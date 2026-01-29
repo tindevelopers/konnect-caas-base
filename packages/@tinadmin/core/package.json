@@ -74,7 +74,7 @@
   "dependencies": {
     "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.89.0",
-    "stripe": "^20.0.0",
+    "stripe": "^20.3.0",
     "ai": "^3.0.0",
     "@ai-sdk/openai": "^1.0.0",
     "openai": "^4.0.0",

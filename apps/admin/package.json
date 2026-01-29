@@ -45,7 +45,7 @@
     "react-dropzone": "^14.3.5",
     "server-only": "^0.0.1",
     "simplebar-react": "^3.3.0",
-    "stripe": "^20.0.0",
+    "stripe": "^20.3.0",
     "ai": "^3.0.0",
     "@ai-sdk/openai": "^1.0.0",
     "openai": "^4.0.0",
