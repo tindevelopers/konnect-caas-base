@@ -210,6 +210,9 @@ importers:
       '@tinadmin/core':
         specifier: workspace:*
         version: link:../../packages/@tinadmin/core
+      '@tinadmin/telnyx-ai-platform':
+        specifier: workspace:*
+        version: link:../../packages/@tinadmin/telnyx-ai-platform
       '@tinadmin/ui-admin':
         specifier: workspace:*
         version: link:../../packages/@tinadmin/ui-admin
@@ -441,6 +444,31 @@ importers:
       '@types/node':
         specifier: ^20
         version: 20.19.30
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  packages/@tinadmin/telnyx-ai-platform:
+    dependencies:
+      clsx:
+        specifier: ^2.1.1
+        version: 2.1.1
+      react:
+        specifier: ^18.0.0 || ^19.0.0
+        version: 19.2.4
+      react-dom:
+        specifier: ^18.0.0 || ^19.0.0
+        version: 19.2.4(react@19.2.4)
+      tailwind-merge:
+        specifier: ^2.6.0
+        version: 2.6.1
+    devDependencies:
+      '@types/react':
+        specifier: ^19.2.7
+        version: 19.2.10
+      '@types/react-dom':
+        specifier: ^19.2.3
+        version: 19.2.3(@types/react@19.2.10)
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
