@@ -48,7 +48,7 @@
     "simplebar-react": "^3.3.0",
     "stripe": "^20.0.0",
     "ai": "^3.0.0",
-    "@ai-sdk/openai": "^1.0.0",
+    "@ai-sdk/openai": "^3.0.25",
     "openai": "^4.0.0",
     "swiper": "^11.2.0",
     "tailwind-merge": "^2.6.0",
