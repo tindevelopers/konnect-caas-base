@@ -258,6 +258,38 @@ export interface Database {
           updated_at?: string;
         };
       };
+      telnyx_mcp_servers: {
+        Row: {
+          id: string;
+          tenant_id: string;
+          name: string;
+          server_url: string;
+          secret_ref: string | null;
+          description: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          tenant_id: string;
+          name: string;
+          server_url: string;
+          secret_ref?: string | null;
+          description?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          tenant_id?: string;
+          name?: string;
+          server_url?: string;
+          secret_ref?: string | null;
+          description?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
       stripe_customers: {
         Row: {
           id: string;

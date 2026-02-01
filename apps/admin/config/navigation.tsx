@@ -55,6 +55,22 @@ export const mainNavItems: NavItem[] = [
     new: true,
     subItems: [
       {
+        name: "AI Assistants",
+        path: "/ai/assistants",
+      },
+      {
+        name: "AI Tests",
+        path: "/ai/tests",
+      },
+      {
+        name: "MCP Servers",
+        path: "/ai/mcp-servers",
+      },
+      {
+        name: "Integration Secrets",
+        path: "/ai/integration-secrets",
+      },
+      {
         name: "Chatbot",
         path: "/saas/chatbot",
       },
