@@ -1,0 +1,13 @@
+{
+  "folders": [
+    {
+      "name": "konnect-caas-base",
+      "path": "."
+    },
+    {
+      "name": "ai-multi-tenant-saas (reference)",
+      "path": "_reference/ai-multi-tenant-saas"
+    }
+  ],
+  "settings": {}
+}

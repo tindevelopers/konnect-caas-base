@@ -50,6 +50,15 @@ export const mainNavItems: NavItem[] = [
     path: "/saas/dashboard",
   },
   {
+    name: "Agents",
+    icon: <AiIcon />,
+    new: true,
+    subItems: [
+      { name: "Voice Agents", path: "/saas/agents/voice" },
+      { name: "Chat Agents", path: "/saas/agents/chat" },
+    ],
+  },
+  {
     name: "AI Assistant",
     icon: <AiIcon />,
     new: true,
