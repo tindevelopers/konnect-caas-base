@@ -1,6 +1,5 @@
 "use client";
 import Image from "next/image";
-import { useRouter } from "next/navigation";
 import React, { useState, useEffect } from "react";
 import { Dropdown } from "../ui/dropdown/Dropdown";
 import { DropdownItem } from "../ui/dropdown/DropdownItem";
@@ -17,7 +16,6 @@ export default function UserDropdown() {
   const [isOpen, setIsOpen] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const router = useRouter();
 
   function toggleDropdown() {
     setIsOpen(!isOpen);
@@ -77,23 +75,20 @@ export default function UserDropdown() {
     };
   }, []);
 
-  async function handleSignOut() {
+  async function handleSignOut(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    closeDropdown();
     try {
-      // Clear session from browser client
+      // Server action first (has session cookies) – then browser client
+      await signOut();
       const supabase = createBrowserClient();
       await supabase.auth.signOut();
-      
-      // Also call server action
-      await signOut();
-      
-      // Redirect to sign in page
-      router.push("/signin");
-      router.refresh();
+      // Hard redirect to clear cached auth state
+      window.location.href = "/signin";
     } catch (error) {
       console.error("Sign out error:", error);
-      // Still redirect even if there's an error
-      router.push("/signin");
-      router.refresh();
+      window.location.href = "/signin";
     }
   }
   return (
@@ -202,6 +197,7 @@ export default function UserDropdown() {
           </li>
         </ul>
         <button
+          type="button"
           onClick={handleSignOut}
           className="flex items-center gap-3 px-3 py-2 mt-3 font-medium text-gray-700 rounded-lg group text-theme-sm hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-gray-300 w-full text-left"
         >

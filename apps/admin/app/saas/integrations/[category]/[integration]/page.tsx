@@ -6,7 +6,8 @@ import Label from "@/components/form/Label";
 import Switch from "@/components/form/switch/Switch";
 import { CheckIcon, XMarkIcon, ClockIcon, KeyIcon, EyeIcon, EyeSlashIcon } from "@heroicons/react/24/outline";
 import { useParams } from "next/navigation";
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { saveIntegrationConfig, fetchIntegrationConfig } from "@/app/actions/integrations/config";
 
 interface IntegrationConfig {
   name: string;
@@ -401,16 +402,70 @@ export default function IntegrationDetailPage() {
 
   const [formData, setFormData] = useState<Record<string, string>>({});
   const [showSecrets, setShowSecrets] = useState<Record<string, boolean>>({});
-  const [isConnected, setIsConnected] = useState(config.status === "connected");
+  const [isConnected, setIsConnected] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleConnect = () => {
-    // Simulate connection
-    setIsConnected(true);
+  useEffect(() => {
+    async function loadConfig() {
+      try {
+        const existing = await fetchIntegrationConfig(integrationName);
+        if (existing?.credentials && typeof existing.credentials === "object") {
+          setFormData(existing.credentials as Record<string, string>);
+        }
+        if (existing?.status === "connected") {
+          setIsConnected(true);
+        }
+      } catch {
+        setError(null);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+    loadConfig();
+  }, [integrationName]);
+
+  const handleConnect = async () => {
+    setError(null);
+    setIsSaving(true);
+    try {
+      const credentials: Record<string, string> = {};
+      config.fields.forEach((f) => {
+        const val = formData[f.name];
+        if (val) credentials[f.name] = val;
+      });
+      await saveIntegrationConfig({
+        provider: integrationName,
+        category: config.category,
+        credentials,
+        status: "connected",
+      });
+      setIsConnected(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save");
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  const handleDisconnect = () => {
-    setIsConnected(false);
-    setFormData({});
+  const handleDisconnect = async () => {
+    setError(null);
+    setIsSaving(true);
+    try {
+      await saveIntegrationConfig({
+        provider: integrationName,
+        category: config.category,
+        credentials: {},
+        status: "disconnected",
+      });
+      setIsConnected(false);
+      setFormData({});
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to disconnect");
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const toggleSecret = (fieldName: string) => {
@@ -430,6 +485,17 @@ export default function IntegrationDetailPage() {
   };
 
   const StatusIcon = statusIcons[isConnected ? "connected" : "disconnected"];
+
+  if (isLoading) {
+    return (
+      <div>
+        <PageBreadcrumb pageTitle={`${config.name} Integration`} />
+        <div className="flex items-center justify-center py-12">
+          <p className="text-gray-500 dark:text-gray-400">Loading…</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -453,11 +519,13 @@ export default function IntegrationDetailPage() {
               {isConnected ? "Connected" : "Disconnected"}
             </span>
             {isConnected ? (
-              <Button variant="outline" onClick={handleDisconnect}>
-                Disconnect
+              <Button variant="outline" onClick={handleDisconnect} disabled={isSaving}>
+                {isSaving ? "Disconnecting…" : "Disconnect"}
               </Button>
             ) : (
-              <Button onClick={handleConnect}>Connect</Button>
+              <Button onClick={handleConnect} disabled={isSaving}>
+                {isSaving ? "Saving…" : "Connect"}
+              </Button>
             )}
           </div>
         </div>
@@ -533,9 +601,16 @@ export default function IntegrationDetailPage() {
                 </div>
               ))}
             </div>
-            <div className="mt-6 flex gap-3">
-              <Button variant="outline">Test Connection</Button>
-              <Button onClick={handleConnect}>Save & Connect</Button>
+            <div className="mt-6 flex flex-col gap-3">
+              {error && (
+                <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+              )}
+              <div className="flex gap-3">
+                <Button variant="outline" disabled={isSaving}>Test Connection</Button>
+                <Button onClick={handleConnect} disabled={isSaving}>
+                  {isSaving ? "Saving…" : "Save & Connect"}
+                </Button>
+              </div>
             </div>
           </div>
         )}

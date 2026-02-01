@@ -56,6 +56,16 @@ const navItems: NavItem[] = [
     ],
   },
   {
+    icon: <MailIcon />,
+    name: "CRM Campaigns",
+    new: true,
+    subItems: [
+      { name: "Campaigns", path: "/crm/campaigns" },
+      { name: "Builder", path: "/crm/campaigns/builder" },
+      { name: "Outreach", path: "/crm/campaigns/outreach" },
+    ],
+  },
+  {
     name: "AI Assistant",
     icon: <AiIcon />,
     new: true,

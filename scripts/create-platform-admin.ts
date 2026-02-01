@@ -1,9 +1,21 @@
 /**
  * Script to create a Platform Admin user
  * Run with: npx tsx scripts/create-platform-admin.ts
+ * Requires: NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in env
  */
 
-import { createAdminClient } from "../src/core/database/admin-client";
+import { createClient } from "@supabase/supabase-js";
+
+function getAdminClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) {
+    throw new Error("NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set");
+  }
+  return createClient(url, key, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+}
 
 async function createPlatformAdmin() {
   const email = "systemadmin@tin.info";
@@ -12,7 +24,7 @@ async function createPlatformAdmin() {
 
   console.log(`Creating Platform Admin user: ${email}`);
 
-  const adminClient = createAdminClient();
+  const adminClient = getAdminClient();
 
   try {
     // 1. Get Platform Admin role ID

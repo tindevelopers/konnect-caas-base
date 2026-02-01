@@ -223,6 +223,41 @@ export interface Database {
           updated_at?: string;
         };
       };
+      integration_configs: {
+        Row: {
+          id: string;
+          tenant_id: string;
+          provider: string;
+          category: string;
+          credentials: Record<string, unknown>;
+          settings: Record<string, unknown> | null;
+          status: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          tenant_id: string;
+          provider: string;
+          category: string;
+          credentials: Record<string, unknown>;
+          settings?: Record<string, unknown> | null;
+          status?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          tenant_id?: string;
+          provider?: string;
+          category?: string;
+          credentials?: Record<string, unknown>;
+          settings?: Record<string, unknown> | null;
+          status?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
       stripe_customers: {
         Row: {
           id: string;
