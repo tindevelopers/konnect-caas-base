@@ -1,6 +1,6 @@
 "use server";
 
-import { createTelnyxClient, TelnyxTransport } from "@tinadmin/telnyx-ai-platform";
+import { createTelnyxClient, TelnyxTransport } from "@tinadmin/telnyx-ai-platform/server";
 import { getIntegrationConfig } from "@/core/integrations";
 import { getCurrentUserTenantId } from "@/core/multi-tenancy/validation";
 import { requirePermission } from "@/core/permissions/middleware";

@@ -4,7 +4,7 @@ import {
   createIntegrationSecret,
   listIntegrationSecrets,
   TelnyxCreateIntegrationSecretRequest,
-} from "@tinadmin/telnyx-ai-platform";
+} from "@tinadmin/telnyx-ai-platform/server";
 import { getTelnyxTransport } from "./client";
 
 export async function listIntegrationSecretsAction() {

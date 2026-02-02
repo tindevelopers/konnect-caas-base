@@ -1,4 +1,8 @@
 import { createClient } from "../database/server";
+import type { Database } from "../database/types";
+
+type IntegrationConfigRow = Database["public"]["Tables"]["integration_configs"]["Row"];
+type IntegrationConfigInsert = Database["public"]["Tables"]["integration_configs"]["Insert"];
 
 export interface IntegrationConfigParams {
   tenantId: string;
@@ -24,7 +28,10 @@ export async function getIntegrationConfigs(tenantId: string) {
   return data;
 }
 
-export async function getIntegrationConfig(tenantId: string, provider: string) {
+export async function getIntegrationConfig(
+  tenantId: string,
+  provider: string
+): Promise<IntegrationConfigRow | null> {
   const supabase = await createClient();
 
   const { data, error } = await supabase
@@ -38,22 +45,26 @@ export async function getIntegrationConfig(tenantId: string, provider: string) {
     throw error;
   }
 
-  return data;
+  return data as IntegrationConfigRow | null;
 }
 
 export async function upsertIntegrationConfig(params: IntegrationConfigParams) {
   const supabase = await createClient();
 
+  const row: IntegrationConfigInsert = {
+    tenant_id: params.tenantId,
+    provider: params.provider,
+    category: params.category,
+    credentials: params.credentials,
+    settings: params.settings ?? null,
+    status: params.status ?? "disconnected",
+  };
+
+  // Supabase client infers never for upsert when Table uses Record<string, unknown> for jsonb; assert.
   const { data, error } = await supabase
     .from("integration_configs")
-    .upsert({
-      tenant_id: params.tenantId,
-      provider: params.provider,
-      category: params.category,
-      credentials: params.credentials,
-      settings: params.settings ?? null,
-      status: params.status ?? "disconnected",
-    })
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .upsert(row as any)
     .select()
     .single();
 

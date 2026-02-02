@@ -4,13 +4,9 @@ import {
   TelnyxIntegrationSecret,
   TelnyxIntegrationSecretListResponse,
 } from "../types/integrationSecrets";
+import type { TelnyxIntegrationSecretsApi } from "../types/apis";
 
-export interface TelnyxIntegrationSecretsApi {
-  listIntegrationSecrets: () => Promise<TelnyxIntegrationSecretListResponse>;
-  createIntegrationSecret: (
-    payload: TelnyxCreateIntegrationSecretRequest
-  ) => Promise<TelnyxIntegrationSecret>;
-}
+export type { TelnyxIntegrationSecretsApi };
 
 export function useIntegrationSecrets(api: TelnyxIntegrationSecretsApi) {
   const [data, setData] = useState<TelnyxIntegrationSecret[]>([]);

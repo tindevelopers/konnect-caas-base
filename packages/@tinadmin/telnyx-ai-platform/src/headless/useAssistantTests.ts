@@ -6,19 +6,9 @@ import {
   TelnyxAssistantTestRun,
   TelnyxTriggerTestRunRequest,
 } from "../types/tests";
+import type { TelnyxAssistantTestsApi } from "../types/apis";
 
-export interface TelnyxAssistantTestsApi {
-  listAssistantTests: (
-    query?: Record<string, string | number | boolean | undefined>
-  ) => Promise<TelnyxAssistantTestListResponse>;
-  createAssistantTest: (
-    payload: TelnyxCreateAssistantTestRequest
-  ) => Promise<TelnyxAssistantTest>;
-  triggerAssistantTestRun: (
-    testId: string,
-    payload?: TelnyxTriggerTestRunRequest
-  ) => Promise<TelnyxAssistantTestRun>;
-}
+export type { TelnyxAssistantTestsApi };
 
 export function useAssistantTests(
   api: TelnyxAssistantTestsApi,

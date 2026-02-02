@@ -7,6 +7,7 @@ export * from "./services/models";
 export * from "./types/assistants";
 export * from "./types/integrationSecrets";
 export * from "./types/tests";
+export * from "./types/apis";
 export * from "./headless/useAssistants";
 export * from "./headless/useIntegrationSecrets";
 export * from "./headless/useAssistantTests";

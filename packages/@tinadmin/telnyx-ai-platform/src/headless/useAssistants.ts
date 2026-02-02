@@ -7,20 +7,9 @@ import {
   TelnyxImportAssistantsResponse,
   TelnyxUpdateAssistantRequest,
 } from "../types/assistants";
+import type { TelnyxAssistantsApi } from "../types/apis";
 
-export interface TelnyxAssistantsApi {
-  listAssistants: () => Promise<TelnyxAssistantListResponse>;
-  getAssistant: (assistantId: string) => Promise<TelnyxAssistant>;
-  createAssistant: (payload: TelnyxCreateAssistantRequest) => Promise<TelnyxAssistant>;
-  updateAssistant: (
-    assistantId: string,
-    payload: TelnyxUpdateAssistantRequest
-  ) => Promise<TelnyxAssistant>;
-  deleteAssistant: (assistantId: string) => Promise<void>;
-  importAssistants: (
-    payload: TelnyxImportAssistantsRequest
-  ) => Promise<TelnyxImportAssistantsResponse>;
-}
+export type { TelnyxAssistantsApi };
 
 export function useAssistantsList(api: TelnyxAssistantsApi) {
   const [data, setData] = useState<TelnyxAssistant[]>([]);

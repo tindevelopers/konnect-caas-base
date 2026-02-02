@@ -10,7 +10,7 @@ import {
   TelnyxCreateAssistantRequest,
   TelnyxImportAssistantsRequest,
   TelnyxUpdateAssistantRequest,
-} from "@tinadmin/telnyx-ai-platform";
+} from "@tinadmin/telnyx-ai-platform/server";
 import { getTelnyxTransport } from "./client";
 
 export async function listAssistantsAction() {

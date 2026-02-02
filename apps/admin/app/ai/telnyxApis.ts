@@ -19,7 +19,7 @@ import {
   TelnyxAssistantsApi,
   TelnyxAssistantTestsApi,
   TelnyxIntegrationSecretsApi,
-} from "@tinadmin/telnyx-ai-platform";
+} from "@tinadmin/telnyx-ai-platform/server";
 
 export const assistantsApi: TelnyxAssistantsApi = {
   listAssistants: listAssistantsAction,

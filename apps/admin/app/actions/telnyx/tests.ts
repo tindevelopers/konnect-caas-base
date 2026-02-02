@@ -6,7 +6,7 @@ import {
   triggerAssistantTestRun,
   TelnyxCreateAssistantTestRequest,
   TelnyxTriggerTestRunRequest,
-} from "@tinadmin/telnyx-ai-platform";
+} from "@tinadmin/telnyx-ai-platform/server";
 import { getTelnyxTransport } from "./client";
 
 export async function listAssistantTestsAction(

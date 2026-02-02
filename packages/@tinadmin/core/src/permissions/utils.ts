@@ -24,7 +24,9 @@ export type Permission =
   | "settings.write"
   | "analytics.read"
   | "api.access"
-  | "audit.read";
+  | "audit.read"
+  | "integrations.read"
+  | "integrations.write";
 
 /**
  * User permissions result
