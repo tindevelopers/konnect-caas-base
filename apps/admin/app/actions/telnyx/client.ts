@@ -1,7 +1,10 @@
 "use server";
 
 import { createTelnyxClient, TelnyxTransport } from "@tinadmin/telnyx-ai-platform/server";
-import { getIntegrationConfig } from "@/core/integrations";
+import {
+  getIntegrationConfig,
+  getPlatformIntegrationConfig,
+} from "@/core/integrations";
 import { getCurrentUserTenantId } from "@/core/multi-tenancy/validation";
 import { requirePermission } from "@/core/permissions/middleware";
 
@@ -14,6 +17,9 @@ function extractApiKey(credentials?: Record<string, unknown> | null) {
   return undefined;
 }
 
+/**
+ * Resolves Telnyx API key in order: (1) tenant integration, (2) platform default, (3) TELNYX_API_KEY env.
+ */
 export async function getTelnyxTransport(
   requiredPermission: "integrations.read" | "integrations.write" = "integrations.read"
 ): Promise<TelnyxTransport> {
@@ -24,17 +30,28 @@ export async function getTelnyxTransport(
 
   await requirePermission(requiredPermission, { tenantId });
 
-  const config = await getIntegrationConfig(tenantId, TELNYX_PROVIDER);
+  const tenantConfig = await getIntegrationConfig(tenantId, TELNYX_PROVIDER);
   const tenantKey = extractApiKey(
-    config?.credentials as Record<string, unknown> | null | undefined
+    tenantConfig?.credentials as Record<string, unknown> | null | undefined
   );
-  const apiKey = tenantKey || process.env.TELNYX_API_KEY;
-
-  if (!apiKey) {
-    throw new Error(
-      "Telnyx API key not configured. Connect a tenant Telnyx integration or set TELNYX_API_KEY."
-    );
+  if (tenantKey) {
+    return createTelnyxClient({ apiKey: tenantKey });
   }
 
-  return createTelnyxClient({ apiKey });
+  const platformConfig = await getPlatformIntegrationConfig(TELNYX_PROVIDER);
+  const platformKey = extractApiKey(
+    platformConfig?.credentials as Record<string, unknown> | null | undefined
+  );
+  if (platformKey) {
+    return createTelnyxClient({ apiKey: platformKey });
+  }
+
+  const envKey = process.env.TELNYX_API_KEY;
+  if (envKey) {
+    return createTelnyxClient({ apiKey: envKey });
+  }
+
+  throw new Error(
+    "Telnyx API key not configured. Set the system default (System Admin → Default Integrations), connect Telnyx for this organization (Integrations → Telephony → Telnyx), or set TELNYX_API_KEY."
+  );
 }

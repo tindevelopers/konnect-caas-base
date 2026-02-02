@@ -258,6 +258,38 @@ export interface Database {
           updated_at?: string;
         };
       };
+      platform_integration_configs: {
+        Row: {
+          id: string;
+          provider: string;
+          category: string;
+          credentials: Record<string, unknown>;
+          settings: Record<string, unknown> | null;
+          status: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          provider: string;
+          category: string;
+          credentials?: Record<string, unknown>;
+          settings?: Record<string, unknown> | null;
+          status?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          provider?: string;
+          category?: string;
+          credentials?: Record<string, unknown>;
+          settings?: Record<string, unknown> | null;
+          status?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
       telnyx_mcp_servers: {
         Row: {
           id: string;

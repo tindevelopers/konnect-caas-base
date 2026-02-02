@@ -74,3 +74,9 @@ export async function upsertIntegrationConfig(params: IntegrationConfigParams) {
 
   return data;
 }
+
+export {
+  getPlatformIntegrationConfig,
+  upsertPlatformIntegrationConfig,
+  type PlatformIntegrationConfigParams,
+} from "./platform";

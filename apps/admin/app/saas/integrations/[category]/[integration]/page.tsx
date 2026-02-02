@@ -99,7 +99,8 @@ const integrationConfigs: Record<string, IntegrationConfig> = {
   "telnyx": {
     name: "Telnyx",
     category: "Telephony",
-    description: "Global communications API for voice, SMS, and messaging",
+    description:
+      "Organization-level Telnyx credentials for AI Assistants and communications. Overrides the system default; use this for enterprise or dedicated Telnyx accounts.",
     status: "disconnected",
     fields: [
       { name: "apiKey", label: "API Key", type: "password", required: true },
