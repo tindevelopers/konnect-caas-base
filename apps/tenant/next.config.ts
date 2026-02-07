@@ -1,5 +1,14 @@
 import type { NextConfig } from "next";
 
+// Normalize NODE_ENV for Builder.io and other deployment platforms
+// Ensure it's set to a standard value if it's not already
+if (process.env.NODE_ENV && !['development', 'production', 'test'].includes(process.env.NODE_ENV)) {
+  // For Builder.io or other platforms, default to production for builds
+  if (process.env.NODE_ENV !== 'development') {
+    process.env.NODE_ENV = 'production';
+  }
+}
+
 const nextConfig: NextConfig = {
   // Server external packages (moved from experimental in Next.js 16)
   serverExternalPackages: ['openai'],
