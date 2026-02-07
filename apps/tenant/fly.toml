@@ -1,0 +1,30 @@
+# Fly.io configuration for WebSocket server
+app = "your-app-name"
+primary_region = "iad"
+
+[build]
+
+[env]
+  PORT = "3012"
+  WEBSOCKET_PORT = "3012"
+  WEBSOCKET_HOST = "0.0.0.0"
+
+[[services]]
+  internal_port = 3012
+  protocol = "tcp"
+  
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+    force_https = true
+  
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+  [[services.http_checks]]
+    interval = "10s"
+    timeout = "2s"
+    grace_period = "5s"
+    method = "GET"
+    path = "/health"

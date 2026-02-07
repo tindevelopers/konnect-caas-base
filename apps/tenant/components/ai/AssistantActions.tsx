@@ -358,22 +358,21 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
                   <span className="block mt-1 text-amber-600 dark:text-amber-400">
                     ⚠️ <strong>Important:</strong> Telnyx cannot connect to localhost.
                     <br />
-                    <strong>Setup ngrok:</strong>
+                    <strong>For local development:</strong> Use ngrok (see NGROK_QUICK_START.md)
                     <br />
-                    1. Sign up: <a href="https://dashboard.ngrok.com/signup" target="_blank" rel="noopener noreferrer" className="underline">dashboard.ngrok.com/signup</a>
+                    <strong>For production:</strong> Set WEBSOCKET_URL environment variable in Vercel
                     <br />
-                    2. Configure: <code className="text-xs">ngrok config add-authtoken YOUR_TOKEN</code>
-                    <br />
-                    3. Start: <code className="text-xs">ngrok http 3012</code>
-                    <br />
-                    4. Get URL: <code className="text-xs">./scripts/get-ngrok-url.sh</code> or check http://localhost:4040
-                    <br />
-                    5. Replace URL above with ngrok WebSocket URL (wss://...)
+                    pointing to a separate WebSocket server (Railway, Render, Fly.io)
                   </span>
                 )}
                 {callForm.streamUrl && callForm.streamUrl.includes("ngrok") && (
                   <span className="block mt-1 text-green-600 dark:text-green-400">
                     ✅ Using ngrok tunnel - Telnyx will be able to connect!
+                  </span>
+                )}
+                {callForm.streamUrl && (callForm.streamUrl.includes("vercel.app") || callForm.streamUrl.includes("railway.app") || callForm.streamUrl.includes("render.com") || callForm.streamUrl.includes("fly.dev")) && !callForm.streamUrl.includes("ngrok") && (
+                  <span className="block mt-1 text-blue-600 dark:text-blue-400">
+                    ℹ️ Using production WebSocket server - Make sure WEBSOCKET_URL is set in Vercel
                   </span>
                 )}
               </p>
