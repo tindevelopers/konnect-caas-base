@@ -101,7 +101,7 @@ async function main() {
       'packages/@tinadmin/config',
       'packages/@tinadmin/ui-admin',
       'packages/@tinadmin/ui-consumer',
-      'apps/admin',
+      'apps/tenant',
       'apps/portal'
     ];
 

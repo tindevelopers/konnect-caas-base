@@ -3,7 +3,7 @@
 # Script to create layout.tsx files for all client component pages
 # that don't already have layouts
 
-find apps/admin/app -name "page.tsx" -type f -exec grep -l '"use client"' {} \; | while read page; do
+find apps/tenant/app -name "page.tsx" -type f -exec grep -l '"use client"' {} \; | while read page; do
   dir=$(dirname "$page")
   layout_file="$dir/layout.tsx"
   

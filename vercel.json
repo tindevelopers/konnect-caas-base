@@ -3,8 +3,8 @@
   "version": 2,
   "framework": "nextjs",
   "installCommand": "pnpm install",
-  "buildCommand": "pnpm turbo run build --filter=@tinadmin/admin",
-  "outputDirectory": "apps/admin/.next",
+  "buildCommand": "pnpm turbo run build --filter=@tinadmin/tenant",
+  "outputDirectory": "apps/tenant/.next",
   "regions": ["iad1"]
 }
 

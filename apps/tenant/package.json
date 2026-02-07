@@ -1,5 +1,5 @@
 {
-  "name": "@tinadmin/admin",
+  "name": "@tinadmin/tenant",
   "version": "1.0.0",
   "private": true,
   "description": "Admin dashboard application for multi-tenant SaaS platform",

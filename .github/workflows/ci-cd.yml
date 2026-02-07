@@ -67,6 +67,6 @@ jobs:
         with:
           name: build-files
           path: |
-            apps/admin/.next/
+            apps/tenant/.next/
             apps/portal/.next/
           retention-days: 7

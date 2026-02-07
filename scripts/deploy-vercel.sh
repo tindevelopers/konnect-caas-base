@@ -62,7 +62,7 @@ deploy_app() {
 
 # Ask which apps to deploy
 echo "Which apps would you like to deploy?"
-echo "1) Admin app only"
+echo "1) Tenant app only"
 echo "2) Portal app only"
 echo "3) Both apps"
 echo ""
@@ -70,16 +70,16 @@ read -p "Enter choice (1-3): " choice
 
 case $choice in
     1)
-        deploy_app "Admin" "apps/admin" "tinadmin-admin"
+        deploy_app "Tenant" "apps/tenant" "tinadmin-tenant"
         ;;
     2)
         deploy_app "Portal" "apps/portal" "tinadmin-portal"
         ;;
     3)
-        deploy_app "Admin" "apps/admin" "tinadmin-admin"
+        deploy_app "Tenant" "apps/tenant" "tinadmin-tenant"
         deploy_app "Portal" "apps/portal" "tinadmin-portal"
         ;;
-    *)
+     *)
         echo "❌ Invalid choice"
         exit 1
         ;;
@@ -92,5 +92,5 @@ echo "1. Configure custom domains in Vercel dashboard"
 echo "2. Set up environment variables"
 echo "3. Verify deployments are working"
 echo ""
-echo "Admin: https://tinadmin-admin.vercel.app"
+echo "Tenant: https://tinadmin-tenant.vercel.app"
 echo "Portal: https://tinadmin-portal.vercel.app"

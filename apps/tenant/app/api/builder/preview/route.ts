@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { builder } from "@builder.io/react";
 import { BUILDER_API_KEY } from "@/lib/builder";
 
 export async function GET(request: NextRequest) {
@@ -7,23 +6,25 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Builder.io API key not configured" }, { status: 500 });
   }
 
-  builder.init(BUILDER_API_KEY);
-
   const searchParams = request.nextUrl.searchParams;
   const urlPath = searchParams.get("urlPath") || "/";
 
   try {
-    const content = await builder
-      .get("page", {
-        userAttributes: {
-          urlPath,
+    // Use Builder.io REST API directly for server-side preview
+    const response = await fetch(
+      `https://cdn.builder.io/api/v1/content/page?apiKey=${BUILDER_API_KEY}&userAttributes.urlPath=${encodeURIComponent(urlPath)}&preview=true`,
+      {
+        headers: {
+          "Content-Type": "application/json",
         },
-        options: {
-          includeRefs: true,
-        },
-        preview: true,
-      })
-      .promise();
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(`Builder.io API error: ${response.statusText}`);
+    }
+
+    const content = await response.json();
 
     return NextResponse.json({ content });
   } catch (error) {

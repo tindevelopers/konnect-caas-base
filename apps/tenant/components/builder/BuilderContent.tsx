@@ -90,10 +90,7 @@ export default function BuilderContent({
     <BuilderComponent
       model={model}
       content={builderContent}
-      options={{
-        ...options,
-        noTrack: process.env.NODE_ENV === "development",
-      }}
+      options={options}
     />
   );
 }

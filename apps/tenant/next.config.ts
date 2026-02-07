@@ -99,7 +99,22 @@ const nextConfig: NextConfig = {
       config.resolve.fallback = {
         ...config.resolve.fallback,
         fs: false,
+        async_hooks: false,
+        'async_hooks': false,
       };
+      
+      // Ignore Builder.io dev tools server-side dependencies in client bundle
+      config.plugins.push(
+        new webpack.IgnorePlugin({
+          resourceRegExp: /^@builder\.io\/dev-tools\/(node|webpack|next)$/,
+        }),
+        new webpack.IgnorePlugin({
+          resourceRegExp: /^async_hooks$/,
+        }),
+        new webpack.IgnorePlugin({
+          resourceRegExp: /^@opentelemetry\/context-async-hooks$/,
+        })
+      );
     }
     
     return config;
