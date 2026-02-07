@@ -60,11 +60,12 @@ export async function getIntegrationConfig(
     return null;
   }
 
+  const row = data as IntegrationConfigRow;
   return {
-    ...(data as IntegrationConfigRow),
+    ...row,
     credentials:
       (decryptIntegrationCredentials(
-        data.credentials as Record<string, unknown>
+        row.credentials as Record<string, unknown>
       ) as Record<string, unknown> | null) ?? {},
   };
 }

@@ -35,11 +35,12 @@ export async function getPlatformIntegrationConfig(
     return null;
   }
 
+  const row = data as PlatformConfigRow;
   return {
-    ...(data as PlatformConfigRow),
+    ...row,
     credentials:
       (decryptIntegrationCredentials(
-        data.credentials as Record<string, unknown>
+        row.credentials as Record<string, unknown>
       ) as Record<string, unknown> | null) ?? {},
   };
 }
