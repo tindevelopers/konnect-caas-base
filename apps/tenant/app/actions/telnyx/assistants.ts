@@ -233,6 +233,13 @@ export async function importAssistantsAction(payload: TelnyxImportAssistantsRequ
 }
 
 export async function callAssistantAction(payload: CallAssistantPayload): Promise<CallAssistantResult> {
+  console.log("[callAssistantAction] Starting call with payload:", {
+    assistantId: payload.assistantId,
+    toNumber: payload.toNumber ? "***" + payload.toNumber.slice(-4) : "missing",
+    fromNumber: payload.fromNumber ? "***" + payload.fromNumber.slice(-4) : "missing",
+    connectionId: payload.connectionId ? "***" + payload.connectionId.slice(-4) : "missing",
+  });
+  
   try {
     const { assistantId, toNumber, fromNumber, connectionId } = payload;
     if (!assistantId) {
@@ -340,11 +347,20 @@ export async function callAssistantAction(payload: CallAssistantPayload): Promis
       }
     );
   } catch (error) {
+    console.error("[callAssistantAction] Error:", error);
     // Ensure errors are properly formatted for client consumption
     if (error instanceof Error) {
+      // Log full error details for debugging
+      console.error("[callAssistantAction] Error details:", {
+        message: error.message,
+        stack: error.stack,
+        name: error.name,
+      });
       throw error;
     }
-    throw new Error(`Failed to start call: ${String(error)}`);
+    const errorMessage = `Failed to start call: ${String(error)}`;
+    console.error("[callAssistantAction] Non-Error thrown:", errorMessage);
+    throw new Error(errorMessage);
   }
 }
 
