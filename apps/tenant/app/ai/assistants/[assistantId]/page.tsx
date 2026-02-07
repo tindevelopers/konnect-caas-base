@@ -11,6 +11,7 @@ import { assistantsApi } from "../../telnyxApis";
 import { listMcpServersAction } from "@/app/actions/telnyx/mcpServers";
 import { listModelsAction } from "@/app/actions/telnyx/models";
 import AssistantActions from "@/components/ai/AssistantActions";
+import AssistantActionsErrorBoundary from "@/components/ai/AssistantActionsErrorBoundary";
 
 export default function AssistantEditorPage() {
   const router = useRouter();
@@ -56,7 +57,9 @@ export default function AssistantEditorPage() {
         models={models}
         onBack={() => router.push("/ai/assistants")}
       />
-      <AssistantActions assistantId={assistantId} />
+      <AssistantActionsErrorBoundary>
+        <AssistantActions assistantId={assistantId} />
+      </AssistantActionsErrorBoundary>
     </>
   );
 }

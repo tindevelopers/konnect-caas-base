@@ -389,21 +389,33 @@ export async function hangUpCallAction(callControlId: string): Promise<void> {
 }
 
 export async function getCallInstructionsAction(assistantId: string) {
-  const h = await headers();
-  const host = h.get("x-forwarded-host") || h.get("host") || "localhost:3010";
-  const proto = h.get("x-forwarded-proto") || (host.includes("localhost") ? "http" : "https");
-  const baseUrl = `${proto}://${host}`;
+  try {
+    if (!assistantId?.trim()) {
+      throw new Error("Assistant ID is required.");
+    }
 
-  return {
-    assistantId,
-    webhookUrl: `${baseUrl}/api/webhooks/telnyx/call-events`,
-    tenantHeader: "x-tenant-id",
-    tenantQueryParam: "tenantId",
-    steps: [
-      "Create or open your Call Control App in Telnyx Mission Control.",
-      "Set the Webhook URL to the value shown below.",
-      "Include the tenant context using x-tenant-id header or ?tenantId= query param.",
-      "Use this assistant ID when starting the AI assistant for inbound calls.",
-    ],
-  };
+    const h = await headers();
+    const host = h.get("x-forwarded-host") || h.get("host") || "localhost:3010";
+    const proto = h.get("x-forwarded-proto") || (host.includes("localhost") ? "http" : "https");
+    const baseUrl = `${proto}://${host}`;
+
+    return {
+      assistantId,
+      webhookUrl: `${baseUrl}/api/webhooks/telnyx/call-events`,
+      tenantHeader: "x-tenant-id",
+      tenantQueryParam: "tenantId",
+      steps: [
+        "Create or open your Call Control App in Telnyx Mission Control.",
+        "Set the Webhook URL to the value shown below.",
+        "Include the tenant context using x-tenant-id header or ?tenantId= query param.",
+        "Use this assistant ID when starting the AI assistant for inbound calls.",
+      ],
+    };
+  } catch (error) {
+    // Ensure errors are properly formatted for client consumption
+    if (error instanceof Error) {
+      throw error;
+    }
+    throw new Error(`Failed to get call instructions: ${String(error)}`);
+  }
 }
