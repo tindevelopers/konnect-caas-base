@@ -18,5 +18,5 @@ alter table integration_configs enable row level security;
 
 create policy integration_configs_tenant_access on integration_configs
   for all
-  using (tenant_id = current_setting('app.current_tenant')::uuid)
-  with check (tenant_id = current_setting('app.current_tenant')::uuid);
+  using (tenant_id = get_current_tenant_id())
+  with check (tenant_id = get_current_tenant_id());

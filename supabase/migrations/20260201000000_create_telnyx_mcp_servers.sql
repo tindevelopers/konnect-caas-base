@@ -17,5 +17,5 @@ alter table telnyx_mcp_servers enable row level security;
 
 create policy telnyx_mcp_servers_tenant_access on telnyx_mcp_servers
   for all
-  using (tenant_id = current_setting('app.current_tenant')::uuid)
-  with check (tenant_id = current_setting('app.current_tenant')::uuid);
+  using (tenant_id = get_current_tenant_id())
+  with check (tenant_id = get_current_tenant_id());

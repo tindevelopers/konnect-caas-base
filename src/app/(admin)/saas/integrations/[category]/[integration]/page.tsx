@@ -8,6 +8,7 @@ import { CheckIcon, XMarkIcon, ClockIcon, KeyIcon, EyeIcon, EyeSlashIcon } from 
 import { useParams } from "next/navigation";
 import React, { useState, useEffect } from "react";
 import { saveIntegrationConfig, fetchIntegrationConfig } from "@/app/actions/integrations/config";
+import { connectGoHighLevelIntegration } from "@/app/actions/integrations/gohighlevel";
 
 interface IntegrationConfig {
   name: string;
@@ -437,12 +438,24 @@ export default function IntegrationDetailPage() {
         const val = formData[f.name];
         if (val) credentials[f.name] = val;
       });
-      await saveIntegrationConfig({
-        provider: integrationName,
-        category: config.category,
-        credentials,
-        status: "connected",
-      });
+      if (integrationName === "gohighlevel") {
+        if (!credentials.apiKey || !credentials.locationId) {
+          throw new Error("GoHighLevel API key and Location ID are required");
+        }
+        await connectGoHighLevelIntegration({
+          credentials: {
+            apiKey: credentials.apiKey,
+            locationId: credentials.locationId,
+          },
+        });
+      } else {
+        await saveIntegrationConfig({
+          provider: integrationName,
+          category: config.category,
+          credentials,
+          status: "connected",
+        });
+      }
       setIsConnected(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save");

@@ -193,6 +193,26 @@ export async function ensureTenantId(
     return providedTenantId;
   }
 
+  // Try request-scoped context (middleware/header/cookie) before falling back to session user.
+  // This supports Platform Admin "selected tenant" flows and tenant-aware public portals.
+  try {
+    const { headers, cookies } = await import("next/headers");
+    const h = await headers();
+    const c = await cookies();
+    const fromHeader = h.get("x-tenant-id");
+    const fromCookie = c.get("current_tenant_id")?.value;
+    const contextualTenantId = fromHeader || fromCookie || null;
+
+    if (contextualTenantId) {
+      const validation = await validateTenantAccess(contextualTenantId, { requireTenant: true });
+      if (validation.isValid) {
+        return contextualTenantId;
+      }
+    }
+  } catch {
+    // Not in a request scope (or next/headers not available) — ignore.
+  }
+
   // Get from current user
   const tenantId = await getCurrentUserTenantId();
   if (!tenantId) {

@@ -73,6 +73,14 @@ export const mainNavItems: NavItem[] = [
         name: "Integration Secrets",
         path: "/ai/integration-secrets",
       },
+        {
+          name: "Telemetry",
+          path: "/ai/telemetry",
+        },
+        {
+          name: "Webhook Events",
+          path: "/ai/webhooks",
+        },
       {
         name: "Text Generator",
         path: "/text-generator",
@@ -143,6 +151,8 @@ export const mainNavItems: NavItem[] = [
     subItems: [
       { name: "Organization Admins", path: "/saas/admin/system-admin/organization-admins" },
       { name: "API Configuration", path: "/saas/admin/system-admin/api-configuration" },
+      { name: "Default Integrations", path: "/saas/admin/system-admin/default-integrations" },
+      { name: "Integrations", path: "/saas/admin/system-admin/integrations" },
       { name: "Multi-Tenant", path: "/multi-tenant", new: true },
       {
         name: "Subscriptions",

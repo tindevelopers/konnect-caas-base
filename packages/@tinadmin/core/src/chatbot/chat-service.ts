@@ -5,10 +5,11 @@
  */
 
 import { generateText } from 'ai';
-import { openai } from '@ai-sdk/openai';
+import { createOpenAI } from '@ai-sdk/openai';
 import { retrieveContext, buildContextString } from './rag-engine';
 import { buildSystemPrompt } from './prompts';
 import { createTenantAwareServerClient } from '../database/tenant-client';
+import { getPlatformIntegrationConfig } from '../integrations';
 import type { ChatRequest, ChatResponse, ChatMessage, ChatConversation } from './types';
 
 export interface ChatOptions {
@@ -66,9 +67,12 @@ export async function processChatMessage(
     { role: 'user', content: request.message },
   ];
 
+  // Resolve AI credentials (platform config → env).
+  const openaiProvider = await getOpenAIProvider();
+
   // Generate response using Vercel AI SDK (maxTokens in SDK 3.x, maxOutputTokens in SDK 5+)
   const result = await generateText({
-    model: openai(model) as any,
+    model: openaiProvider(model) as any,
     messages,
     temperature,
     ...(maxTokens != null && {
@@ -121,6 +125,60 @@ export async function processChatMessage(
       confidence: domainContext.confidence,
     },
   };
+}
+
+const AI_GATEWAY_PROVIDER = 'ai_gateway';
+const DEFAULT_AI_GATEWAY_BASE_URL = 'https://ai-gateway.vercel.sh/v1';
+
+let openaiProviderCache:
+  | { provider: ReturnType<typeof createOpenAI>; fingerprint: string }
+  | null = null;
+
+function extractString(obj: unknown, key: string): string | undefined {
+  if (!obj || typeof obj !== 'object') return undefined;
+  const v = (obj as Record<string, unknown>)[key];
+  return typeof v === 'string' && v.trim() ? v : undefined;
+}
+
+async function getOpenAIProvider(): Promise<ReturnType<typeof createOpenAI>> {
+  // 1) Platform-configured Vercel AI Gateway
+  try {
+    const platform = await getPlatformIntegrationConfig(AI_GATEWAY_PROVIDER);
+    const creds = platform?.credentials as Record<string, unknown> | null | undefined;
+    const settings = platform?.settings as Record<string, unknown> | null | undefined;
+    const gatewayKey = extractString(creds, 'apiKey');
+    const gatewayBase = extractString(settings, 'baseUrl') ?? DEFAULT_AI_GATEWAY_BASE_URL;
+    if (gatewayKey) {
+      const fingerprint = `gateway:${gatewayBase}:${gatewayKey.slice(0, 6)}`;
+      if (openaiProviderCache?.fingerprint === fingerprint) return openaiProviderCache.provider;
+      const provider = createOpenAI({ apiKey: gatewayKey, baseURL: gatewayBase, name: 'openai' });
+      openaiProviderCache = { provider, fingerprint };
+      return provider;
+    }
+  } catch {
+    // Fall back to env vars if Supabase/admin client isn't available.
+  }
+
+  // 2) Environment-configured Vercel AI Gateway
+  const envGatewayKey = process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN;
+  if (envGatewayKey) {
+    const fingerprint = `gateway:${DEFAULT_AI_GATEWAY_BASE_URL}:${envGatewayKey.slice(0, 6)}`;
+    if (openaiProviderCache?.fingerprint === fingerprint) return openaiProviderCache.provider;
+    const provider = createOpenAI({
+      apiKey: envGatewayKey,
+      baseURL: DEFAULT_AI_GATEWAY_BASE_URL,
+      name: 'openai',
+    });
+    openaiProviderCache = { provider, fingerprint };
+    return provider;
+  }
+
+  // 3) Direct OpenAI (env) — createOpenAI defaults to OPENAI_API_KEY.
+  const fingerprint = `openai:${(process.env.OPENAI_API_KEY || 'missing').slice(0, 6)}`;
+  if (openaiProviderCache?.fingerprint === fingerprint) return openaiProviderCache.provider;
+  const provider = createOpenAI();
+  openaiProviderCache = { provider, fingerprint };
+  return provider;
 }
 
 /**

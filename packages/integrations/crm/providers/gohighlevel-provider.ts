@@ -22,6 +22,7 @@ interface GoHighLevelRecord {
   email?: string;
   phone?: string;
   value?: number;
+  currency?: string;
   stage?: string;
   status?: string;
   externalId?: string;

@@ -1,6 +1,7 @@
 import type {
   TelnyxAssistant,
   TelnyxAssistantListResponse,
+  TelnyxCloneAssistantResponse,
   TelnyxCreateAssistantRequest,
   TelnyxImportAssistantsRequest,
   TelnyxImportAssistantsResponse,
@@ -28,6 +29,7 @@ export interface TelnyxAssistantsApi {
     assistantId: string,
     payload: TelnyxUpdateAssistantRequest
   ) => Promise<TelnyxAssistant>;
+  cloneAssistant: (assistantId: string) => Promise<TelnyxCloneAssistantResponse>;
   deleteAssistant: (assistantId: string) => Promise<void>;
   importAssistants: (
     payload: TelnyxImportAssistantsRequest

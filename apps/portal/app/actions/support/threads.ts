@@ -4,5 +4,5 @@
 export {
   getTicketThreads,
   createTicketThread,
-} from "../../../admin/app/actions/support/threads";
+} from "../../../../admin/app/actions/support/threads";
 

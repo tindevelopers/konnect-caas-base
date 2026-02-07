@@ -1,5 +1,6 @@
 import ApiKeyTable from "@/components/api-keys/ApiKeyTable";
 import PageBreadcrumb from "@/components/common/PageBreadCrumb";
+import SystemKeysPanel from "@/components/system-keys/SystemKeysPanel";
 import { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -11,7 +12,10 @@ export default function ApiConfigurationPage() {
   return (
     <div>
       <PageBreadcrumb pageTitle="API Configuration" />
-      <ApiKeyTable />
+      <div className="space-y-6">
+        <SystemKeysPanel />
+        <ApiKeyTable />
+      </div>
     </div>
   );
 }

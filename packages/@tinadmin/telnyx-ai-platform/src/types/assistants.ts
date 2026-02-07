@@ -28,6 +28,10 @@ export interface TelnyxAssistantListResponse {
   data: TelnyxAssistant[];
 }
 
+export interface TelnyxCloneAssistantResponse {
+  id: string;
+}
+
 export interface TelnyxModelMetadata {
   id: string;
   object?: string;

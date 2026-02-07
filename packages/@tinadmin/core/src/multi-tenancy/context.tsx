@@ -17,6 +17,28 @@ interface TenantContextType {
 
 const TenantContext = createContext<TenantContextType | undefined>(undefined);
 
+function readCookie(name: string): string | null {
+  if (typeof document === "undefined") return null;
+  const cookies = document.cookie ? document.cookie.split("; ") : [];
+  for (const c of cookies) {
+    const [k, ...rest] = c.split("=");
+    if (k === name) return decodeURIComponent(rest.join("="));
+  }
+  return null;
+}
+
+function getSelectedTenantId(): string | null {
+  if (typeof window === "undefined") return null;
+  const fromCookie = readCookie("current_tenant_id");
+  if (fromCookie) return fromCookie;
+  try {
+    const fromStorage = window.localStorage.getItem("current_tenant_id");
+    return fromStorage || null;
+  } catch {
+    return null;
+  }
+}
+
 export function TenantProvider({ children }: { children: ReactNode }) {
   const [tenant, setTenant] = useState<Tenant | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -32,21 +54,54 @@ export function TenantProvider({ children }: { children: ReactNode }) {
       // Get current user
       const { data: { user }, error: userError } = await supabase.auth.getUser();
       
+      // If no authenticated user, fall back to selected tenant cookie/localStorage.
+      // This enables tenant-aware public portal pages (branding, SEO) without requiring sign-in.
       if (userError || !user) {
-        setTenant(null);
+        const selectedTenantId = getSelectedTenantId();
+        if (!selectedTenantId) {
+          setTenant(null);
+          setIsLoading(false);
+          return;
+        }
+
+        const tenantResult: { data: Tenant | null; error: any } = await supabase
+          .from("tenants")
+          .select("*")
+          .eq("id", selectedTenantId)
+          .single();
+        const tenantData = tenantResult.data;
+        const tenantError = tenantResult.error;
+
+        if (tenantError) {
+          setError(tenantError.message);
+          setTenant(null);
+        } else {
+          setTenant(tenantData);
+        }
         setIsLoading(false);
         return;
       }
 
       // Get user's tenant_id from users table
-      const userDataResult: { data: { tenant_id: string | null } | null; error: any } = await supabase
+      const userDataResult: {
+        data: { tenant_id: string | null; roles?: { name: string } | null } | null;
+        error: any;
+      } = await supabase
         .from("users")
-        .select("tenant_id")
+        .select("tenant_id, roles:role_id(name)")
         .eq("id", user.id)
         .single();
 
       const userData = userDataResult.data;
-      if (userDataResult.error || !userData?.tenant_id) {
+      const roleName = (userData?.roles as any)?.name as string | undefined;
+
+      // Platform Admins have tenant_id = NULL. Allow a selected tenant override (cookie/localStorage).
+      const selectedTenantId = getSelectedTenantId();
+      const effectiveTenantId =
+        userData?.tenant_id ||
+        (roleName === "Platform Admin" ? selectedTenantId : null);
+
+      if (userDataResult.error || !effectiveTenantId) {
         setTenant(null);
         setIsLoading(false);
         return;
@@ -56,7 +111,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
       const tenantResult: { data: Tenant | null; error: any } = await supabase
         .from("tenants")
         .select("*")
-        .eq("id", userData.tenant_id)
+        .eq("id", effectiveTenantId)
         .single();
       
       const tenantData = tenantResult.data;

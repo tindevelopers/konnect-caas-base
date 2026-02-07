@@ -3,6 +3,10 @@
  * Uses admin client; callers must enforce platform-admin-only access.
  */
 import { createAdminClient } from "../database/admin-client";
+import {
+  decryptIntegrationCredentials,
+  encryptIntegrationCredentials,
+} from "./crypto";
 import type { Database } from "../database/types";
 
 type PlatformConfigRow = Database["public"]["Tables"]["platform_integration_configs"]["Row"];
@@ -27,7 +31,17 @@ export async function getPlatformIntegrationConfig(
     .maybeSingle();
 
   if (error) throw error;
-  return data as PlatformConfigRow | null;
+  if (!data) {
+    return null;
+  }
+
+  return {
+    ...(data as PlatformConfigRow),
+    credentials:
+      (decryptIntegrationCredentials(
+        data.credentials as Record<string, unknown>
+      ) as Record<string, unknown> | null) ?? {},
+  };
 }
 
 export async function upsertPlatformIntegrationConfig(
@@ -37,7 +51,7 @@ export async function upsertPlatformIntegrationConfig(
   const row: PlatformConfigInsert = {
     provider: params.provider,
     category: params.category,
-    credentials: params.credentials,
+    credentials: encryptIntegrationCredentials(params.credentials),
     settings: params.settings ?? null,
     status: params.status ?? "disconnected",
   };

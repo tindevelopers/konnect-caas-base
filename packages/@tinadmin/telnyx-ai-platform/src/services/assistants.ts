@@ -2,6 +2,7 @@ import { TelnyxTransport } from "../client/types";
 import {
   TelnyxAssistant,
   TelnyxAssistantListResponse,
+  TelnyxCloneAssistantResponse,
   TelnyxCreateAssistantRequest,
   TelnyxUpdateAssistantRequest,
   TelnyxImportAssistantsRequest,
@@ -39,6 +40,15 @@ export async function updateAssistant(
   return transport.request(`/ai/assistants/${assistantId}`, {
     method: "POST",
     body: payload,
+  });
+}
+
+export async function cloneAssistant(
+  transport: TelnyxTransport,
+  assistantId: string
+): Promise<TelnyxCloneAssistantResponse> {
+  return transport.request(`/ai/assistants/${assistantId}/clone`, {
+    method: "POST",
   });
 }
 

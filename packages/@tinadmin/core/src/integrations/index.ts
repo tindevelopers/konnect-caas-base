@@ -1,4 +1,8 @@
 import { createClient } from "../database/server";
+import {
+  decryptIntegrationCredentials,
+  encryptIntegrationCredentials,
+} from "./crypto";
 import type { Database } from "../database/types";
 
 type IntegrationConfigRow = Database["public"]["Tables"]["integration_configs"]["Row"];
@@ -25,7 +29,14 @@ export async function getIntegrationConfigs(tenantId: string) {
     throw error;
   }
 
-  return data;
+  const rows = (data ?? []) as unknown as IntegrationConfigRow[];
+  return rows.map((row) => ({
+    ...(row as IntegrationConfigRow),
+    credentials:
+      (decryptIntegrationCredentials(
+        row.credentials as Record<string, unknown>
+      ) as Record<string, unknown> | null) ?? {},
+  }));
 }
 
 export async function getIntegrationConfig(
@@ -45,7 +56,17 @@ export async function getIntegrationConfig(
     throw error;
   }
 
-  return data as IntegrationConfigRow | null;
+  if (!data) {
+    return null;
+  }
+
+  return {
+    ...(data as IntegrationConfigRow),
+    credentials:
+      (decryptIntegrationCredentials(
+        data.credentials as Record<string, unknown>
+      ) as Record<string, unknown> | null) ?? {},
+  };
 }
 
 export async function upsertIntegrationConfig(params: IntegrationConfigParams) {
@@ -55,7 +76,7 @@ export async function upsertIntegrationConfig(params: IntegrationConfigParams) {
     tenant_id: params.tenantId,
     provider: params.provider,
     category: params.category,
-    credentials: params.credentials,
+    credentials: encryptIntegrationCredentials(params.credentials),
     settings: params.settings ?? null,
     status: params.status ?? "disconnected",
   };

@@ -7,7 +7,7 @@
 import { createClient } from "@/core/database/server";
 import { getUserPermissions, hasPermission, hasAnyPermission, hasAllPermissions, type Permission } from "./permissions";
 import { hasTenantPermission } from "./tenant-permissions";
-import { getCurrentUserTenantId } from "@/core/multi-tenancy/validation";
+import { ensureTenantId } from "@/core/multi-tenancy/validation";
 import { logPermissionCheckWithContext } from "@/core/auth/audit-log";
 
 export interface PermissionCheckResult {
@@ -55,7 +55,14 @@ export async function checkPermission(
     const hasAccess = userPermissions.isPlatformAdmin || userPermissions.permissions.includes(permission);
     
     // Log permission check
-    const tenantId = options?.tenantId || await getCurrentUserTenantId();
+    let tenantId = options?.tenantId ?? null;
+    if (!tenantId) {
+      try {
+        tenantId = await ensureTenantId();
+      } catch {
+        tenantId = null;
+      }
+    }
     await logPermissionCheckWithContext(user.id, permission, hasAccess, {
       tenantId,
       action: "permission_check",

@@ -5,5 +5,5 @@ export {
   getAllSupportTickets,
   getSupportTicket,
   createTicket,
-} from "../../../admin/app/actions/support/tickets";
+} from "../../../../admin/app/actions/support/tickets";
 

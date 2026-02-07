@@ -258,6 +258,64 @@ export interface Database {
           updated_at?: string;
         };
       };
+      telephony_events: {
+        Row: {
+          id: string;
+          tenant_id: string;
+          provider: string;
+          event_type: string;
+          external_id: string | null;
+          payload: Record<string, any>;
+          received_at: string;
+        };
+        Insert: {
+          id?: string;
+          tenant_id: string;
+          provider: string;
+          event_type: string;
+          external_id?: string | null;
+          payload?: Record<string, any>;
+          received_at?: string;
+        };
+        Update: {
+          id?: string;
+          tenant_id?: string;
+          provider?: string;
+          event_type?: string;
+          external_id?: string | null;
+          payload?: Record<string, any>;
+          received_at?: string;
+        };
+      };
+      ai_agent_events: {
+        Row: {
+          id: string;
+          tenant_id: string;
+          provider: string;
+          event_type: string;
+          external_id: string | null;
+          payload: Record<string, any>;
+          received_at: string;
+        };
+        Insert: {
+          id?: string;
+          tenant_id: string;
+          provider: string;
+          event_type: string;
+          external_id?: string | null;
+          payload?: Record<string, any>;
+          received_at?: string;
+        };
+        Update: {
+          id?: string;
+          tenant_id?: string;
+          provider?: string;
+          event_type?: string;
+          external_id?: string | null;
+          payload?: Record<string, any>;
+          received_at?: string;
+        };
+      };
       stripe_customers: {
         Row: {
           id: string;

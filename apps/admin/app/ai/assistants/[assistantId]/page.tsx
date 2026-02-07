@@ -10,6 +10,7 @@ import {
 import { assistantsApi } from "../../telnyxApis";
 import { listMcpServersAction } from "@/app/actions/telnyx/mcpServers";
 import { listModelsAction } from "@/app/actions/telnyx/models";
+import AssistantActions from "@/components/ai/AssistantActions";
 
 export default function AssistantEditorPage() {
   const router = useRouter();
@@ -47,12 +48,15 @@ export default function AssistantEditorPage() {
   }, []);
 
   return (
-    <AssistantEditor
-      api={assistantsApi}
-      assistantId={assistantId}
-      mcpServers={mcpServers}
-      models={models}
-      onBack={() => router.push("/ai/assistants")}
-    />
+    <>
+      <AssistantEditor
+        api={assistantsApi}
+        assistantId={assistantId}
+        mcpServers={mcpServers}
+        models={models}
+        onBack={() => router.push("/ai/assistants")}
+      />
+      <AssistantActions assistantId={assistantId} />
+    </>
   );
 }

@@ -87,7 +87,16 @@ From **Developers → API Keys**:
 2. Import your GitHub repository
 3. Select **TurboRepo** framework preset
 
-### 3.2 Configure Project Settings
+### 3.2 Create Two Vercel Projects (Recommended)
+
+This repo contains **two Next.js apps** and you should deploy them as **separate Vercel projects**:
+
+- **Admin**: `apps/admin` (internal admin UI for tenants + platform admins)
+- **Portal**: `apps/portal` (public/consumer portal, SEO-focused)
+
+This matches the recommended “separate deployment/domain” boundary for platform/admin vs public portal.
+
+### 3.3 Configure Project Settings (Admin)
 
 **Build Settings:**
 - Framework: Next.js
@@ -95,7 +104,15 @@ From **Developers → API Keys**:
 - Build Command: `pnpm build`
 - Install Command: `pnpm install`
 
-### 3.3 Set Environment Variables
+### 3.4 Configure Project Settings (Portal)
+
+**Build Settings:**
+- Framework: Next.js
+- Root Directory: `apps/portal`
+- Build Command: `pnpm build`
+- Install Command: `pnpm install`
+
+### 3.5 Set Environment Variables
 
 Add these in **Settings → Environment Variables**:
 
@@ -120,6 +137,17 @@ Add these in **Settings → Environment Variables**:
 2. Add your domain
 3. Configure DNS as instructed
 
+### 4.2 Domain / Subdomain Mapping (Recommended)
+
+Use separate hostnames so tenants can never “hit” platform/admin surfaces accidentally:
+
+- **Portal** (public/consumer): `https://your-domain.com` → Vercel project rooted at `apps/portal`
+- **Admin** (tenant + platform management): `https://admin.your-domain.com` → Vercel project rooted at `apps/admin`
+
+Optional (for stricter separation of platform-only features):
+
+- **Platform-only**: `https://platform.your-domain.com` → separate deployment, or route to `apps/admin` but enforce Platform Admin only
+
 ### 4.2 DNS Records
 
 Add these records at your DNS provider:
@@ -128,6 +156,12 @@ Add these records at your DNS provider:
 Type    Name    Value
 A       @       76.76.21.21
 CNAME   www     cname.vercel-dns.com
+```
+
+For `admin.your-domain.com`, add the Vercel-provided CNAME (shown in Vercel Domains UI), e.g.:
+
+```
+CNAME   admin   cname.vercel-dns.com
 ```
 
 ### 4.3 Enable SSL

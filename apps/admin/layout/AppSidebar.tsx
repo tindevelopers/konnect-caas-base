@@ -1,5 +1,5 @@
 "use client";
-import React, { useEffect, useRef, useCallback, useState } from "react";
+import React, { useEffect, useMemo, useRef, useCallback, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
@@ -37,6 +37,21 @@ type NavItem = {
   pro?: boolean;
   subItems?: (NavItem | { name: string; path: string; pro?: boolean; new?: boolean })[];
 };
+
+type NavLeaf = { name: string; path: string; pro?: boolean; new?: boolean };
+type NavChild = NavItem | NavLeaf;
+
+const PLATFORM_ONLY_PREFIXES = [
+  "/admin",
+  "/multi-tenant",
+  "/saas/admin/system-admin",
+  "/saas/admin/entity/tenant-management",
+  "/saas/subscriptions",
+  "/saas/webhooks",
+];
+
+const isPlatformOnlyPath = (path?: string) =>
+  !!path && PLATFORM_ONLY_PREFIXES.some((prefix) => path.startsWith(prefix));
 
 const navItems: NavItem[] = [
   {
@@ -89,6 +104,14 @@ const navItems: NavItem[] = [
         name: "Integration Secrets",
         path: "/ai/integration-secrets",
       },
+        {
+          name: "Telemetry",
+          path: "/ai/telemetry",
+        },
+        {
+          name: "Webhook Events",
+          path: "/ai/webhooks",
+        },
       {
         name: "Text Generator",
         path: "/text-generator",
@@ -169,6 +192,7 @@ const navItems: NavItem[] = [
       { name: "Organization Admins", path: "/saas/admin/system-admin/organization-admins" },
       { name: "API Configuration", path: "/saas/admin/system-admin/api-configuration" },
       { name: "Default Integrations", path: "/saas/admin/system-admin/default-integrations" },
+      { name: "Integrations", path: "/saas/admin/system-admin/integrations" },
       { name: "Multi-Tenant", path: "/multi-tenant", new: true },
       {
         name: "Subscriptions",
@@ -417,10 +441,87 @@ const AppSidebar: React.FC = () => {
   const pathname = usePathname();
   const { tenant, isLoading: isTenantLoading } = useTenant();
   const { branding } = useWhiteLabel();
+  const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
   
   const logoUrl = branding.logo || "/images/logo/logo.svg";
   const logoDarkUrl = branding.logo || "/images/logo/logo-dark.svg";
   const logoIconUrl = branding.favicon || "/images/logo/logo-icon.svg";
+
+  useEffect(() => {
+    let isMounted = true;
+    const loadRole = async () => {
+      try {
+        const response = await fetch("/api/admin/check-platform-admin");
+        if (!response.ok) {
+          if (isMounted) {
+            setIsPlatformAdmin(false);
+          }
+          return;
+        }
+        const data = await response.json();
+        if (isMounted) {
+          setIsPlatformAdmin(Boolean(data?.isPlatformAdmin));
+        }
+      } catch (error) {
+        if (isMounted) {
+          setIsPlatformAdmin(false);
+        }
+      }
+    };
+    loadRole();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const filteredNavItems = useMemo(() => {
+    const filterChildren = (items: NavChild[]): NavChild[] =>
+      items
+        .map((item) => {
+          const hasSubItems = (item as NavItem).subItems !== undefined;
+          if (hasSubItems) {
+            const navItem = item as NavItem;
+            if (!isPlatformAdmin && isPlatformOnlyPath(navItem.path)) {
+              return null;
+            }
+            const filtered = filterChildren(navItem.subItems ?? []);
+            if (!navItem.path && filtered.length === 0) {
+              return null;
+            }
+            return { ...navItem, subItems: filtered };
+          }
+
+          const leaf = item as NavLeaf;
+          if (!isPlatformAdmin && isPlatformOnlyPath(leaf.path)) {
+            return null;
+          }
+          return leaf;
+        })
+        .filter(Boolean) as NavChild[];
+
+    const filterRoot = (items: NavItem[]) =>
+      items
+        .map((item) => {
+          if (!isPlatformAdmin && isPlatformOnlyPath(item.path)) {
+            return null;
+          }
+          if (!item.subItems) {
+            return item;
+          }
+          const filtered = filterChildren(item.subItems);
+          if (!item.path && filtered.length === 0) {
+            return null;
+          }
+          return { ...item, subItems: filtered };
+        })
+        .filter(Boolean) as NavItem[];
+
+    return {
+      main: filterRoot(navItems),
+      support: filterRoot(supportItems),
+      others: filterRoot(othersItems),
+    };
+  }, [isPlatformAdmin]);
 
   const renderMenuItems = (
     navItems: NavItem[],
@@ -809,7 +910,7 @@ const AppSidebar: React.FC = () => {
                   <HorizontaLDots />
                 )}
               </h2>
-              {renderMenuItems(navItems, "main")}
+              {renderMenuItems(filteredNavItems.main, "main")}
             </div>
             <div>
               <h2
@@ -825,7 +926,7 @@ const AppSidebar: React.FC = () => {
                   <HorizontaLDots />
                 )}
               </h2>
-              {renderMenuItems(supportItems, "support")}
+              {renderMenuItems(filteredNavItems.support, "support")}
             </div>
             <div>
               <h2
@@ -841,7 +942,7 @@ const AppSidebar: React.FC = () => {
                   <HorizontaLDots />
                 )}
               </h2>
-              {renderMenuItems(othersItems, "others")}
+              {renderMenuItems(filteredNavItems.others, "others")}
             </div>
           </div>
         </nav>

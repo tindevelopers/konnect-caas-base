@@ -3,6 +3,7 @@ import {
   getAssistantAction,
   createAssistantAction,
   updateAssistantAction,
+  cloneAssistantAction,
   deleteAssistantAction,
   importAssistantsAction,
 } from "@/app/actions/telnyx/assistants";
@@ -26,6 +27,7 @@ export const assistantsApi: TelnyxAssistantsApi = {
   getAssistant: getAssistantAction,
   createAssistant: createAssistantAction,
   updateAssistant: updateAssistantAction,
+  cloneAssistant: cloneAssistantAction,
   deleteAssistant: deleteAssistantAction,
   importAssistants: importAssistantsAction,
 };

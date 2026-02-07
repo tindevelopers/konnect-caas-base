@@ -27,6 +27,27 @@ interface TenantSwitcherProps {
   className?: string;
 }
 
+function readCookie(name: string): string | null {
+  if (typeof document === "undefined") return null;
+  const cookies = document.cookie ? document.cookie.split("; ") : [];
+  for (const c of cookies) {
+    const [k, ...rest] = c.split("=");
+    if (k === name) return decodeURIComponent(rest.join("="));
+  }
+  return null;
+}
+
+function getSelectedTenantId(): string | null {
+  if (typeof window === "undefined") return null;
+  const fromCookie = readCookie("current_tenant_id");
+  if (fromCookie) return fromCookie;
+  try {
+    return window.localStorage.getItem("current_tenant_id");
+  } catch {
+    return null;
+  }
+}
+
 export default function TenantSwitcher({ className = "" }: TenantSwitcherProps) {
   const router = useRouter();
   const { tenant, tenantId, isLoading: tenantLoading } = useTenant();
@@ -35,7 +56,18 @@ export default function TenantSwitcher({ className = "" }: TenantSwitcherProps) 
   const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [isPlatformAdminUser, setIsPlatformAdminUser] = useState(false);
+  const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
+  const [impersonationError, setImpersonationError] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setSelectedTenantId(getSelectedTenantId());
+    isPlatformAdmin()
+      .then(setIsPlatformAdminUser)
+      .catch((error) => {
+        console.error("Error checking platform admin status:", error);
+      });
+  }, []);
 
   useEffect(() => {
     async function loadTenants() {
@@ -84,19 +116,61 @@ export default function TenantSwitcher({ className = "" }: TenantSwitcherProps) 
     }
 
     try {
-      const supabase = createBrowserClient();
-      
-      // Set tenant context in session/localStorage
+      setImpersonationError(null);
+
+      if (isPlatformAdminUser) {
+        const reason = window.prompt("Reason for impersonating this tenant?");
+        if (!reason || !reason.trim()) {
+          setImpersonationError("A reason is required to impersonate a tenant.");
+          return;
+        }
+
+        const response = await fetch("/api/impersonation/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tenantId: newTenantId, reason }),
+        });
+
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}));
+          setImpersonationError(payload?.error || "Failed to start impersonation.");
+          return;
+        }
+      }
+
+      // Keep a client-side reference for UI state.
       localStorage.setItem("current_tenant_id", newTenantId);
-      
-      // Update tenant context
-      // The TenantProvider will pick this up on next render
-      
-      // Reload the page to refresh tenant context
+      setSelectedTenantId(newTenantId);
+
       router.refresh();
       setIsOpen(false);
     } catch (error) {
       console.error("Error switching tenant:", error);
+      setImpersonationError("Failed to switch tenant.");
+    }
+  };
+
+  const handleStopImpersonation = async () => {
+    try {
+      setImpersonationError(null);
+      const response = await fetch("/api/impersonation/stop", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: "manual_stop" }),
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        setImpersonationError(payload?.error || "Failed to stop impersonation.");
+        return;
+      }
+
+      localStorage.removeItem("current_tenant_id");
+      setSelectedTenantId(null);
+      router.refresh();
+    } catch (error) {
+      console.error("Error stopping impersonation:", error);
+      setImpersonationError("Failed to stop impersonation.");
     }
   };
 
@@ -109,7 +183,7 @@ export default function TenantSwitcher({ className = "" }: TenantSwitcherProps) 
   // For regular users, show only their tenant (should be 1)
   const displayTenants = isPlatformAdminUser ? filteredTenants : tenants;
 
-  if (tenantLoading || !tenant) {
+  if (tenantLoading || (!tenant && !isPlatformAdminUser)) {
     return (
       <div className={`flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-100 dark:bg-gray-800 ${className}`}>
         <div className="h-8 w-8 rounded-lg bg-gray-200 dark:bg-gray-700 animate-pulse" />
@@ -118,17 +192,33 @@ export default function TenantSwitcher({ className = "" }: TenantSwitcherProps) 
     );
   }
 
+  const isImpersonating = isPlatformAdminUser && !!selectedTenantId;
+  const tenantName = tenant?.name || "Select tenant";
+  const tenantAvatarUrl = tenant?.avatar_url;
+
   return (
     <div className={`relative ${className}`} ref={dropdownRef}>
+      {isImpersonating && (
+        <div className="mb-2 flex items-center justify-between rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm text-indigo-700 dark:border-indigo-900/50 dark:bg-indigo-900/20 dark:text-indigo-200">
+          <span className="truncate">Impersonating {tenantName}</span>
+          <button
+            type="button"
+            onClick={handleStopImpersonation}
+            className="ml-3 whitespace-nowrap text-xs font-semibold text-indigo-700 hover:text-indigo-900 dark:text-indigo-200 dark:hover:text-white"
+          >
+            Stop
+          </button>
+        </div>
+      )}
       <button
         onClick={() => setIsOpen(!isOpen)}
         className="flex items-center gap-3 px-3 py-2 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors min-w-[200px]"
       >
         <div className="flex items-center gap-2 flex-1 min-w-0">
-          {tenant.avatar_url ? (
+          {tenantAvatarUrl ? (
             <Image
-              src={tenant.avatar_url}
-              alt={tenant.name}
+              src={tenantAvatarUrl}
+              alt={tenantName}
               width={24}
               height={24}
               className="rounded-lg flex-shrink-0"
@@ -139,7 +229,7 @@ export default function TenantSwitcher({ className = "" }: TenantSwitcherProps) 
             </div>
           )}
           <span className="text-sm font-medium text-gray-900 dark:text-white truncate">
-            {tenant.name}
+            {tenantName}
           </span>
         </div>
         <ChevronDownIcon
@@ -230,6 +320,11 @@ export default function TenantSwitcher({ className = "" }: TenantSwitcherProps) 
             </div>
           )}
         </div>
+      )}
+      {impersonationError && (
+        <p className="mt-2 text-xs text-red-600 dark:text-red-400">
+          {impersonationError}
+        </p>
       )}
     </div>
   );
