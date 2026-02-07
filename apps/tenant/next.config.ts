@@ -100,7 +100,6 @@ const nextConfig: NextConfig = {
         ...config.resolve.fallback,
         fs: false,
         async_hooks: false,
-        'async_hooks': false,
       };
       
       // Ignore Builder.io dev tools server-side dependencies in client bundle
