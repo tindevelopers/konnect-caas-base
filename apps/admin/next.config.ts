@@ -19,6 +19,7 @@ const nextConfig: NextConfig = {
       "@fullcalendar/interaction",
       "simplebar-react",
       "swiper",
+      "@builder.io/react",
     ],
   },
   
