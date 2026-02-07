@@ -12,6 +12,9 @@ import {
   TelnyxCreateAssistantRequest,
   TelnyxImportAssistantsRequest,
   TelnyxUpdateAssistantRequest,
+  listAssistantTests,
+  createAssistantTest,
+  triggerAssistantTestRun,
 } from "@tinadmin/telnyx-ai-platform/server";
 import { headers } from "next/headers";
 import { getTelnyxTransport } from "./client";
@@ -26,6 +29,8 @@ interface CallAssistantPayload {
   toNumber: string;
   fromNumber: string;
   connectionId: string;
+  streamUrl?: string; // Optional WebSocket URL for audio streaming
+  streamTrack?: "inbound_track" | "outbound_track" | "both_tracks"; // Which audio track to stream
 }
 
 interface CallAssistantResult {
@@ -282,13 +287,22 @@ export async function callAssistantAction(payload: CallAssistantPayload): Promis
       TELNYX_PROVIDER,
       async () => {
         try {
+          // Build dial request body
+          const dialBody: Record<string, string> = {
+            connection_id: connectionId.trim(),
+            from: fromNumber.trim(),
+            to: toNumber.trim(),
+          };
+
+          // Add streaming if streamUrl is provided
+          if (payload.streamUrl?.trim()) {
+            dialBody.stream_url = payload.streamUrl.trim();
+            dialBody.stream_track = payload.streamTrack || "both_tracks";
+          }
+
           const dialResponse = await transport.request("/calls", {
             method: "POST",
-            body: {
-              connection_id: connectionId.trim(),
-              from: fromNumber.trim(),
-              to: toNumber.trim(),
-            },
+            body: dialBody,
           });
 
           const callControlId = extractCallControlId(dialResponse);
@@ -433,5 +447,116 @@ export async function getCallInstructionsAction(assistantId: string) {
       throw error;
     }
     throw new Error(`Failed to get call instructions: ${String(error)}`);
+  }
+}
+
+interface TestCallResult {
+  testId: string;
+  runId: string;
+  conversationId?: string | null;
+  status: string;
+}
+
+/**
+ * Test call action that uses Telnyx's test run API to simulate a call without dialing a real number.
+ * This creates a test (if one doesn't exist) and triggers a test run.
+ */
+export async function testCallAssistantAction(assistantId: string): Promise<TestCallResult> {
+  console.log("[testCallAssistantAction] Starting test call for assistant:", assistantId);
+  
+  try {
+    if (!assistantId?.trim()) {
+      throw new Error("Assistant ID is required.");
+    }
+
+    const { tenantId, userId } = await getTelemetryContext();
+    const transport = await getTelnyxTransport("integrations.write");
+
+    return trackApiCall(
+      "testCallAssistant",
+      TELNYX_PROVIDER,
+      async () => {
+        // Get the assistant to retrieve its version_id
+        const assistant = await getAssistant(transport, assistantId);
+        const versionId = (assistant as any).version_id || assistantId;
+        
+        // First, try to find an existing test
+        const testsResponse = await listAssistantTests(transport);
+        
+        let testId: string;
+        const existingTests = testsResponse.data || [];
+        
+        // Look for a test that matches this assistant or use the first one
+        // If no tests exist, create a new one
+        if (existingTests.length > 0) {
+          // Use the first existing test (tests are reusable)
+          testId = existingTests[0].test_id;
+          console.log("[testCallAssistantAction] Using existing test:", testId);
+        } else {
+          // Create a new test
+          // Note: Tests require a destination, but we'll use a placeholder
+          // The test run simulates the conversation without actually dialing
+          const testName = `Quick Test - ${assistantId.slice(0, 8)}`;
+          const testPayload = {
+            name: testName,
+            destination: assistantId, // For web_chat channel, use assistant ID as destination
+            telnyx_conversation_channel: "web_chat", // Use web_chat for internal testing (no real calls)
+            instructions: "Test the assistant's response to a simple greeting and question.",
+            rubric: [
+              {
+                name: "greeting_response",
+                criteria: "Assistant should respond appropriately to greeting",
+              },
+              {
+                name: "question_handling",
+                criteria: "Assistant should handle questions correctly",
+              },
+            ],
+            description: `Quick test for assistant ${assistantId}`,
+            max_duration_seconds: 60,
+          };
+          
+          const createdTest = await createAssistantTest(transport, testPayload);
+          testId = createdTest.test_id;
+          console.log("[testCallAssistantAction] Created new test:", testId);
+        }
+
+        // Trigger the test run with the assistant version_id
+        const testRun = await triggerAssistantTestRun(transport, testId, {
+          destination_version_id: versionId,
+        });
+        
+        return {
+          testId,
+          runId: testRun.run_id,
+          conversationId: testRun.conversation_id || null,
+          status: testRun.status,
+        };
+      },
+      {
+        tenantId,
+        userId,
+        requestData: {
+          assistantId,
+        },
+      }
+    );
+  } catch (error) {
+    console.error("[testCallAssistantAction] Error:", error);
+    if (error instanceof Error) {
+      if (error.message.includes("401") || error.message.includes("Unauthorized")) {
+        throw new Error(
+          "Telnyx API authentication failed (401). Please verify your API key is valid. " +
+          "Check your Telnyx API key in System Admin → Integrations → Telnyx"
+        );
+      }
+      if (error.message.includes("404")) {
+        throw new Error(
+          "Assistant not found. Please verify the assistant ID is correct."
+        );
+      }
+      throw error;
+    }
+    throw new Error(`Failed to start test call: ${String(error)}`);
   }
 }

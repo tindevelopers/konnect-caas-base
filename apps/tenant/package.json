@@ -11,7 +11,9 @@
     "build": "next build --webpack",
     "start": "next start --port 3010",
     "lint": "next lint",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "ws:server": "tsx server/websocket-server.ts",
+    "dev:all": "concurrently \"pnpm dev\" \"pnpm ws:server\""
   },
   "dependencies": {
     "@ai-sdk/openai": "^1.0.0",
@@ -34,6 +36,7 @@
     "@tinadmin/core": "workspace:*",
     "@tinadmin/telnyx-ai-platform": "workspace:*",
     "@tinadmin/ui-admin": "workspace:*",
+    "@types/ws": "^8.18.1",
     "ai": "^5.0.52",
     "apexcharts": "^4.3.0",
     "autoprefixer": "^10.4.20",
@@ -53,7 +56,8 @@
     "stripe": "^20.0.0",
     "swiper": "^11.2.0",
     "tailwind-merge": "^2.6.0",
-    "tailwindcss": "^4.0.0"
+    "tailwindcss": "^4.0.0",
+    "ws": "^8.19.0"
   },
   "devDependencies": {
     "@builder.io/dev-tools": "^1.25.0",
@@ -63,10 +67,12 @@
     "@types/prismjs": "^1.26.5",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
+    "concurrently": "^9.2.1",
     "dotenv": "^17.2.3",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "postcss": "^8",
+    "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vitest": "^2.1.2"
   }

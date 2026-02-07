@@ -12,8 +12,10 @@ import {
   cloneAssistantAction,
   getCallInstructionsAction,
   hangUpCallAction,
+  testCallAssistantAction,
 } from "@/app/actions/telnyx/assistants";
 import CallStatusModal from "./CallStatusModal";
+import AudioStreamPlayer from "./AudioStreamPlayer";
 
 interface AssistantActionsProps {
   assistantId: string;
@@ -51,6 +53,7 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
     toNumber: "",
     fromNumber: "",
     connectionId: "",
+    streamUrl: "", // Optional WebSocket URL for audio streaming
   });
   const [callResult, setCallResult] = useState<CallResult | null>(null);
   const [callError, setCallError] = useState<string | null>(null);
@@ -59,16 +62,55 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
   const [instructions, setInstructions] = useState<CallInstructions | null>(null);
   const [instructionsError, setInstructionsError] = useState<string | null>(null);
   const [isLoadingInstructions, setIsLoadingInstructions] = useState(false);
+  const [isLoadingStreamUrl, setIsLoadingStreamUrl] = useState(false);
 
   const [isCloning, setIsCloning] = useState(false);
   const [cloneError, setCloneError] = useState<string | null>(null);
   const [isHangingUp, setIsHangingUp] = useState(false);
+  const [isTesting, setIsTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{
+    testId: string;
+    runId: string;
+    conversationId?: string | null;
+    status: string;
+  } | null>(null);
+  const [testError, setTestError] = useState<string | null>(null);
 
-  const openCallModal = useCallback(() => {
+  const openCallModal = useCallback(async () => {
     setCallError(null);
     setCallResult(null);
+    
+    // Auto-populate WebSocket stream URL
+    if (!callForm.streamUrl) {
+      setIsLoadingStreamUrl(true);
+      try {
+        // First, try to get ngrok URL if available
+        const ngrokResponse = await fetch("/api/websocket/ngrok-url").catch(() => null);
+        if (ngrokResponse?.ok) {
+          const ngrokData = await ngrokResponse.json();
+          if (ngrokData.available && ngrokData.websocketUrl) {
+            setCallForm((prev) => ({ ...prev, streamUrl: ngrokData.websocketUrl }));
+            setIsLoadingStreamUrl(false);
+            callModal.openModal();
+            return;
+          }
+        }
+        
+        // Fallback to local WebSocket URL
+        const response = await fetch("/api/websocket/stream-url");
+        if (response.ok) {
+          const data = await response.json();
+          setCallForm((prev) => ({ ...prev, streamUrl: data.streamUrl }));
+        }
+      } catch (error) {
+        console.error("Failed to get stream URL:", error);
+      } finally {
+        setIsLoadingStreamUrl(false);
+      }
+    }
+    
     callModal.openModal();
-  }, [callModal]);
+  }, [callModal, callForm.streamUrl]);
 
   const openReceiveModal = useCallback(async () => {
     receiveModal.openModal();
@@ -97,6 +139,8 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
         toNumber: callForm.toNumber,
         fromNumber: callForm.fromNumber,
         connectionId: callForm.connectionId,
+        streamUrl: callForm.streamUrl || undefined,
+        streamTrack: "both_tracks",
       });
       setCallResult(result);
       setBanner({
@@ -148,6 +192,32 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
     }
   }, [assistantId, cloneModal, router]);
 
+  const handleTestCall = useCallback(async () => {
+    setIsTesting(true);
+    setTestError(null);
+    setTestResult(null);
+    try {
+      const result = await testCallAssistantAction(assistantId);
+      setTestResult(result);
+      setBanner({
+        variant: "success",
+        title: "Test call started",
+        message: `Test run ${result.runId} initiated. This simulates a call without dialing a real number.`,
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to start test call.";
+      setTestError(message);
+      setBanner({
+        variant: "error",
+        title: "Test call failed",
+        message,
+      });
+    } finally {
+      setIsTesting(false);
+    }
+  }, [assistantId]);
+
   return (
     <div className="mt-8 rounded-2xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-900">
       <div className="flex items-center justify-between gap-4">
@@ -167,12 +237,20 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
         </div>
       )}
 
-      <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <Button
           startIcon={<CallIcon className="h-4 w-4" />}
           onClick={openCallModal}
         >
           Call Assistant
+        </Button>
+        <Button
+          variant="outline"
+          startIcon={<CallIcon className="h-4 w-4" />}
+          onClick={handleTestCall}
+          disabled={isTesting}
+        >
+          {isTesting ? "Testing..." : "Test Call"}
         </Button>
         <Button
           variant="outline"
@@ -208,6 +286,10 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
           </h4>
           <p className="mb-6 text-sm text-gray-500 dark:text-gray-400">
             Provide a destination number and Call Control settings to start an outbound call.
+            <br />
+            <span className="text-xs text-gray-400 dark:text-gray-500">
+              💡 Tip: Use "Test Call" button for internal testing without dialing a real number.
+            </span>
           </p>
 
           <div className="space-y-4">
@@ -254,6 +336,46 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
               />
               <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                 Find this in Telnyx Mission Control → Voice → Call Control Apps.
+              </p>
+            </div>
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-400">
+                WebSocket Stream URL {isLoadingStreamUrl && "(Loading...)"}
+              </label>
+              <input
+                type="text"
+                placeholder="Auto-populated..."
+                className={inputClasses}
+                value={callForm.streamUrl}
+                onChange={(event) =>
+                  setCallForm((prev) => ({ ...prev, streamUrl: event.target.value }))
+                }
+                disabled={isLoadingStreamUrl}
+              />
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                WebSocket URL for real-time audio streaming. Auto-populated based on your environment.
+                {callForm.streamUrl && callForm.streamUrl.includes("localhost") && (
+                  <span className="block mt-1 text-amber-600 dark:text-amber-400">
+                    ⚠️ <strong>Important:</strong> Telnyx cannot connect to localhost.
+                    <br />
+                    <strong>Setup ngrok:</strong>
+                    <br />
+                    1. Sign up: <a href="https://dashboard.ngrok.com/signup" target="_blank" rel="noopener noreferrer" className="underline">dashboard.ngrok.com/signup</a>
+                    <br />
+                    2. Configure: <code className="text-xs">ngrok config add-authtoken YOUR_TOKEN</code>
+                    <br />
+                    3. Start: <code className="text-xs">ngrok http 3012</code>
+                    <br />
+                    4. Get URL: <code className="text-xs">./scripts/get-ngrok-url.sh</code> or check http://localhost:4040
+                    <br />
+                    5. Replace URL above with ngrok WebSocket URL (wss://...)
+                  </span>
+                )}
+                {callForm.streamUrl && callForm.streamUrl.includes("ngrok") && (
+                  <span className="block mt-1 text-green-600 dark:text-green-400">
+                    ✅ Using ngrok tunnel - Telnyx will be able to connect!
+                  </span>
+                )}
               </p>
             </div>
           </div>
@@ -384,6 +506,36 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
         </div>
       </Modal>
 
+      {/* Test Result Display */}
+      {testResult && (
+        <div className="mt-4 rounded-xl border border-green-200 bg-green-50 p-4 dark:border-green-800 dark:bg-green-900/20">
+          <p className="font-medium text-green-800 dark:text-green-200">Test Call Started</p>
+          <div className="mt-2 space-y-1 text-sm text-green-700 dark:text-green-300">
+            <p>Test ID: <span className="font-mono">{testResult.testId}</span></p>
+            <p>Run ID: <span className="font-mono">{testResult.runId}</span></p>
+            {testResult.conversationId && (
+              <p>Conversation ID: <span className="font-mono">{testResult.conversationId}</span></p>
+            )}
+            <p>Status: <span className="font-medium">{testResult.status}</span></p>
+            <p className="mt-2 text-xs text-green-600 dark:text-green-400">
+              This test simulates a call without dialing a real number. Check the test results at{" "}
+              <button
+                onClick={() => router.push(`/ai/tests`)}
+                className="underline hover:text-green-800 dark:hover:text-green-200"
+              >
+                /ai/tests
+              </button>
+            </p>
+          </div>
+        </div>
+      )}
+
+      {testError && (
+        <div className="mt-4">
+          <Alert variant="error" title="Test Call Failed" message={testError} />
+        </div>
+      )}
+
       {/* Call Status Modal */}
       {callResult && (
         <CallStatusModal
@@ -391,6 +543,7 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
           onClose={() => setCallResult(null)}
           callControlId={callResult.callControlId}
           conversationId={callResult.conversationId}
+          streamUrl={callForm.streamUrl || undefined}
           onHangUp={async () => {
             if (!callResult) return;
             setIsHangingUp(true);

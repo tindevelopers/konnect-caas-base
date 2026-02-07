@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { Modal } from "@/components/ui/modal";
 import Button from "@/components/ui/button/Button";
+import AudioStreamPlayer from "./AudioStreamPlayer";
 
 interface CallStatusModalProps {
   isOpen: boolean;
@@ -11,6 +12,7 @@ interface CallStatusModalProps {
   conversationId?: string | null;
   onHangUp: () => void | Promise<void>;
   isHangingUp?: boolean;
+  streamUrl?: string; // Optional WebSocket URL for audio streaming
 }
 
 export default function CallStatusModal({
@@ -20,9 +22,14 @@ export default function CallStatusModal({
   conversationId,
   onHangUp,
   isHangingUp = false,
+  streamUrl,
 }: CallStatusModalProps) {
   const [isMuted, setIsMuted] = useState(false);
   const [audioLevels, setAudioLevels] = useState<number[]>([]);
+  const [clientId] = useState(() => `client-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`);
+  
+  // Generate WebSocket URL with client ID if streamUrl is provided
+  const wsUrl = streamUrl ? `${streamUrl}?clientId=${clientId}` : undefined;
 
   // Generate random audio waveform visualization
   useEffect(() => {
@@ -95,6 +102,19 @@ export default function CallStatusModal({
             </div>
           )}
         </div>
+
+        {/* Audio Stream Player */}
+        {wsUrl && (
+          <div className="mb-6">
+            <AudioStreamPlayer
+              streamUrl={wsUrl}
+              isActive={isOpen}
+              onError={(error) => {
+                console.error("Audio stream error:", error);
+              }}
+            />
+          </div>
+        )}
 
         {/* Controls */}
         <div className="flex gap-3 justify-center">
