@@ -233,64 +233,156 @@ export async function importAssistantsAction(payload: TelnyxImportAssistantsRequ
 }
 
 export async function callAssistantAction(payload: CallAssistantPayload): Promise<CallAssistantResult> {
-  const { assistantId, toNumber, fromNumber, connectionId } = payload;
-  if (!assistantId) {
-    throw new Error("Assistant ID is required.");
+  try {
+    const { assistantId, toNumber, fromNumber, connectionId } = payload;
+    if (!assistantId) {
+      throw new Error("Assistant ID is required.");
+    }
+    if (!toNumber?.trim()) {
+      throw new Error("Destination phone number is required.");
+    }
+    if (!fromNumber?.trim()) {
+      throw new Error("Caller (from) number is required.");
+    }
+    if (!connectionId?.trim()) {
+      throw new Error("Call Control connection ID is required.");
+    }
+
+    const { tenantId, userId } = await getTelemetryContext();
+    
+    let transport: Awaited<ReturnType<typeof getTelnyxTransport>>;
+    try {
+      transport = await getTelnyxTransport("integrations.write");
+    } catch (error) {
+      if (error instanceof Error) {
+        if (error.message.includes("Tenant context missing")) {
+          throw new Error(
+            "Tenant context missing. Please select a tenant or configure the platform default Telnyx integration."
+          );
+        }
+        if (error.message.includes("401") || error.message.includes("Unauthorized")) {
+          throw new Error(
+            "Telnyx API authentication failed (401). Please verify your API key is valid. " +
+            "Check your Telnyx API key in System Admin → Integrations → Telnyx"
+          );
+        }
+      }
+      throw error;
+    }
+
+    return trackApiCall(
+      "callAssistant",
+      TELNYX_PROVIDER,
+      async () => {
+        try {
+          const dialResponse = await transport.request("/calls", {
+            method: "POST",
+            body: {
+              connection_id: connectionId.trim(),
+              from: fromNumber.trim(),
+              to: toNumber.trim(),
+            },
+          });
+
+          const callControlId = extractCallControlId(dialResponse);
+          if (!callControlId) {
+            const responseStr = JSON.stringify(dialResponse, null, 2);
+            throw new Error(
+              `Telnyx dial did not return a call_control_id. Response: ${responseStr.substring(0, 500)}`
+            );
+          }
+
+          const startResponse = await transport.request(
+            `/calls/${callControlId}/actions/ai_assistant_start`,
+            {
+              method: "POST",
+              body: {
+                assistant: {
+                  assistant_id: assistantId,
+                },
+              },
+            }
+          );
+
+          const conversationId = extractConversationId(startResponse);
+          return { callControlId, conversationId };
+        } catch (error) {
+          // Improve error messages for Telnyx API errors
+          if (error instanceof Error) {
+            if (error.message.includes("404")) {
+              throw new Error(
+                "Call Control App ID not found. Please verify the Connection ID is correct in Telnyx Mission Control."
+              );
+            }
+            if (error.message.includes("400")) {
+              throw new Error(
+                "Invalid request parameters. Please check phone numbers and Call Control App ID format."
+              );
+            }
+            if (error.message.includes("422")) {
+              throw new Error(
+                "Invalid assistant configuration. Please verify the assistant ID exists and is properly configured."
+              );
+            }
+          }
+          throw error;
+        }
+      },
+      {
+        tenantId,
+        userId,
+        requestData: {
+          assistantId,
+          toNumber: redactPhoneNumber(toNumber),
+          fromNumber: redactPhoneNumber(fromNumber),
+          connectionId,
+        },
+      }
+    );
+  } catch (error) {
+    // Ensure errors are properly formatted for client consumption
+    if (error instanceof Error) {
+      throw error;
+    }
+    throw new Error(`Failed to start call: ${String(error)}`);
   }
-  if (!toNumber?.trim()) {
-    throw new Error("Destination phone number is required.");
-  }
-  if (!fromNumber?.trim()) {
-    throw new Error("Caller (from) number is required.");
-  }
-  if (!connectionId?.trim()) {
-    throw new Error("Call Control connection ID is required.");
+}
+
+export async function hangUpCallAction(callControlId: string): Promise<void> {
+  if (!callControlId?.trim()) {
+    throw new Error("Call Control ID is required to hang up.");
   }
 
   const { tenantId, userId } = await getTelemetryContext();
-  const transport = await getTelnyxTransport("integrations.write");
+  
+  let transport: Awaited<ReturnType<typeof getTelnyxTransport>>;
+  try {
+    transport = await getTelnyxTransport("integrations.write");
+  } catch (error) {
+    if (error instanceof Error) {
+      if (error.message.includes("Tenant context missing")) {
+        throw new Error(
+          "Tenant context missing. Please select a tenant or configure the platform default Telnyx integration."
+        );
+      }
+    }
+    throw error;
+  }
 
   return trackApiCall(
-    "callAssistant",
+    "hangUpCall",
     TELNYX_PROVIDER,
     async () => {
-      const dialResponse = await transport.request("/calls", {
+      await transport.request(`/calls/${callControlId}/actions/hangup`, {
         method: "POST",
-        body: {
-          connection_id: connectionId.trim(),
-          from: fromNumber.trim(),
-          to: toNumber.trim(),
-        },
+        body: {},
       });
-
-      const callControlId = extractCallControlId(dialResponse);
-      if (!callControlId) {
-        throw new Error("Telnyx dial did not return a call_control_id.");
-      }
-
-      const startResponse = await transport.request(
-        `/calls/${callControlId}/actions/ai_assistant_start`,
-        {
-          method: "POST",
-          body: {
-            assistant: {
-              assistant_id: assistantId,
-            },
-          },
-        }
-      );
-
-      const conversationId = extractConversationId(startResponse);
-      return { callControlId, conversationId };
     },
     {
       tenantId,
       userId,
       requestData: {
-        assistantId,
-        toNumber: redactPhoneNumber(toNumber),
-        fromNumber: redactPhoneNumber(fromNumber),
-        connectionId,
+        callControlId,
       },
     }
   );

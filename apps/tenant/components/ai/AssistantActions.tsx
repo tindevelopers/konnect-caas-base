@@ -11,7 +11,9 @@ import {
   callAssistantAction,
   cloneAssistantAction,
   getCallInstructionsAction,
+  hangUpCallAction,
 } from "@/app/actions/telnyx/assistants";
+import CallStatusModal from "./CallStatusModal";
 
 interface AssistantActionsProps {
   assistantId: string;
@@ -60,6 +62,7 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
 
   const [isCloning, setIsCloning] = useState(false);
   const [cloneError, setCloneError] = useState<string | null>(null);
+  const [isHangingUp, setIsHangingUp] = useState(false);
 
   const openCallModal = useCallback(() => {
     setCallError(null);
@@ -103,6 +106,8 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
           result.conversationId ? ` · Conversation: ${result.conversationId}` : ""
         }`,
       });
+      // Close the call modal and show call status modal
+      callModal.closeModal();
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Failed to start the assistant call.";
@@ -115,7 +120,7 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
     } finally {
       setIsCalling(false);
     }
-  }, [assistantId, callForm]);
+  }, [assistantId, callForm, callModal]);
 
   const handleClone = useCallback(async () => {
     setIsCloning(true);
@@ -378,6 +383,40 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
           </div>
         </div>
       </Modal>
+
+      {/* Call Status Modal */}
+      {callResult && (
+        <CallStatusModal
+          isOpen={!!callResult}
+          onClose={() => setCallResult(null)}
+          callControlId={callResult.callControlId}
+          conversationId={callResult.conversationId}
+          onHangUp={async () => {
+            if (!callResult) return;
+            setIsHangingUp(true);
+            try {
+              await hangUpCallAction(callResult.callControlId);
+              setCallResult(null);
+              setBanner({
+                variant: "success",
+                title: "Call ended",
+                message: "The call has been terminated.",
+              });
+            } catch (error) {
+              const message =
+                error instanceof Error ? error.message : "Failed to hang up call.";
+              setBanner({
+                variant: "error",
+                title: "Hang up failed",
+                message,
+              });
+            } finally {
+              setIsHangingUp(false);
+            }
+          }}
+          isHangingUp={isHangingUp}
+        />
+      )}
     </div>
   );
 }
