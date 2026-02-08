@@ -82,13 +82,7 @@ export function AssistantsList({
                   <td className="px-6 py-6 text-red-600 dark:text-red-400" colSpan={5}>
                     <div className="space-y-1">
                       <div className="font-medium">Error loading assistants:</div>
-                      <div className="text-sm">
-                        {typeof error === 'string' 
-                          ? error 
-                          : error instanceof Error 
-                          ? error.message 
-                          : JSON.stringify(error)}
-                      </div>
+                      <div className="text-sm">{error}</div>
                     </div>
                   </td>
                 </tr>
