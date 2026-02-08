@@ -2,7 +2,7 @@
   "$schema": "https://railway.app/railway.schema.json",
   "build": {
     "builder": "NIXPACKS",
-    "buildCommand": "pnpm install --frozen-lockfile"
+    "buildCommand": ""
   },
   "deploy": {
     "startCommand": "cd apps/tenant && WEBSOCKET_HOST=0.0.0.0 WEBSOCKET_PORT=$PORT pnpm ws:server",

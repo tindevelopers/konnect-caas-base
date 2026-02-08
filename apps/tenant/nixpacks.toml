@@ -7,5 +7,9 @@ cmds = [
   "pnpm install --frozen-lockfile"
 ]
 
+# Skip build phase - WebSocket server doesn't need Next.js build
+[phases.build]
+cmds = []
+
 [start]
 cmd = "cd apps/tenant && WEBSOCKET_HOST=0.0.0.0 WEBSOCKET_PORT=$PORT pnpm ws:server"
