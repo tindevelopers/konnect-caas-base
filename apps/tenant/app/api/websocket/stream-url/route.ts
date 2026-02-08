@@ -7,7 +7,8 @@ import { headers } from "next/headers";
  */
 export async function GET() {
   try {
-    // Check for production WebSocket URL (set in Vercel environment variables)
+    // PRIORITY 1: Always use production/remote WebSocket URL if set (Railway, etc.)
+    // This allows testing production infrastructure even during local development
     const productionWsUrl = process.env.WEBSOCKET_URL;
     const authToken = process.env.WEBSOCKET_AUTH_TOKEN;
     
@@ -16,6 +17,7 @@ export async function GET() {
       hasProductionWsUrl: !!productionWsUrl,
       hasAuthToken: !!authToken,
       productionWsUrlPreview: productionWsUrl ? productionWsUrl.substring(0, 50) + '...' : 'none',
+      note: "Production URL is always preferred, even in local development",
     });
     
     if (productionWsUrl) {
@@ -39,16 +41,18 @@ export async function GET() {
         }
       }
       
-      console.log("[TELEMETRY] stream-url returning production URL", {
+      console.log("[TELEMETRY] stream-url returning production/remote URL", {
         timestamp: new Date().toISOString(),
         streamUrlPreview: streamUrl.substring(0, 100) + (streamUrl.length > 100 ? '...' : ''),
         hasToken: streamUrl.includes('token='),
+        source: "production",
+        note: "Using remote WebSocket server (Railway) for testing",
       });
       
       return NextResponse.json({
         streamUrl,
         source: "production",
-        message: "Using production WebSocket server",
+        message: "Using remote WebSocket server (Railway) - recommended for testing",
       });
     }
 

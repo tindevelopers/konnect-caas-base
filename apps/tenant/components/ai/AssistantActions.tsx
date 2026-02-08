@@ -81,29 +81,56 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
     setCallResult(null);
     
     // Auto-populate WebSocket stream URL
+    // Priority: Production URL (Railway) > ngrok > localhost
+    // This ensures we test against production infrastructure even locally
     if (!callForm.streamUrl) {
       setIsLoadingStreamUrl(true);
       try {
-        // First, try to get ngrok URL if available
-        const ngrokResponse = await fetch("/api/websocket/ngrok-url").catch(() => null);
-        if (ngrokResponse?.ok) {
-          const ngrokData = await ngrokResponse.json();
-          if (ngrokData.available && ngrokData.websocketUrl) {
-            setCallForm((prev) => ({ ...prev, streamUrl: ngrokData.websocketUrl }));
-            setIsLoadingStreamUrl(false);
-            callModal.openModal();
-            return;
-          }
-        }
-        
-        // Fallback to local WebSocket URL
+        // PRIORITY 1: Get production/remote WebSocket URL (Railway)
+        // This is always preferred, even in local development, to test production infrastructure
         const response = await fetch("/api/websocket/stream-url");
         if (response.ok) {
           const data = await response.json();
-          setCallForm((prev) => ({ ...prev, streamUrl: data.streamUrl }));
+          if (data.streamUrl) {
+            console.log("[TELEMETRY] AssistantActions - Using stream URL", {
+              timestamp: new Date().toISOString(),
+              source: data.source,
+              streamUrlPreview: data.streamUrl.substring(0, 100) + (data.streamUrl.length > 100 ? '...' : ''),
+            });
+            
+            // If production URL is available, use it (even in local dev)
+            if (data.source === "production") {
+              setCallForm((prev) => ({ ...prev, streamUrl: data.streamUrl }));
+              setIsLoadingStreamUrl(false);
+              callModal.openModal();
+              return;
+            }
+            
+            // PRIORITY 2: If not production, try ngrok for local development
+            const ngrokResponse = await fetch("/api/websocket/ngrok-url").catch(() => null);
+            if (ngrokResponse?.ok) {
+              const ngrokData = await ngrokResponse.json();
+              if (ngrokData.available && ngrokData.websocketUrl) {
+                console.log("[TELEMETRY] AssistantActions - Using ngrok URL", {
+                  timestamp: new Date().toISOString(),
+                  ngrokUrl: ngrokData.websocketUrl.substring(0, 100),
+                });
+                setCallForm((prev) => ({ ...prev, streamUrl: ngrokData.websocketUrl }));
+                setIsLoadingStreamUrl(false);
+                callModal.openModal();
+                return;
+              }
+            }
+            
+            // PRIORITY 3: Fallback to localhost (won't work for Telnyx, but useful for testing UI)
+            setCallForm((prev) => ({ ...prev, streamUrl: data.streamUrl }));
+          }
         }
       } catch (error) {
-        console.error("Failed to get stream URL:", error);
+        console.error("[TELEMETRY] AssistantActions - Failed to get stream URL", {
+          timestamp: new Date().toISOString(),
+          error: error instanceof Error ? error.message : String(error),
+        });
       } finally {
         setIsLoadingStreamUrl(false);
       }
