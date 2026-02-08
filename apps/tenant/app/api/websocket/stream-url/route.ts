@@ -13,15 +13,18 @@ export async function GET() {
     
     if (productionWsUrl) {
       // Optionally append shared-token auth if the provided URL doesn't already include it
-      let streamUrl = productionWsUrl;
+      // Sanitize URL: trim whitespace/newlines that might come from env vars
+      let streamUrl = productionWsUrl.trim();
       if (authToken) {
         try {
-          const url = new URL(productionWsUrl);
+          const url = new URL(streamUrl);
           if (!url.searchParams.get("token")) {
-            url.searchParams.set("token", authToken);
+            // Trim token to remove any newlines
+            url.searchParams.set("token", authToken.trim());
           }
           streamUrl = url.toString();
-        } catch {
+        } catch (error) {
+          console.error("[stream-url] Error parsing productionWsUrl:", error);
           // ignore and use as-is
         }
       }
@@ -64,9 +67,11 @@ export async function GET() {
     if (authToken) {
       try {
         const url = new URL(wsUrl);
-        url.searchParams.set("token", authToken);
+        // Trim token to remove any newlines
+        url.searchParams.set("token", authToken.trim());
         streamUrl = url.toString();
-      } catch {
+      } catch (error) {
+        console.error("[stream-url] Error parsing wsUrl:", error);
         // ignore and use as-is
       }
     }

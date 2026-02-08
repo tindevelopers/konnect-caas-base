@@ -32,13 +32,18 @@ export default function CallStatusModal({
   const wsUrl = useMemo(() => {
     if (!streamUrl) return undefined;
     try {
-      const url = new URL(streamUrl);
+      // Sanitize URL: trim whitespace/newlines that might come from env vars
+      const sanitizedUrl = streamUrl.trim();
+      const url = new URL(sanitizedUrl);
       url.searchParams.set("clientId", clientId);
       url.searchParams.set("callControlId", callControlId);
       return url.toString();
-    } catch {
-      const joiner = streamUrl.includes("?") ? "&" : "?";
-      return `${streamUrl}${joiner}clientId=${encodeURIComponent(clientId)}&callControlId=${encodeURIComponent(callControlId)}`;
+    } catch (error) {
+      console.error("[CallStatusModal] Error parsing streamUrl:", error, streamUrl);
+      // Fallback: manually construct URL if URL constructor fails
+      const sanitizedUrl = streamUrl.trim();
+      const joiner = sanitizedUrl.includes("?") ? "&" : "?";
+      return `${sanitizedUrl}${joiner}clientId=${encodeURIComponent(clientId)}&callControlId=${encodeURIComponent(callControlId)}`;
     }
   }, [streamUrl, clientId, callControlId]);
 

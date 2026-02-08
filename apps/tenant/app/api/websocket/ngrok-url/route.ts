@@ -41,9 +41,11 @@ export async function GET() {
     if (authToken) {
       try {
         const url = new URL(wsBaseUrl);
-        url.searchParams.set("token", authToken);
+        // Trim token to remove any newlines
+        url.searchParams.set("token", authToken.trim());
         wsUrl = url.toString();
-      } catch {
+      } catch (error) {
+        console.error("[ngrok-url] Error parsing wsBaseUrl:", error);
         // ignore and use as-is
       }
     }
