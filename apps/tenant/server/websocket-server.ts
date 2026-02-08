@@ -51,8 +51,13 @@ wss.on("connection", (ws: WebSocket, req) => {
   const connectionId = clientId || `telnyx-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   
   // Optional shared-secret auth (recommended for production)
-  if (AUTH_TOKEN && token !== AUTH_TOKEN) {
-    console.warn(`[WebSocket] Unauthorized connection rejected: ${connectionId}`);
+  // Note: Telnyx connections don't have clientId, so they bypass auth check
+  // Only browser clients need to provide the token
+  if (AUTH_TOKEN && !isTelnyx && token !== AUTH_TOKEN.trim()) {
+    console.warn(`[WebSocket] Unauthorized connection rejected: ${connectionId}`, {
+      providedToken: token ? `${token.substring(0, 10)}...` : 'missing',
+      expectedLength: AUTH_TOKEN.trim().length,
+    });
     try {
       ws.close(1008, "Unauthorized");
     } catch {
