@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Modal } from "@/components/ui/modal";
 import Button from "@/components/ui/button/Button";
+import { TelnyxRTC } from "@telnyx/webrtc";
 
 interface WebcallModalProps {
   isOpen: boolean;
@@ -38,28 +39,16 @@ export default function WebcallModal({
 
     const initClient = async () => {
       try {
-        // Dynamically import Telnyx WebRTC SDK
-        // TelnyxRTC is exported as both default and named export
-        const TelnyxRTCModule = await import("@telnyx/webrtc");
-        // Try named export first, then default
-        const TelnyxRTC = TelnyxRTCModule.TelnyxRTC || TelnyxRTCModule.default;
-        
-        if (!TelnyxRTC || typeof TelnyxRTC !== 'function') {
-          const moduleKeys = Object.keys(TelnyxRTCModule);
-          throw new Error(
-            `TelnyxRTC is not a constructor. ` +
-            `Module exports: ${moduleKeys.join(', ')}. ` +
-            `TelnyxRTC type: ${typeof TelnyxRTCModule.TelnyxRTC}, ` +
-            `default type: ${typeof TelnyxRTCModule.default}`
-          );
-        }
-        
         console.log("[TELEMETRY] WebcallModal - Initializing Telnyx WebRTC client", {
           timestamp: new Date().toISOString(),
           assistantId,
           hasCredentials: !!credentials,
           TelnyxRTCType: typeof TelnyxRTC,
         });
+
+        if (!TelnyxRTC || typeof TelnyxRTC !== 'function') {
+          throw new Error(`TelnyxRTC is not a constructor. Type: ${typeof TelnyxRTC}`);
+        }
 
         // Create client with credentials
         const client = new TelnyxRTC({
