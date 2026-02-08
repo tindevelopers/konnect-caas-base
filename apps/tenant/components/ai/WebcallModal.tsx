@@ -28,6 +28,7 @@ export default function WebcallModal({
   const [error, setError] = useState<string | null>(null);
   const [audioLevels, setAudioLevels] = useState<number[]>([]);
   const [isMuted, setIsMuted] = useState(false);
+  const [permissionError, setPermissionError] = useState<string | null>(null);
   
   const clientRef = useRef<any>(null);
   const callRef = useRef<any>(null);
@@ -63,8 +64,18 @@ export default function WebcallModal({
         clientRef.current = client;
 
         // Set up audio element for remote audio
+        // Wait a tick to ensure audio element is mounted
+        await new Promise(resolve => setTimeout(resolve, 100));
         if (audioElementRef.current) {
           client.remoteElement = audioElementRef.current.id;
+          console.log("[TELEMETRY] WebcallModal - Audio element configured", {
+            timestamp: new Date().toISOString(),
+            elementId: audioElementRef.current.id,
+          });
+        } else {
+          console.warn("[TELEMETRY] WebcallModal - Audio element not found", {
+            timestamp: new Date().toISOString(),
+          });
         }
 
         // Event listeners
@@ -75,13 +86,22 @@ export default function WebcallModal({
             });
             setIsConnected(true);
             setError(null);
+            setPermissionError(null);
           })
           .on("telnyx.error", (error: any) => {
             console.error("[TELEMETRY] WebcallModal - Client error", {
               timestamp: new Date().toISOString(),
               error: error.message || String(error),
+              errorType: error.type,
             });
-            setError(error.message || "Connection error");
+            
+            // Check if it's a permission error
+            const errorMessage = error.message || String(error);
+            if (errorMessage.includes("Permission denied") || errorMessage.includes("NotAllowedError")) {
+              setPermissionError("Microphone permission denied. Please allow microphone access in your browser settings.");
+            }
+            
+            setError(errorMessage || "Connection error");
             setIsConnected(false);
           })
           .on("telnyx.notification", (notification: any) => {
@@ -93,17 +113,33 @@ export default function WebcallModal({
 
             if (notification.type === "callUpdate") {
               const call = notification.call;
-              callRef.current = call;
-              setCallState(call.state || "");
+              if (call) {
+                callRef.current = call;
+                setCallState(call.state || "");
 
-              // Handle call states
-              if (call.state === "active") {
-                setIsCalling(true);
-                setError(null);
-              } else if (call.state === "hangup" || call.state === "destroy") {
-                setIsCalling(false);
-                handleHangUp();
+                // Handle call states
+                if (call.state === "active") {
+                  setIsCalling(true);
+                  setError(null);
+                  setPermissionError(null);
+                } else if (call.state === "hangup" || call.state === "destroy") {
+                  setIsCalling(false);
+                  handleHangUp();
+                }
               }
+            } else if (notification.type === "userMediaError") {
+              console.error("[TELEMETRY] WebcallModal - User media error", {
+                timestamp: new Date().toISOString(),
+                error: notification.error,
+              });
+              setPermissionError("Microphone access denied. Please allow microphone access in your browser settings.");
+              setIsCalling(false);
+            } else if (notification.type === "peerConnectionFailureError") {
+              console.error("[TELEMETRY] WebcallModal - Peer connection failure", {
+                timestamp: new Date().toISOString(),
+                error: notification.error,
+              });
+              setError("Connection failed. Please check your network connection.");
             }
           });
 
@@ -147,9 +183,18 @@ export default function WebcallModal({
     }
 
     const interval = setInterval(() => {
-      // Generate random audio levels for visualization (in real app, use actual audio levels)
-      const levels = Array.from({ length: 50 }, () => Math.random() * 100);
-      setAudioLevels(levels);
+      try {
+        // Generate random audio levels for visualization (in real app, use actual audio levels)
+        const levels = Array.from({ length: 50 }, () => Math.random() * 100);
+        setAudioLevels(levels);
+      } catch (err) {
+        console.error("[TELEMETRY] WebcallModal - Error generating audio levels", {
+          timestamp: new Date().toISOString(),
+          error: err instanceof Error ? err.message : String(err),
+        });
+        // Fallback to empty array if there's an error
+        setAudioLevels([]);
+      }
     }, 100);
 
     return () => clearInterval(interval);
@@ -162,6 +207,26 @@ export default function WebcallModal({
     }
 
     try {
+      // Request microphone permission before starting call
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        // Permission granted - stop the stream as Telnyx will handle it
+        stream.getTracks().forEach(track => track.stop());
+        setPermissionError(null);
+      } catch (mediaError: any) {
+        console.error("[TELEMETRY] WebcallModal - Microphone permission denied", {
+          timestamp: new Date().toISOString(),
+          error: mediaError.message || String(mediaError),
+          name: mediaError.name,
+        });
+        
+        if (mediaError.name === "NotAllowedError" || mediaError.name === "PermissionDeniedError") {
+          setPermissionError("Microphone permission denied. Please allow microphone access in your browser settings and try again.");
+          return;
+        }
+        throw mediaError;
+      }
+
       console.log("[TELEMETRY] WebcallModal - Starting webcall", {
         timestamp: new Date().toISOString(),
         assistantId,
@@ -185,10 +250,12 @@ export default function WebcallModal({
       callRef.current = call;
       setIsCalling(true);
       setError(null);
+      setPermissionError(null);
     } catch (err) {
       console.error("[TELEMETRY] WebcallModal - Call start error", {
         timestamp: new Date().toISOString(),
         error: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined,
       });
       setError(err instanceof Error ? err.message : "Failed to start call");
     }
@@ -303,11 +370,34 @@ export default function WebcallModal({
           id="remoteMedia"
           ref={audioElementRef}
           autoPlay
+          playsInline
           style={{ display: "none" }}
+          onError={(e) => {
+            console.error("[TELEMETRY] WebcallModal - Audio element error", {
+              timestamp: new Date().toISOString(),
+              error: e.currentTarget.error?.message,
+            });
+          }}
         />
 
+        {/* Permission Error Display */}
+        {permissionError && (
+          <div className="mb-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-700 dark:bg-amber-900/20 dark:text-amber-400">
+            <div className="font-medium mb-1">⚠️ Microphone Permission Required</div>
+            <div>{permissionError}</div>
+            <div className="mt-2 text-xs">
+              <strong>How to fix:</strong>
+              <ol className="list-decimal list-inside mt-1 space-y-1">
+                <li>Click the lock/info icon in your browser's address bar</li>
+                <li>Find "Microphone" and set it to "Allow"</li>
+                <li>Refresh the page and try again</li>
+              </ol>
+            </div>
+          </div>
+        )}
+
         {/* Error Display */}
-        {error && (
+        {error && !permissionError && (
           <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-600 dark:bg-red-900/20 dark:text-red-400">
             {error}
           </div>
