@@ -9,10 +9,24 @@ export async function GET() {
   try {
     // Check for production WebSocket URL (set in Vercel environment variables)
     const productionWsUrl = process.env.WEBSOCKET_URL;
+    const authToken = process.env.WEBSOCKET_AUTH_TOKEN;
     
     if (productionWsUrl) {
+      // Optionally append shared-token auth if the provided URL doesn't already include it
+      let streamUrl = productionWsUrl;
+      if (authToken) {
+        try {
+          const url = new URL(productionWsUrl);
+          if (!url.searchParams.get("token")) {
+            url.searchParams.set("token", authToken);
+          }
+          streamUrl = url.toString();
+        } catch {
+          // ignore and use as-is
+        }
+      }
       return NextResponse.json({
-        streamUrl: productionWsUrl,
+        streamUrl,
         source: "production",
         message: "Using production WebSocket server",
       });
@@ -44,9 +58,21 @@ export async function GET() {
     const wsUrl = wsPort 
       ? `${wsProto}://${wsHost}:${wsPort}/api/websocket/stream`
       : `${wsProto}://${wsHost}/api/websocket/stream`;
+
+    // Append optional shared-token auth for both browser + Telnyx (Telnyx can't set headers)
+    let streamUrl = wsUrl;
+    if (authToken) {
+      try {
+        const url = new URL(wsUrl);
+        url.searchParams.set("token", authToken);
+        streamUrl = url.toString();
+      } catch {
+        // ignore and use as-is
+      }
+    }
     
     return NextResponse.json({
-      streamUrl: wsUrl,
+      streamUrl,
       host,
       proto,
       wsHost,

@@ -6,6 +6,8 @@ import { NextResponse } from "next/server";
  */
 export async function GET() {
   try {
+    const authToken = process.env.WEBSOCKET_AUTH_TOKEN;
+    
     // Check if ngrok is running (port 4040)
     const ngrokResponse = await fetch("http://localhost:4040/api/tunnels", {
       signal: AbortSignal.timeout(2000), // 2 second timeout
@@ -34,7 +36,17 @@ export async function GET() {
     }
 
     const publicUrl = httpsTunnel.public_url;
-    const wsUrl = publicUrl.replace("https://", "wss://") + "/api/websocket/stream";
+    const wsBaseUrl = publicUrl.replace("https://", "wss://") + "/api/websocket/stream";
+    let wsUrl = wsBaseUrl;
+    if (authToken) {
+      try {
+        const url = new URL(wsBaseUrl);
+        url.searchParams.set("token", authToken);
+        wsUrl = url.toString();
+      } catch {
+        // ignore and use as-is
+      }
+    }
 
     return NextResponse.json({
       available: true,

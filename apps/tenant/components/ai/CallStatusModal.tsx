@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Modal } from "@/components/ui/modal";
 import Button from "@/components/ui/button/Button";
 import AudioStreamPlayer from "./AudioStreamPlayer";
@@ -28,8 +28,19 @@ export default function CallStatusModal({
   const [audioLevels, setAudioLevels] = useState<number[]>([]);
   const [clientId] = useState(() => `client-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`);
   
-  // Generate WebSocket URL with client ID if streamUrl is provided
-  const wsUrl = streamUrl ? `${streamUrl}?clientId=${clientId}` : undefined;
+  // Generate WebSocket URL with routing identifiers (preserve any existing query params like token)
+  const wsUrl = useMemo(() => {
+    if (!streamUrl) return undefined;
+    try {
+      const url = new URL(streamUrl);
+      url.searchParams.set("clientId", clientId);
+      url.searchParams.set("callControlId", callControlId);
+      return url.toString();
+    } catch {
+      const joiner = streamUrl.includes("?") ? "&" : "?";
+      return `${streamUrl}${joiner}clientId=${encodeURIComponent(clientId)}&callControlId=${encodeURIComponent(callControlId)}`;
+    }
+  }, [streamUrl, clientId, callControlId]);
 
   // Generate random audio waveform visualization
   useEffect(() => {
