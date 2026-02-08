@@ -29,5 +29,6 @@
     "*.js": "${capture}.js.map, ${capture}.min.js, ${capture}.d.ts",
     "tsconfig.json": "tsconfig.*.json",
     "package.json": "package-lock.json, yarn.lock, pnpm-lock.yaml"
-  }
+  },
+  "abacus.viewKind": "editor"
 }
