@@ -14,7 +14,9 @@ import {
   hangUpCallAction,
   testCallAssistantAction,
 } from "@/app/actions/telnyx/assistants";
+import { getWebRTCCredentialsAction } from "@/app/actions/telnyx/webrtc";
 import CallStatusModal from "./CallStatusModal";
+import WebcallModal from "./WebcallModal";
 import AudioStreamPlayer from "./AudioStreamPlayer";
 
 interface AssistantActionsProps {
@@ -75,6 +77,15 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
     status: string;
   } | null>(null);
   const [testError, setTestError] = useState<string | null>(null);
+  
+  const [webcallCredentials, setWebcallCredentials] = useState<{
+    login?: string;
+    password?: string;
+    login_token?: string;
+  } | null>(null);
+  const [isLoadingWebcallCredentials, setIsLoadingWebcallCredentials] = useState(false);
+  const [webcallError, setWebcallError] = useState<string | null>(null);
+  const webcallModal = useModal();
 
   const openCallModal = useCallback(async () => {
     setCallError(null);
@@ -245,6 +256,36 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
     }
   }, [assistantId]);
 
+  const handleWebcall = useCallback(async () => {
+    setIsLoadingWebcallCredentials(true);
+    setWebcallError(null);
+    try {
+      const credentials = await getWebRTCCredentialsAction();
+      if (credentials.error) {
+        setWebcallError(credentials.error);
+        setBanner({
+          variant: "error",
+          title: "Webcall setup failed",
+          message: credentials.error,
+        });
+        return;
+      }
+      setWebcallCredentials(credentials);
+      webcallModal.openModal();
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to get WebRTC credentials.";
+      setWebcallError(message);
+      setBanner({
+        variant: "error",
+        title: "Webcall setup failed",
+        message,
+      });
+    } finally {
+      setIsLoadingWebcallCredentials(false);
+    }
+  }, [assistantId, webcallModal]);
+
   return (
     <div className="mt-8 rounded-2xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-900">
       <div className="flex items-center justify-between gap-4">
@@ -270,6 +311,14 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
           onClick={openCallModal}
         >
           Call Assistant
+        </Button>
+        <Button
+          variant="outline"
+          startIcon={<CallIcon className="h-4 w-4" />}
+          onClick={handleWebcall}
+          disabled={isLoadingWebcallCredentials}
+        >
+          {isLoadingWebcallCredentials ? "Loading..." : "Webcall"}
         </Button>
         <Button
           variant="outline"
@@ -555,6 +604,18 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
           <Alert variant="error" title="Test Call Failed" message={testError} />
         </div>
       )}
+
+      {/* Webcall Modal */}
+      <WebcallModal
+        isOpen={webcallModal.isOpen}
+        onClose={() => {
+          webcallModal.closeModal();
+          setWebcallCredentials(null);
+          setWebcallError(null);
+        }}
+        assistantId={assistantId}
+        credentials={webcallCredentials || undefined}
+      />
 
       {/* Call Status Modal */}
       {callResult && (
