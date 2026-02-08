@@ -15,7 +15,7 @@ function isPlatformOnlyPath(pathname: string): boolean {
   return PLATFORM_ONLY_PREFIXES.some((prefix) => pathname.startsWith(prefix));
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
   const requestHeaders = new Headers(request.headers);
 
@@ -87,7 +87,7 @@ export async function middleware(request: NextRequest) {
     // This is necessary because Platform Admins have tenant_id = NULL and RLS might block the query
     const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
     if (!serviceRoleKey) {
-      console.error("[middleware] SUPABASE_SERVICE_ROLE_KEY not set, cannot verify Platform Admin status");
+      console.error("[proxy] SUPABASE_SERVICE_ROLE_KEY not set, cannot verify Platform Admin status");
       const url = request.nextUrl.clone();
       url.pathname = "/saas/dashboard";
       return NextResponse.redirect(url);
@@ -116,7 +116,7 @@ export async function middleware(request: NextRequest) {
     
     // If query failed or user not found, deny access
     if (userRowResult.error || !userRow) {
-      console.error("[middleware] Error checking Platform Admin status:", userRowResult.error);
+      console.error("[proxy] Error checking Platform Admin status:", userRowResult.error);
       const url = request.nextUrl.clone();
       url.pathname = "/saas/dashboard";
       return NextResponse.redirect(url);
@@ -148,4 +148,3 @@ export const config = {
     "/((?!api|_next/static|_next/image|favicon.ico|builder).*)",
   ],
 };
-

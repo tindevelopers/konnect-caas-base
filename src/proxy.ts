@@ -4,7 +4,7 @@ import type { Database } from "@/core/database";
 import { resolveTenant, resolveContext } from "@/core/multi-tenancy/resolver";
 import { getSubdomainFromRequest, getTenantIdFromSubdomain } from "@/core/multi-tenancy/subdomain-routing";
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   let response = NextResponse.next({
     request: {
       headers: request.headers,
@@ -65,7 +65,7 @@ export async function middleware(request: NextRequest) {
 
   // Log auth status for debugging
   if (authError) {
-    console.log("[middleware] Auth error:", authError.message);
+    console.log("[proxy] Auth error:", authError.message);
   }
 
   // Try subdomain routing first
@@ -79,7 +79,7 @@ export async function middleware(request: NextRequest) {
     const tenantId = await getTenantIdFromSubdomain(subdomainInfo.subdomain);
     if (tenantId) {
       tenantResult = {
-        tenant: null, // We don't need full tenant object in middleware
+        tenant: null, // We don't need full tenant object in proxy
         tenantId,
         source: "subdomain" as const,
       };
@@ -157,4 +157,3 @@ export const config = {
     "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };
-
