@@ -303,13 +303,39 @@ export async function callAssistantAction(payload: CallAssistantPayload): Promis
 
           // Add streaming if streamUrl is provided
           if (payload.streamUrl?.trim()) {
-            dialBody.stream_url = payload.streamUrl.trim();
+            const streamUrl = payload.streamUrl.trim();
+            dialBody.stream_url = streamUrl;
             dialBody.stream_track = payload.streamTrack || "both_tracks";
+            
+            console.log("[TELEMETRY] callAssistantAction - Adding stream URL", {
+              timestamp: new Date().toISOString(),
+              streamUrl: streamUrl.substring(0, 100) + (streamUrl.length > 100 ? '...' : ''),
+              streamTrack: dialBody.stream_track,
+              hasToken: streamUrl.includes('token='),
+            });
+          } else {
+            console.warn("[TELEMETRY] callAssistantAction - No streamUrl provided", {
+              timestamp: new Date().toISOString(),
+            });
           }
+
+          console.log("[TELEMETRY] callAssistantAction - Dialing call", {
+            timestamp: new Date().toISOString(),
+            dialBody: {
+              ...dialBody,
+              to: dialBody.to ? `***${dialBody.to.slice(-4)}` : 'missing',
+              from: dialBody.from ? `***${dialBody.from.slice(-4)}` : 'missing',
+            },
+          });
 
           const dialResponse = await transport.request("/calls", {
             method: "POST",
             body: dialBody,
+          });
+          
+          console.log("[TELEMETRY] callAssistantAction - Dial response received", {
+            timestamp: new Date().toISOString(),
+            hasResponse: !!dialResponse,
           });
 
           const callControlId = extractCallControlId(dialResponse);
