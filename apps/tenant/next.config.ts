@@ -5,7 +5,8 @@ import type { NextConfig } from "next";
 if (process.env.NODE_ENV && !['development', 'production', 'test'].includes(process.env.NODE_ENV)) {
   // For Builder.io or other platforms, default to production for builds
   if (process.env.NODE_ENV !== 'development') {
-    process.env.NODE_ENV = 'production';
+    // @types/node may mark env vars as readonly; runtime mutation is still supported.
+    (process.env as any).NODE_ENV = 'production';
   }
 }
 
@@ -86,7 +87,8 @@ const nextConfig: NextConfig = {
       '@tinadmin/core': corePath,
       '@tinadmin/ui-admin': path.resolve(__dirname, '../../packages/@tinadmin/ui-admin/src'),
       '@tinadmin/config': path.resolve(__dirname, '../../packages/@tinadmin/config/src'),
-      '@tinadmin/telnyx-ai-platform': path.resolve(__dirname, '../../packages/@tinadmin/telnyx-ai-platform'),
+      // Point to source so subpath imports (e.g. "/server") work without prebuilding dist/
+      '@tinadmin/telnyx-ai-platform': path.resolve(__dirname, '../../packages/@tinadmin/telnyx-ai-platform/src'),
     };
     
     // Ignore optional dependencies that are loaded dynamically

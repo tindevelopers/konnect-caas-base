@@ -1,4 +1,5 @@
 import { createServerClient } from "@supabase/ssr";
+import { createClient } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
 
 const PLATFORM_ONLY_PREFIXES = [
@@ -82,15 +83,45 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(url);
     }
 
+    // Use admin client to bypass RLS when checking Platform Admin status
+    // This is necessary because Platform Admins have tenant_id = NULL and RLS might block the query
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!serviceRoleKey) {
+      console.error("[middleware] SUPABASE_SERVICE_ROLE_KEY not set, cannot verify Platform Admin status");
+      const url = request.nextUrl.clone();
+      url.pathname = "/saas/dashboard";
+      return NextResponse.redirect(url);
+    }
+
+    const adminClient = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      serviceRoleKey,
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false,
+        },
+      }
+    );
+
     const userRowResult: {
       data: { tenant_id: string | null; roles?: { name: string } | null } | null;
       error: any;
-    } = await (supabase.from("users") as any)
+    } = await (adminClient.from("users") as any)
       .select("tenant_id, roles:role_id(name)")
       .eq("id", user.id)
       .single();
 
     const userRow = userRowResult.data;
+    
+    // If query failed or user not found, deny access
+    if (userRowResult.error || !userRow) {
+      console.error("[middleware] Error checking Platform Admin status:", userRowResult.error);
+      const url = request.nextUrl.clone();
+      url.pathname = "/saas/dashboard";
+      return NextResponse.redirect(url);
+    }
+
     const roleName = (userRow?.roles as any)?.name as string | undefined;
     const isPlatformAdmin = roleName === "Platform Admin" && userRow?.tenant_id === null;
 

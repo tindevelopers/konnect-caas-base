@@ -267,15 +267,30 @@ export async function signIn(data: SignInData) {
   const adminClient = createAdminClient();
 
   console.log("[signIn] Starting sign in for:", data.email);
+  console.log("[signIn] Supabase URL:", process.env.NEXT_PUBLIC_SUPABASE_URL);
+  console.log("[signIn] Anon key present:", !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
 
-  const { data: authData, error } = await supabase.auth.signInWithPassword({
-    email: data.email,
-    password: data.password,
-  });
+  let authData;
+  try {
+    const result = await supabase.auth.signInWithPassword({
+      email: data.email,
+      password: data.password,
+    });
 
-  if (error || !authData.user) {
-    console.error("[signIn] Auth error:", error);
-    throw error || new Error("Failed to sign in");
+    authData = result.data;
+    const error = result.error;
+
+    if (error || !authData?.user) {
+      console.error("[signIn] Auth error:", error);
+      console.error("[signIn] Error details:", JSON.stringify(error, null, 2));
+      throw error || new Error("Failed to sign in");
+    }
+  } catch (err: any) {
+    console.error("[signIn] Exception during sign in:", err);
+    console.error("[signIn] Error message:", err?.message);
+    console.error("[signIn] Error code:", err?.code);
+    console.error("[signIn] Error status:", err?.status);
+    throw err;
   }
 
   console.log("[signIn] Auth successful, user ID:", authData.user.id);

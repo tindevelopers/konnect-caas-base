@@ -108,6 +108,13 @@ export async function listAssistantsAction() {
           "Tenant context missing. Please select a tenant or configure the platform default Telnyx integration."
         );
       }
+      if (error.message.includes("not configured") || error.message.includes("API key")) {
+        throw new Error(
+          "Telnyx API key not configured. " +
+          "Please configure Telnyx integration: System Admin → Integrations → Telephony → Telnyx, " +
+          "or set TELNYX_API_KEY environment variable."
+        );
+      }
     }
     throw error;
   }

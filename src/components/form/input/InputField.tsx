@@ -55,7 +55,7 @@ const Input: FC<InputProps> = ({
   }
 
   return (
-    <div className="relative">
+    <div className="relative" suppressHydrationWarning>
       <input
         type={type}
         id={id}
