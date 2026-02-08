@@ -29,6 +29,8 @@ export default function WebcallModal({
   const [audioLevels, setAudioLevels] = useState<number[]>([]);
   const [isMuted, setIsMuted] = useState(false);
   const [permissionError, setPermissionError] = useState<string | null>(null);
+  const [permissionState, setPermissionState] = useState<PermissionState | null>(null);
+  const [isRequestingPermission, setIsRequestingPermission] = useState(false);
   
   const clientRef = useRef<any>(null);
   const callRef = useRef<any>(null);
@@ -175,6 +177,35 @@ export default function WebcallModal({
     };
   }, [isOpen, credentials, assistantId]);
 
+  // Check microphone permission state
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const checkPermission = async () => {
+      try {
+        if (navigator.permissions && navigator.permissions.query) {
+          const result = await navigator.permissions.query({ name: 'microphone' as PermissionName });
+          setPermissionState(result.state);
+          
+          result.onchange = () => {
+            setPermissionState(result.state);
+            if (result.state === 'granted') {
+              setPermissionError(null);
+            }
+          };
+        }
+      } catch (err) {
+        // Permission API not supported or failed
+        console.warn("[TELEMETRY] WebcallModal - Permission API not available", {
+          timestamp: new Date().toISOString(),
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    };
+
+    checkPermission();
+  }, [isOpen]);
+
   // Generate audio waveform visualization
   useEffect(() => {
     if (!isOpen || !isCalling) {
@@ -200,32 +231,85 @@ export default function WebcallModal({
     return () => clearInterval(interval);
   }, [isOpen, isCalling]);
 
+  const requestMicrophonePermission = async (): Promise<boolean> => {
+    setIsRequestingPermission(true);
+    setPermissionError(null);
+    
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error("getUserMedia is not supported in this browser");
+      }
+
+      console.log("[TELEMETRY] WebcallModal - Requesting microphone permission", {
+        timestamp: new Date().toISOString(),
+      });
+
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        } 
+      });
+      
+      // Permission granted - stop the stream as Telnyx will handle it
+      stream.getTracks().forEach(track => track.stop());
+      
+      setPermissionState('granted');
+      setPermissionError(null);
+      setIsRequestingPermission(false);
+      
+      console.log("[TELEMETRY] WebcallModal - Microphone permission granted", {
+        timestamp: new Date().toISOString(),
+      });
+      
+      return true;
+    } catch (mediaError: any) {
+      console.error("[TELEMETRY] WebcallModal - Microphone permission denied", {
+        timestamp: new Date().toISOString(),
+        error: mediaError.message || String(mediaError),
+        name: mediaError.name,
+      });
+      
+      setIsRequestingPermission(false);
+      
+      if (mediaError.name === "NotAllowedError" || mediaError.name === "PermissionDeniedError") {
+        setPermissionState('denied');
+        setPermissionError(
+          "Microphone permission denied. " +
+          "The browser has blocked microphone access. " +
+          "Please click the lock/info icon in your browser's address bar and allow microphone access, then refresh the page."
+        );
+        return false;
+      } else if (mediaError.name === "NotFoundError") {
+        setPermissionError("No microphone found. Please connect a microphone and try again.");
+        return false;
+      } else {
+        setPermissionError(`Microphone error: ${mediaError.message || String(mediaError)}`);
+        return false;
+      }
+    }
+  };
+
   const handleStartCall = async () => {
     if (!clientRef.current || !isConnected) {
       setError("Client not ready. Please wait for connection.");
       return;
     }
 
+    // Check if permission is already granted
+    if (permissionState === 'denied') {
+      setPermissionError("Microphone permission is blocked. Please enable it in your browser settings and refresh the page.");
+      return;
+    }
+
+    // Request microphone permission before starting call
+    const hasPermission = await requestMicrophonePermission();
+    if (!hasPermission) {
+      return; // Error already set by requestMicrophonePermission
+    }
+
     try {
-      // Request microphone permission before starting call
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        // Permission granted - stop the stream as Telnyx will handle it
-        stream.getTracks().forEach(track => track.stop());
-        setPermissionError(null);
-      } catch (mediaError: any) {
-        console.error("[TELEMETRY] WebcallModal - Microphone permission denied", {
-          timestamp: new Date().toISOString(),
-          error: mediaError.message || String(mediaError),
-          name: mediaError.name,
-        });
-        
-        if (mediaError.name === "NotAllowedError" || mediaError.name === "PermissionDeniedError") {
-          setPermissionError("Microphone permission denied. Please allow microphone access in your browser settings and try again.");
-          return;
-        }
-        throw mediaError;
-      }
 
       console.log("[TELEMETRY] WebcallModal - Starting webcall", {
         timestamp: new Date().toISOString(),
@@ -384,14 +468,30 @@ export default function WebcallModal({
         {permissionError && (
           <div className="mb-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-700 dark:bg-amber-900/20 dark:text-amber-400">
             <div className="font-medium mb-1">⚠️ Microphone Permission Required</div>
-            <div>{permissionError}</div>
+            <div className="mb-2">{permissionError}</div>
             <div className="mt-2 text-xs">
               <strong>How to fix:</strong>
               <ol className="list-decimal list-inside mt-1 space-y-1">
-                <li>Click the lock/info icon in your browser's address bar</li>
-                <li>Find "Microphone" and set it to "Allow"</li>
-                <li>Refresh the page and try again</li>
+                <li>Click the lock/info icon (🔒) in your browser's address bar</li>
+                <li>Find "Microphone" in the permissions list</li>
+                <li>Change it from "Block" to "Allow"</li>
+                <li>Refresh this page (F5 or Cmd+R)</li>
+                <li>Click "Start Call" again</li>
               </ol>
+            </div>
+            {permissionState === 'denied' && (
+              <div className="mt-2 text-xs italic">
+                Note: The browser has permanently blocked microphone access. You must manually enable it in browser settings.
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Permission Status */}
+        {permissionState && !permissionError && (
+          <div className="mb-4 rounded-lg bg-blue-50 p-3 text-sm text-blue-700 dark:bg-blue-900/20 dark:text-blue-400">
+            <div className="font-medium">
+              Microphone: {permissionState === 'granted' ? '✅ Allowed' : permissionState === 'prompt' ? '⏳ Click to allow' : '❌ Blocked'}
             </div>
           </div>
         )}
@@ -406,12 +506,25 @@ export default function WebcallModal({
         {/* Controls */}
         <div className="flex gap-3 justify-center">
           {!isCalling && isConnected && (
-            <Button
-              onClick={handleStartCall}
-              className="min-w-[120px] bg-green-600 hover:bg-green-700 text-white"
-            >
-              Start Call
-            </Button>
+            <>
+              {permissionState !== 'granted' && (
+                <Button
+                  onClick={requestMicrophonePermission}
+                  disabled={isRequestingPermission}
+                  variant="outline"
+                  className="min-w-[120px]"
+                >
+                  {isRequestingPermission ? "Requesting..." : "Allow Microphone"}
+                </Button>
+              )}
+              <Button
+                onClick={handleStartCall}
+                disabled={permissionState === 'denied' || isRequestingPermission}
+                className="min-w-[120px] bg-green-600 hover:bg-green-700 text-white disabled:opacity-50"
+              >
+                Start Call
+              </Button>
+            </>
           )}
           {isCalling && (
             <>
