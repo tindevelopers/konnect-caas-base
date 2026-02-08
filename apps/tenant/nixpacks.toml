@@ -2,7 +2,10 @@
 nixPkgs = ["nodejs_20", "pnpm"]
 
 [phases.install]
-cmds = ["pnpm install --frozen-lockfile"]
+cmds = [
+  "rm -f package-lock.json || true",
+  "pnpm install --frozen-lockfile"
+]
 
 [start]
 cmd = "cd apps/tenant && WEBSOCKET_HOST=0.0.0.0 WEBSOCKET_PORT=$PORT pnpm ws:server"
