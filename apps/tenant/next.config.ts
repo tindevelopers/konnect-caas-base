@@ -86,6 +86,7 @@ const nextConfig: NextConfig = {
       '@tinadmin/core': corePath,
       '@tinadmin/ui-admin': path.resolve(__dirname, '../../packages/@tinadmin/ui-admin/src'),
       '@tinadmin/config': path.resolve(__dirname, '../../packages/@tinadmin/config/src'),
+      '@tinadmin/telnyx-ai-platform': path.resolve(__dirname, '../../packages/@tinadmin/telnyx-ai-platform'),
     };
     
     // Ignore optional dependencies that are loaded dynamically
