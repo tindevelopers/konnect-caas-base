@@ -11,6 +11,13 @@ export async function GET() {
     const productionWsUrl = process.env.WEBSOCKET_URL;
     const authToken = process.env.WEBSOCKET_AUTH_TOKEN;
     
+    console.log("[TELEMETRY] stream-url route called", {
+      timestamp: new Date().toISOString(),
+      hasProductionWsUrl: !!productionWsUrl,
+      hasAuthToken: !!authToken,
+      productionWsUrlPreview: productionWsUrl ? productionWsUrl.substring(0, 50) + '...' : 'none',
+    });
+    
     if (productionWsUrl) {
       // Optionally append shared-token auth if the provided URL doesn't already include it
       // Sanitize URL: trim whitespace/newlines that might come from env vars
@@ -24,10 +31,20 @@ export async function GET() {
           }
           streamUrl = url.toString();
         } catch (error) {
-          console.error("[stream-url] Error parsing productionWsUrl:", error);
+          console.error("[TELEMETRY] stream-url Error parsing productionWsUrl", {
+            timestamp: new Date().toISOString(),
+            error: error instanceof Error ? error.message : String(error),
+          });
           // ignore and use as-is
         }
       }
+      
+      console.log("[TELEMETRY] stream-url returning production URL", {
+        timestamp: new Date().toISOString(),
+        streamUrlPreview: streamUrl.substring(0, 100) + (streamUrl.length > 100 ? '...' : ''),
+        hasToken: streamUrl.includes('token='),
+      });
+      
       return NextResponse.json({
         streamUrl,
         source: "production",
@@ -71,10 +88,23 @@ export async function GET() {
         url.searchParams.set("token", authToken.trim());
         streamUrl = url.toString();
       } catch (error) {
-        console.error("[stream-url] Error parsing wsUrl:", error);
+        console.error("[TELEMETRY] stream-url Error parsing wsUrl", {
+          timestamp: new Date().toISOString(),
+          error: error instanceof Error ? error.message : String(error),
+        });
         // ignore and use as-is
       }
     }
+    
+    console.log("[TELEMETRY] stream-url returning localhost/vercel URL", {
+      timestamp: new Date().toISOString(),
+      streamUrlPreview: streamUrl.substring(0, 100) + (streamUrl.length > 100 ? '...' : ''),
+      host,
+      wsHost,
+      wsPort: wsPort || "default",
+      source: host.includes("localhost") ? "localhost" : "vercel",
+      hasToken: streamUrl.includes('token='),
+    });
     
     return NextResponse.json({
       streamUrl,

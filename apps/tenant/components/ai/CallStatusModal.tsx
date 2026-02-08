@@ -30,20 +30,51 @@ export default function CallStatusModal({
   
   // Generate WebSocket URL with routing identifiers (preserve any existing query params like token)
   const wsUrl = useMemo(() => {
-    if (!streamUrl) return undefined;
+    if (!streamUrl) {
+      console.warn("[TELEMETRY] CallStatusModal - No streamUrl provided", {
+        timestamp: new Date().toISOString(),
+        callControlId,
+        clientId,
+      });
+      return undefined;
+    }
     try {
       // Sanitize URL: trim whitespace/newlines that might come from env vars
       const sanitizedUrl = streamUrl.trim();
       const url = new URL(sanitizedUrl);
       url.searchParams.set("clientId", clientId);
       url.searchParams.set("callControlId", callControlId);
-      return url.toString();
+      const finalUrl = url.toString();
+      
+      console.log("[TELEMETRY] CallStatusModal - WebSocket URL generated", {
+        timestamp: new Date().toISOString(),
+        callControlId,
+        clientId,
+        originalStreamUrl: sanitizedUrl.substring(0, 100) + (sanitizedUrl.length > 100 ? '...' : ''),
+        finalUrl: finalUrl.substring(0, 100) + (finalUrl.length > 100 ? '...' : ''),
+        hasToken: finalUrl.includes('token='),
+      });
+      
+      return finalUrl;
     } catch (error) {
-      console.error("[CallStatusModal] Error parsing streamUrl:", error, streamUrl);
+      console.error("[TELEMETRY] CallStatusModal - Error parsing streamUrl", {
+        timestamp: new Date().toISOString(),
+        error: error instanceof Error ? error.message : String(error),
+        streamUrl: streamUrl.substring(0, 100),
+        callControlId,
+        clientId,
+      });
       // Fallback: manually construct URL if URL constructor fails
       const sanitizedUrl = streamUrl.trim();
       const joiner = sanitizedUrl.includes("?") ? "&" : "?";
-      return `${sanitizedUrl}${joiner}clientId=${encodeURIComponent(clientId)}&callControlId=${encodeURIComponent(callControlId)}`;
+      const fallbackUrl = `${sanitizedUrl}${joiner}clientId=${encodeURIComponent(clientId)}&callControlId=${encodeURIComponent(callControlId)}`;
+      
+      console.log("[TELEMETRY] CallStatusModal - Using fallback URL construction", {
+        timestamp: new Date().toISOString(),
+        fallbackUrl: fallbackUrl.substring(0, 100) + (fallbackUrl.length > 100 ? '...' : ''),
+      });
+      
+      return fallbackUrl;
     }
   }, [streamUrl, clientId, callControlId]);
 
