@@ -132,7 +132,9 @@
       "sswr>svelte": "5.46.4",
       "@ai-sdk/svelte>svelte": "5.46.4",
       "ai>svelte": "5.46.4",
-      "jsondiffpatch": ">=0.7.2"
+      "jsondiffpatch": ">=0.7.2",
+      "glob": ">=10.5.0",
+      "undici": ">=6.23.0"
     }
   }
 }
