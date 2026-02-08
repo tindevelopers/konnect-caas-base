@@ -2,10 +2,10 @@
   "$schema": "https://railway.app/railway.schema.json",
   "build": {
     "builder": "NIXPACKS",
-    "buildCommand": "cd apps/tenant && pnpm install"
+    "buildCommand": "pnpm install --frozen-lockfile"
   },
   "deploy": {
-    "startCommand": "cd apps/tenant && pnpm ws:server",
+    "startCommand": "cd apps/tenant && WEBSOCKET_HOST=0.0.0.0 WEBSOCKET_PORT=$PORT pnpm ws:server",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10,
     "healthcheckPath": "/health",

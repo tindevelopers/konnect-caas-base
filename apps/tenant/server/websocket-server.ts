@@ -14,8 +14,16 @@ import { WebSocketServer, WebSocket } from "ws";
 import { createServer } from "http";
 import { parse } from "url";
 
-const PORT = process.env.WEBSOCKET_PORT ? parseInt(process.env.WEBSOCKET_PORT, 10) : 3012;
+function parsePort(value: string | undefined): number | null {
+  if (!value) return null;
+  const parsed = parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+// Railway provides PORT; we also support WEBSOCKET_PORT for local/dev.
+const PORT = parsePort(process.env.WEBSOCKET_PORT) ?? parsePort(process.env.PORT) ?? 3012;
 const HOST = process.env.WEBSOCKET_HOST || "0.0.0.0";
+const AUTH_TOKEN = process.env.WEBSOCKET_AUTH_TOKEN; // optional shared secret
 
 interface ClientConnection {
   ws: WebSocket;
@@ -36,15 +44,29 @@ const wss = new WebSocketServer({
 wss.on("connection", (ws: WebSocket, req) => {
   const query = parse(req.url || "", true).query;
   const clientId = query.clientId as string;
+  const requestedCallControlId = (query.callControlId as string) || undefined;
+  const token = (query.token as string) || undefined;
   const isTelnyx = !clientId; // Telnyx connections don't have clientId
   
   const connectionId = clientId || `telnyx-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  
+  // Optional shared-secret auth (recommended for production)
+  if (AUTH_TOKEN && token !== AUTH_TOKEN) {
+    console.warn(`[WebSocket] Unauthorized connection rejected: ${connectionId}`);
+    try {
+      ws.close(1008, "Unauthorized");
+    } catch {
+      // ignore
+    }
+    return;
+  }
   
   console.log(`[WebSocket] ${isTelnyx ? 'Telnyx' : 'Client'} connected: ${connectionId}`);
   
   const connection: ClientConnection = { 
     ws, 
     isTelnyx,
+    callControlId: !isTelnyx ? requestedCallControlId : undefined,
   };
   clients.set(connectionId, connection);
 
@@ -54,6 +76,7 @@ wss.on("connection", (ws: WebSocket, req) => {
       event: "connected",
       version: "1.0.0",
       clientId: connectionId,
+      callControlId: requestedCallControlId,
     }));
   }
 
@@ -110,15 +133,14 @@ function handleTelnyxMessage(connectionId: string, message: any) {
       telnyxConnections.set(connection.streamId, connectionId);
     }
     
-    // Broadcast start event to all browser clients (they'll filter by streamId if needed)
-    broadcastToAllClients(message);
+    // Route start event to matching browser clients (fallback to broadcast if unknown)
+    routeToCall(connection.callControlId, message);
   } else if (message.event === "media") {
-    // Relay media to all browser clients
-    // In a production system, you'd route to specific clients based on streamId
-    broadcastToAllClients(message);
+    // Route media to the browser client(s) that started this call (fallback to broadcast)
+    routeToCall(connection.callControlId, message);
   } else if (message.event === "stop") {
     console.log(`[WebSocket] Telnyx stream stopped: ${connectionId}`);
-    broadcastToAllClients(message);
+    routeToCall(connection.callControlId, message);
     
     // Clean up mapping
     if (connection.streamId) {
@@ -126,10 +148,10 @@ function handleTelnyxMessage(connectionId: string, message: any) {
     }
   } else if (message.event === "error") {
     console.error(`[WebSocket] Telnyx error:`, message.payload);
-    broadcastToAllClients(message);
+    routeToCall(connection.callControlId, message);
   } else {
     // Relay other events
-    broadcastToAllClients(message);
+    routeToCall(connection.callControlId, message);
   }
 }
 
@@ -144,6 +166,23 @@ function broadcastToClient(clientId: string, message: any) {
   }
 }
 
+function broadcastToCallControlId(callControlId: string, message: any) {
+  // Route to browser clients subscribed to this callControlId
+  clients.forEach((connection, clientId) => {
+    if (
+      !connection.isTelnyx &&
+      connection.callControlId === callControlId &&
+      connection.ws.readyState === WebSocket.OPEN
+    ) {
+      try {
+        connection.ws.send(JSON.stringify(message));
+      } catch (error) {
+        console.error(`[WebSocket] Error routing to ${clientId}:`, error);
+      }
+    }
+  });
+}
+
 function broadcastToAllClients(message: any) {
   // Broadcast to all browser clients (not Telnyx connections)
   clients.forEach((connection, clientId) => {
@@ -155,6 +194,15 @@ function broadcastToAllClients(message: any) {
       }
     }
   });
+}
+
+function routeToCall(callControlId: string | undefined, message: any) {
+  if (callControlId) {
+    broadcastToCallControlId(callControlId, message);
+    return;
+  }
+  // Backwards-compatibility fallback
+  broadcastToAllClients(message);
 }
 
 // Health check endpoint
