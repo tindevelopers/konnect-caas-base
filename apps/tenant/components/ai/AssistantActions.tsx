@@ -383,13 +383,7 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
                 WebSocket URL for real-time audio streaming. Auto-populated based on your environment.
                 {callForm.streamUrl && callForm.streamUrl.includes("localhost") && (
                   <span className="block mt-1 text-amber-600 dark:text-amber-400">
-                    ⚠️ <strong>Important:</strong> Telnyx cannot connect to localhost.
-                    <br />
-                    <strong>For local development:</strong> Use ngrok (see NGROK_QUICK_START.md)
-                    <br />
-                    <strong>For production:</strong> Set WEBSOCKET_URL environment variable in Vercel
-                    <br />
-                    pointing to a separate WebSocket server (Railway, Render, Fly.io)
+                    ⚠️ Localhost won't work for Telnyx. Set WEBSOCKET_URL in .env.local to use remote server (Railway) for testing.
                   </span>
                 )}
                 {callForm.streamUrl && callForm.streamUrl.includes("ngrok") && (
@@ -398,8 +392,8 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
                   </span>
                 )}
                 {callForm.streamUrl && (callForm.streamUrl.includes("vercel.app") || callForm.streamUrl.includes("railway.app") || callForm.streamUrl.includes("render.com") || callForm.streamUrl.includes("fly.dev")) && !callForm.streamUrl.includes("ngrok") && (
-                  <span className="block mt-1 text-blue-600 dark:text-blue-400">
-                    ℹ️ Using production WebSocket server - Make sure WEBSOCKET_URL is set in Vercel
+                  <span className="block mt-1 text-green-600 dark:text-green-400">
+                    ✅ Using remote WebSocket server (Railway) - Recommended for testing production infrastructure!
                   </span>
                 )}
               </p>
