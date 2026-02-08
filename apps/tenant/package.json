@@ -7,9 +7,9 @@
     "node": "20"
   },
   "scripts": {
-    "dev": "next dev --port 3010 --webpack",
+    "dev": "next dev --port 3015 --webpack",
     "build": "next build --webpack",
-    "start": "next start --port 3010",
+    "start": "next start --port 3015",
     "lint": "next lint",
     "type-check": "tsc --noEmit",
     "ws:server": "tsx server/websocket-server.ts",

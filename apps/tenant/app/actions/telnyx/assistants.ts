@@ -15,7 +15,7 @@ import {
   listAssistantTests,
   createAssistantTest,
   triggerAssistantTestRun,
-} from "@tinadmin/telnyx-ai-platform/server";
+} from "@tinadmin/telnyx-ai-platform";
 import { headers } from "next/headers";
 import { getTelnyxTransport } from "./client";
 import { trackApiCall } from "@/src/core/telemetry";
