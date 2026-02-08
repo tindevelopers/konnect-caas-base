@@ -2,9 +2,31 @@
 
 import { getTelnyxTransport } from "./client";
 import { trackApiCall } from "@/src/core/telemetry";
-import { getTelemetryContext } from "./assistants";
+import { ensureTenantId } from "@/core/multi-tenancy/validation";
+import { createClient } from "@/core/database/server";
 
 const TELNYX_PROVIDER = "telnyx";
+
+async function getTelemetryContext() {
+  let tenantId: string | null = null;
+  let userId: string | null = null;
+  
+  try {
+    tenantId = await ensureTenantId().catch(() => null);
+  } catch {
+    // Ignore
+  }
+  
+  try {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    userId = user?.id || null;
+  } catch {
+    // Ignore
+  }
+  
+  return { tenantId, userId };
+}
 
 /**
  * Get WebRTC credentials for making webcalls
