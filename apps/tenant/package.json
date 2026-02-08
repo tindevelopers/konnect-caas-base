@@ -43,7 +43,7 @@
     "clsx": "^2.1.1",
     "flatpickr": "^4.6.13",
     "next": "^16.1.6",
-    "openai": "^4.0.0",
+    "openai": "^6.18.0",
     "prismjs": "^1.30.0",
     "react": "^19.2.3",
     "react-apexcharts": "^1.7.0",
