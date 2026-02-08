@@ -183,20 +183,51 @@ export default function WebcallModal({
 
     const checkPermission = async () => {
       try {
+        // Try Permissions API first
         if (navigator.permissions && navigator.permissions.query) {
-          const result = await navigator.permissions.query({ name: 'microphone' as PermissionName });
-          setPermissionState(result.state);
-          
-          result.onchange = () => {
+          try {
+            const result = await navigator.permissions.query({ name: 'microphone' as PermissionName });
             setPermissionState(result.state);
-            if (result.state === 'granted') {
-              setPermissionError(null);
-            }
-          };
+            
+            console.log("[TELEMETRY] WebcallModal - Permission state checked", {
+              timestamp: new Date().toISOString(),
+              state: result.state,
+            });
+            
+            result.onchange = () => {
+              setPermissionState(result.state);
+              if (result.state === 'granted') {
+                setPermissionError(null);
+              }
+            };
+          } catch (permErr) {
+            // Permissions API might not support 'microphone' name in some browsers
+            console.warn("[TELEMETRY] WebcallModal - Permission API query failed", {
+              timestamp: new Date().toISOString(),
+              error: permErr instanceof Error ? permErr.message : String(permErr),
+            });
+          }
+        }
+        
+        // Also try a test getUserMedia to see current state (without requesting)
+        // This will fail silently if permission is denied, but won't show a prompt
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          stream.getTracks().forEach(track => track.stop());
+          setPermissionState('granted');
+          setPermissionError(null);
+        } catch (testErr: any) {
+          if (testErr.name === 'NotAllowedError' || testErr.name === 'PermissionDeniedError') {
+            setPermissionState('denied');
+            setPermissionError(
+              "Microphone access is blocked. " +
+              "Please click the lock icon (🔒) in your browser's address bar, " +
+              "find 'Microphone', change it to 'Allow', then refresh this page."
+            );
+          }
         }
       } catch (err) {
-        // Permission API not supported or failed
-        console.warn("[TELEMETRY] WebcallModal - Permission API not available", {
+        console.warn("[TELEMETRY] WebcallModal - Permission check failed", {
           timestamp: new Date().toISOString(),
           error: err instanceof Error ? err.message : String(err),
         });
@@ -240,10 +271,27 @@ export default function WebcallModal({
         throw new Error("getUserMedia is not supported in this browser");
       }
 
+      // Check if permission is already denied
+      if (permissionState === 'denied') {
+        setPermissionError(
+          "Microphone access is permanently blocked. " +
+          "To fix this:\n" +
+          "1. Click the lock icon (🔒) in your browser's address bar\n" +
+          "2. Find 'Microphone' in the permissions list\n" +
+          "3. Change it from 'Block' to 'Allow'\n" +
+          "4. Refresh this page (F5 or Cmd+R)\n" +
+          "5. Click 'Allow Microphone' again"
+        );
+        setIsRequestingPermission(false);
+        return false;
+      }
+
       console.log("[TELEMETRY] WebcallModal - Requesting microphone permission", {
         timestamp: new Date().toISOString(),
+        currentState: permissionState,
       });
 
+      // Request permission - this should trigger browser prompt if not already denied
       const stream = await navigator.mediaDevices.getUserMedia({ 
         audio: {
           echoCancellation: true,
@@ -269,6 +317,7 @@ export default function WebcallModal({
         timestamp: new Date().toISOString(),
         error: mediaError.message || String(mediaError),
         name: mediaError.name,
+        code: mediaError.code,
       });
       
       setIsRequestingPermission(false);
@@ -276,9 +325,17 @@ export default function WebcallModal({
       if (mediaError.name === "NotAllowedError" || mediaError.name === "PermissionDeniedError") {
         setPermissionState('denied');
         setPermissionError(
-          "Microphone permission denied. " +
-          "The browser has blocked microphone access. " +
-          "Please click the lock/info icon in your browser's address bar and allow microphone access, then refresh the page."
+          "❌ Microphone access is blocked by your browser.\n\n" +
+          "🔧 To fix this:\n" +
+          "1. Look for a lock icon (🔒) or info icon (ℹ️) in your browser's address bar\n" +
+          "2. Click it to open site settings\n" +
+          "3. Find 'Microphone' in the permissions list\n" +
+          "4. Change it from 'Block' to 'Allow'\n" +
+          "5. Refresh this page (press F5 or Cmd+R)\n" +
+          "6. Try clicking 'Allow Microphone' again\n\n" +
+          "💡 If you don't see the lock icon, try:\n" +
+          "• Chrome: chrome://settings/content/microphone → Remove localhost from blocked sites\n" +
+          "• Or use an incognito/private window to test"
         );
         return false;
       } else if (mediaError.name === "NotFoundError") {
@@ -467,21 +524,17 @@ export default function WebcallModal({
         {/* Permission Error Display */}
         {permissionError && (
           <div className="mb-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-700 dark:bg-amber-900/20 dark:text-amber-400">
-            <div className="font-medium mb-1">⚠️ Microphone Permission Required</div>
-            <div className="mb-2">{permissionError}</div>
-            <div className="mt-2 text-xs">
-              <strong>How to fix:</strong>
-              <ol className="list-decimal list-inside mt-1 space-y-1">
-                <li>Click the lock/info icon (🔒) in your browser's address bar</li>
-                <li>Find "Microphone" in the permissions list</li>
-                <li>Change it from "Block" to "Allow"</li>
-                <li>Refresh this page (F5 or Cmd+R)</li>
-                <li>Click "Start Call" again</li>
-              </ol>
-            </div>
+            <div className="font-medium mb-2">⚠️ Microphone Permission Required</div>
+            <div className="whitespace-pre-line text-xs mb-3">{permissionError}</div>
             {permissionState === 'denied' && (
-              <div className="mt-2 text-xs italic">
-                Note: The browser has permanently blocked microphone access. You must manually enable it in browser settings.
+              <div className="mt-3 p-2 bg-white dark:bg-gray-800 rounded border border-amber-200 dark:border-amber-800">
+                <div className="text-xs font-medium mb-1">Quick Fix:</div>
+                <div className="text-xs">
+                  <strong>Chrome:</strong> Click the lock icon (🔒) in address bar → Microphone → Allow → Refresh page
+                </div>
+                <div className="text-xs mt-1">
+                  <strong>Or:</strong> Open <code className="bg-gray-100 dark:bg-gray-700 px-1 rounded">chrome://settings/content/microphone</code> → Remove localhost from blocked sites
+                </div>
               </div>
             )}
           </div>
