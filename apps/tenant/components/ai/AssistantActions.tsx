@@ -17,6 +17,7 @@ import {
 import { getWebRTCCredentialsAction } from "@/app/actions/telnyx/webrtc";
 import CallStatusModal from "./CallStatusModal";
 import WebcallModal from "./WebcallModal";
+import WebcallCredentialsModal from "./WebcallCredentialsModal";
 import AudioStreamPlayer from "./AudioStreamPlayer";
 
 interface AssistantActionsProps {
@@ -86,6 +87,7 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
   const [isLoadingWebcallCredentials, setIsLoadingWebcallCredentials] = useState(false);
   const [webcallError, setWebcallError] = useState<string | null>(null);
   const webcallModal = useModal();
+  const webcallCredentialsModal = useModal();
 
   const openCallModal = useCallback(async () => {
     setCallError(null);
@@ -260,16 +262,16 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
     setIsLoadingWebcallCredentials(true);
     setWebcallError(null);
     try {
+      // Try to get credentials from API/env first
       const credentials = await getWebRTCCredentialsAction();
+      
       if (credentials.error) {
-        setWebcallError(credentials.error);
-        setBanner({
-          variant: "error",
-          title: "Webcall setup failed",
-          message: credentials.error,
-        });
+        // If no credentials found, show credentials modal
+        setIsLoadingWebcallCredentials(false);
+        webcallCredentialsModal.openModal();
         return;
       }
+      
       setWebcallCredentials(credentials);
       webcallModal.openModal();
     } catch (error) {
@@ -284,7 +286,44 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
     } finally {
       setIsLoadingWebcallCredentials(false);
     }
-  }, [assistantId, webcallModal]);
+  }, [assistantId, webcallModal, webcallCredentialsModal]);
+
+  const handleWebcallCredentialsSubmit = useCallback(async (manualCredentials: {
+    login: string;
+    password: string;
+  }) => {
+    setIsLoadingWebcallCredentials(true);
+    setWebcallError(null);
+    webcallCredentialsModal.closeModal();
+    
+    try {
+      const credentials = await getWebRTCCredentialsAction(manualCredentials);
+      
+      if (credentials.error) {
+        setWebcallError(credentials.error);
+        setBanner({
+          variant: "error",
+          title: "Webcall setup failed",
+          message: credentials.error,
+        });
+        return;
+      }
+      
+      setWebcallCredentials(credentials);
+      webcallModal.openModal();
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to get WebRTC credentials.";
+      setWebcallError(message);
+      setBanner({
+        variant: "error",
+        title: "Webcall setup failed",
+        message,
+      });
+    } finally {
+      setIsLoadingWebcallCredentials(false);
+    }
+  }, [webcallModal, webcallCredentialsModal]);
 
   return (
     <div className="mt-8 rounded-2xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-900">
@@ -604,6 +643,13 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
           <Alert variant="error" title="Test Call Failed" message={testError} />
         </div>
       )}
+
+      {/* Webcall Credentials Modal */}
+      <WebcallCredentialsModal
+        isOpen={webcallCredentialsModal.isOpen}
+        onClose={webcallCredentialsModal.closeModal}
+        onSubmit={handleWebcallCredentialsSubmit}
+      />
 
       {/* Webcall Modal */}
       <WebcallModal

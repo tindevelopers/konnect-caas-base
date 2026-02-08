@@ -30,9 +30,12 @@ async function getTelemetryContext() {
 
 /**
  * Get WebRTC credentials for making webcalls
- * Returns SIP connection credentials or generates a token
+ * Returns SIP connection credentials from API, environment variables, or manual input
  */
-export async function getWebRTCCredentialsAction(): Promise<{
+export async function getWebRTCCredentialsAction(manualCredentials?: {
+  login?: string;
+  password?: string;
+}): Promise<{
   login?: string;
   password?: string;
   login_token?: string;
@@ -44,11 +47,37 @@ export async function getWebRTCCredentialsAction(): Promise<{
     "getWebRTCCredentials",
     TELNYX_PROVIDER,
     async () => {
+      // Priority 1: Use manually provided credentials
+      if (manualCredentials?.login && manualCredentials?.password) {
+        console.log("[TELEMETRY] getWebRTCCredentials - Using manual credentials", {
+          timestamp: new Date().toISOString(),
+          hasLogin: !!manualCredentials.login,
+        });
+        return {
+          login: manualCredentials.login,
+          password: manualCredentials.password,
+        };
+      }
+
+      // Priority 2: Check environment variables
+      const envLogin = process.env.TELNYX_SIP_USERNAME || process.env.TELNYX_WEBRTC_USERNAME;
+      const envPassword = process.env.TELNYX_SIP_PASSWORD || process.env.TELNYX_WEBRTC_PASSWORD;
+      
+      if (envLogin && envPassword) {
+        console.log("[TELEMETRY] getWebRTCCredentials - Using environment variables", {
+          timestamp: new Date().toISOString(),
+          hasLogin: !!envLogin,
+        });
+        return {
+          login: envLogin,
+          password: envPassword,
+        };
+      }
+
+      // Priority 3: Try to fetch from Telnyx API
       try {
         const transport = await getTelnyxTransport("integrations.read");
 
-        // Try to get SIP connections
-        // Note: This requires appropriate Telnyx API permissions
         try {
           const connectionsResponse = await transport.request("/sip_connections", {
             method: "GET",
@@ -64,7 +93,7 @@ export async function getWebRTCCredentialsAction(): Promise<{
           );
 
           if (activeConnection) {
-            console.log("[TELEMETRY] getWebRTCCredentials - Found SIP connection", {
+            console.log("[TELEMETRY] getWebRTCCredentials - Found SIP connection via API", {
               timestamp: new Date().toISOString(),
               connectionId: activeConnection.id,
             });
@@ -80,24 +109,21 @@ export async function getWebRTCCredentialsAction(): Promise<{
             error: sipError instanceof Error ? sipError.message : String(sipError),
           });
         }
-
-        // Fallback: For webcalls, Telnyx might allow using API key-based auth
-        // Or we can generate a token. For now, return an error asking for SIP connection
-        return {
-          error:
-            "SIP connection not found. Please configure a SIP connection in Telnyx Mission Control for WebRTC webcalls.",
-        };
       } catch (error) {
-        console.error("[TELEMETRY] getWebRTCCredentials - Error", {
+        console.warn("[TELEMETRY] getWebRTCCredentials - API fetch failed", {
           timestamp: new Date().toISOString(),
           error: error instanceof Error ? error.message : String(error),
         });
-
-        if (error instanceof Error) {
-          return { error: error.message };
-        }
-        return { error: "Failed to get WebRTC credentials" };
       }
+
+      // No credentials found
+      return {
+        error:
+            "SIP connection not found. Please configure SIP credentials via:\n" +
+            "1. Environment variables: TELNYX_SIP_USERNAME and TELNYX_SIP_PASSWORD\n" +
+            "2. Or pass credentials manually when starting webcall\n" +
+            "3. Or configure a SIP connection in Telnyx Mission Control",
+      };
     },
     {
       tenantId,
