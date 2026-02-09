@@ -79,7 +79,25 @@ export async function getWebRTCCredentialsAction(manualCredentials?: {
         const transport = await getTelnyxTransport("integrations.read");
 
         try {
-          const connectionsResponse = await transport.request("/sip_connections", {
+          const connectionsResponse = await transport.request<{
+            data?: Array<{
+              id?: string;
+              connection_name?: string;
+              active?: boolean;
+              sip_username?: string;
+              username?: string;
+              password?: string;
+            }> | {
+              data?: Array<{
+                id?: string;
+                connection_name?: string;
+                active?: boolean;
+                sip_username?: string;
+                username?: string;
+                password?: string;
+              }>;
+            };
+          }>("/sip_connections", {
             method: "GET",
           });
 
