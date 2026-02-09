@@ -38,10 +38,12 @@ export default function SystemAdminIntegrationsPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  const categories = useMemo(
-    () => ["All", ...integrationCategories],
-    []
-  );
+  const categories = useMemo(() => {
+    const cats = ["All", ...integrationCategories];
+    console.log("[IntegrationsPage] Categories:", cats);
+    console.log("[IntegrationsPage] integrationCategories:", integrationCategories);
+    return cats;
+  }, []);
 
   const filteredIntegrations = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -224,20 +226,26 @@ export default function SystemAdminIntegrationsPage() {
       </div>
 
       <div className="flex flex-wrap gap-2">
-        {categories.map((item) => (
-          <button
-            key={item}
-            type="button"
-            onClick={() => setCategory(item)}
-            className={`rounded-full px-4 py-1 text-sm font-medium ${
-              category === item
-                ? "bg-brand-500 text-white"
-                : "bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
-            }`}
-          >
-            {item}
-          </button>
-        ))}
+        {categories.length === 0 ? (
+          <div className="text-sm text-gray-500 dark:text-gray-400">
+            No categories available. Categories: {JSON.stringify(integrationCategories)}
+          </div>
+        ) : (
+          categories.map((item) => (
+            <button
+              key={item}
+              type="button"
+              onClick={() => setCategory(item)}
+              className={`rounded-full px-4 py-1 text-sm font-medium ${
+                category === item
+                  ? "bg-brand-500 text-white"
+                  : "bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+              }`}
+            >
+              {item}
+            </button>
+          ))
+        )}
       </div>
 
       {loadError && (

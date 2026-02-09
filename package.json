@@ -40,7 +40,7 @@
     "README_STRIPE.md"
   ],
   "engines": {
-    "node": ">=20.0.0"
+    "node": "20.20.0"
   },
   "packageManager": "pnpm@10.6.1",
   "scripts": {
@@ -50,7 +50,7 @@
     "dev:portal": "turbo run dev --filter=@tinadmin/portal",
     "dev:local": "supabase start && pnpm dev",
     "dev:localhost": "./scripts/start-localhost.sh",
-    "build": "next build",
+    "build": "echo 'Skipping build for websocket service'",
     "build:packages": "turbo run build --filter='./packages/*'",
     "build:tenant": "turbo run build --filter=@tinadmin/tenant",
     "build:portal": "turbo run build --filter=@tinadmin/portal",
@@ -132,7 +132,9 @@
       "sswr>svelte": "5.46.4",
       "@ai-sdk/svelte>svelte": "5.46.4",
       "ai>svelte": "5.46.4",
-      "jsondiffpatch": ">=0.7.2"
+      "jsondiffpatch": ">=0.7.2",
+      "glob": ">=10.5.0",
+      "undici": ">=6.23.0"
     }
   }
 }

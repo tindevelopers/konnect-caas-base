@@ -1,5 +1,15 @@
 import type { NextConfig } from "next";
 
+// Normalize NODE_ENV for Builder.io and other deployment platforms
+// Ensure it's set to a standard value if it's not already
+if (process.env.NODE_ENV && !['development', 'production', 'test'].includes(process.env.NODE_ENV)) {
+  // For Builder.io or other platforms, default to production for builds
+  if (process.env.NODE_ENV !== 'development') {
+    // @types/node may mark env vars as readonly; runtime mutation is still supported.
+    (process.env as any).NODE_ENV = 'production';
+  }
+}
+
 const nextConfig: NextConfig = {
   // Server external packages (moved from experimental in Next.js 16)
   serverExternalPackages: ['openai'],
@@ -77,6 +87,8 @@ const nextConfig: NextConfig = {
       '@tinadmin/core': corePath,
       '@tinadmin/ui-admin': path.resolve(__dirname, '../../packages/@tinadmin/ui-admin/src'),
       '@tinadmin/config': path.resolve(__dirname, '../../packages/@tinadmin/config/src'),
+      // Point to source so subpath imports (e.g. "/server") work without prebuilding dist/
+      '@tinadmin/telnyx-ai-platform': path.resolve(__dirname, '../../packages/@tinadmin/telnyx-ai-platform/src'),
     };
     
     // Ignore optional dependencies that are loaded dynamically
@@ -144,7 +156,7 @@ const nextConfig: NextConfig = {
           },
           {
             key: "Permissions-Policy",
-            value: "camera=(), microphone=(), geolocation=()",
+            value: "camera=(self), microphone=(self), geolocation=()",
           },
         ],
       },

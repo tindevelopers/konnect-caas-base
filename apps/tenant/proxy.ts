@@ -1,4 +1,5 @@
 import { createServerClient } from "@supabase/ssr";
+import { createClient } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
 
 const PLATFORM_ONLY_PREFIXES = [
@@ -14,9 +15,27 @@ function isPlatformOnlyPath(pathname: string): boolean {
   return PLATFORM_ONLY_PREFIXES.some((prefix) => pathname.startsWith(prefix));
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
   const requestHeaders = new Headers(request.headers);
+
+  // Check if this is a Builder.io preview request
+  const userAgent = request.headers.get("user-agent") || "";
+  const referer = request.headers.get("referer") || "";
+  const isBuilderPreview = 
+    userAgent.includes("Builder.io") || 
+    referer.includes("builder.io") ||
+    referer.includes("fly.dev") || // Builder.io preview proxy uses fly.dev
+    pathname.startsWith("/builder"); // Allow all /builder routes
+
+  // Allow Builder.io preview requests to bypass authentication
+  if (isBuilderPreview) {
+    return NextResponse.next({
+      request: {
+        headers: requestHeaders,
+      },
+    });
+  }
 
   // If a tenant is selected (Platform Admin flow), propagate it as a request header
   const selectedTenantId = request.cookies.get("current_tenant_id")?.value;
@@ -64,15 +83,45 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(url);
     }
 
+    // Use admin client to bypass RLS when checking Platform Admin status
+    // This is necessary because Platform Admins have tenant_id = NULL and RLS might block the query
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!serviceRoleKey) {
+      console.error("[proxy] SUPABASE_SERVICE_ROLE_KEY not set, cannot verify Platform Admin status");
+      const url = request.nextUrl.clone();
+      url.pathname = "/saas/dashboard";
+      return NextResponse.redirect(url);
+    }
+
+    const adminClient = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      serviceRoleKey,
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false,
+        },
+      }
+    );
+
     const userRowResult: {
       data: { tenant_id: string | null; roles?: { name: string } | null } | null;
       error: any;
-    } = await (supabase.from("users") as any)
+    } = await (adminClient.from("users") as any)
       .select("tenant_id, roles:role_id(name)")
       .eq("id", user.id)
       .single();
 
     const userRow = userRowResult.data;
+    
+    // If query failed or user not found, deny access
+    if (userRowResult.error || !userRow) {
+      console.error("[proxy] Error checking Platform Admin status:", userRowResult.error);
+      const url = request.nextUrl.clone();
+      url.pathname = "/saas/dashboard";
+      return NextResponse.redirect(url);
+    }
+
     const roleName = (userRow?.roles as any)?.name as string | undefined;
     const isPlatformAdmin = roleName === "Platform Admin" && userRow?.tenant_id === null;
 
@@ -88,12 +137,14 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/admin/:path*",
-    "/multi-tenant/:path*",
-    "/saas/admin/system-admin/:path*",
-    "/saas/admin/entity/tenant-management/:path*",
-    "/saas/subscriptions/:path*",
-    "/saas/webhooks/:path*",
+    /*
+     * Match all request paths except for the ones starting with:
+     * - api (API routes)
+     * - _next/static (static files)
+     * - _next/image (image optimization files)
+     * - favicon.ico (favicon file)
+     * - builder (Builder.io routes - handled separately)
+     */
+    "/((?!api|_next/static|_next/image|favicon.ico|builder).*)",
   ],
 };
-

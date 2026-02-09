@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: websocket-server
+    env: node
+    buildCommand: cd apps/tenant && pnpm install
+    startCommand: cd apps/tenant && pnpm ws:server
+    envVars:
+      - key: WEBSOCKET_PORT
+        value: 3012
+      - key: WEBSOCKET_HOST
+        value: 0.0.0.0
+    healthCheckPath: /health

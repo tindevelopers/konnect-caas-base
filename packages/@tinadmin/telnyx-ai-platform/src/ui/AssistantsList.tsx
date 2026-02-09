@@ -79,8 +79,11 @@ export function AssistantsList({
               )}
               {!isLoading && error && (
                 <tr>
-                  <td className="px-6 py-6 text-red-600" colSpan={5}>
-                    {error}
+                  <td className="px-6 py-6 text-red-600 dark:text-red-400" colSpan={5}>
+                    <div className="space-y-1">
+                      <div className="font-medium">Error loading assistants:</div>
+                      <div className="text-sm">{error}</div>
+                    </div>
                   </td>
                 </tr>
               )}

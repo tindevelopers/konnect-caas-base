@@ -3,11 +3,11 @@ import { NextResponse, type NextRequest } from "next/server";
 import { resolveContext } from "@/core/multi-tenancy/resolver";
 
 /**
- * Portal Middleware
+ * Portal Proxy
  * 
- * Simplified middleware for the consumer portal.
+ * Simplified proxy for the consumer portal.
  */
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const requestHeaders = new Headers(request.headers);
 
   // Resolve tenant/org context from hostname/headers/url (subdomain/header/url-param/session).
@@ -135,4 +135,3 @@ export const config = {
     "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };
-

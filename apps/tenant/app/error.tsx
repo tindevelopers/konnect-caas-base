@@ -48,6 +48,23 @@ export default function Error({
           </p>
         )}
 
+        {process.env.NODE_ENV === "development" && error.message && (
+          <div className="mb-6 rounded-lg border border-red-200 bg-red-50 p-4 dark:border-red-800 dark:bg-red-900/20">
+            <p className="text-sm font-medium text-red-800 dark:text-red-400">Error Message:</p>
+            <p className="mt-1 text-sm text-red-700 dark:text-red-300 font-mono">{error.message}</p>
+            {error.stack && (
+              <details className="mt-2">
+                <summary className="cursor-pointer text-xs text-red-600 dark:text-red-400">
+                  Show Stack Trace
+                </summary>
+                <pre className="mt-2 overflow-auto text-xs text-red-600 dark:text-red-400 whitespace-pre-wrap">
+                  {error.stack}
+                </pre>
+              </details>
+            )}
+          </div>
+        )}
+
         <div className="flex flex-col sm:flex-row gap-4 justify-center">
           <button
             onClick={() => reset()}

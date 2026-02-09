@@ -23,7 +23,16 @@ export function useAssistantsList(api: TelnyxAssistantsApi) {
       const response = await api.listAssistants();
       setData(response.data ?? []);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load assistants");
+      let errorMessage = "Failed to load assistants";
+      if (err instanceof Error) {
+        errorMessage = err.message;
+      } else if (typeof err === 'string') {
+        errorMessage = err;
+      } else if (err && typeof err === 'object' && 'message' in err) {
+        errorMessage = String(err.message);
+      }
+      console.error("[useAssistantsList] Error loading assistants:", err);
+      setError(errorMessage);
     } finally {
       setIsLoading(false);
     }
