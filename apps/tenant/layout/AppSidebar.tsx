@@ -7,39 +7,13 @@ import { useSidebar } from "../context/SidebarContext";
 import { useTenant } from "@/core/multi-tenancy";
 import { useWhiteLabel } from "@/context/WhiteLabelContext";
 import {
-  AiIcon,
-  BoxCubeIcon,
-  CalenderIcon,
-  CallIcon,
-  CartIcon,
-  ChatIcon,
   ChevronDownIcon,
-  GridIcon,
   HorizontaLDots,
-  ListIcon,
-  LockIcon,
-  MailIcon,
-  PageIcon,
-  PieChartIcon,
-  PlugInIcon,
-  ShootingStarIcon,
-  TableIcon,
-  TaskIcon,
-  UserCircleIcon,
 } from "../icons";
 import SidebarWidget from "./SidebarWidget";
+import { getNavigationItems, type NavItem as ConfigNavItem } from "@/config/navigation";
 
-type NavItem = {
-  name: string;
-  icon?: React.ReactNode;
-  path?: string;
-  new?: boolean;
-  pro?: boolean;
-  subItems?: (NavItem | { name: string; path: string; pro?: boolean; new?: boolean })[];
-};
-
-type NavLeaf = { name: string; path: string; pro?: boolean; new?: boolean };
-type NavChild = NavItem | NavLeaf;
+type NavItem = ConfigNavItem;
 
 const PLATFORM_ONLY_PREFIXES = [
   "/admin",
@@ -53,388 +27,7 @@ const PLATFORM_ONLY_PREFIXES = [
 const isPlatformOnlyPath = (path?: string) =>
   !!path && PLATFORM_ONLY_PREFIXES.some((prefix) => path.startsWith(prefix));
 
-const navItems: NavItem[] = [
-  {
-    icon: <GridIcon />,
-    name: "Dashboard",
-    path: "/saas/dashboard",
-  },
-  {
-    name: "CRM",
-    icon: <UserCircleIcon />,
-    new: true,
-    subItems: [
-      { name: "Contacts", path: "/crm/contacts" },
-      { name: "Companies", path: "/crm/companies" },
-      { name: "Deals", path: "/crm/deals" },
-      { name: "Tasks", path: "/crm/tasks" },
-    ],
-  },
-  {
-    icon: <CallIcon />,
-    name: "Support",
-    new: true,
-    subItems: [
-      { name: "Support List", path: "/support-tickets" },
-      { name: "Support Reply", path: "/support-ticket-reply" },
-      { name: "Tickets", path: "/saas/support/tickets" },
-      { name: "Categories", path: "/saas/support/categories" },
-      { name: "Knowledge Base", path: "/saas/support/knowledge-base" },
-      { name: "Settings", path: "/saas/support/settings" },
-    ],
-  },
-  {
-    name: "AI Assistant",
-    icon: <AiIcon />,
-    new: true,
-    subItems: [
-      {
-        name: "AI Assistants",
-        path: "/ai/assistants",
-      },
-      {
-        name: "AI Tests",
-        path: "/ai/tests",
-      },
-      {
-        name: "MCP Servers",
-        path: "/ai/mcp-servers",
-      },
-      {
-        name: "Integration Secrets",
-        path: "/ai/integration-secrets",
-      },
-        {
-          name: "Telemetry",
-          path: "/ai/telemetry",
-        },
-        {
-          name: "Webhook Events",
-          path: "/ai/webhooks",
-        },
-      {
-        name: "Text Generator",
-        path: "/text-generator",
-      },
-      {
-        name: "Image Generator",
-        path: "/image-generator",
-      },
-      {
-        name: "Code Generator",
-        path: "/code-generator",
-      },
-      {
-        name: "Video Generator",
-        path: "/video-generator",
-      },
-    ],
-  },
-  {
-    name: "E-commerce",
-    icon: <CartIcon />,
-    new: true,
-    subItems: [
-      { name: "Products", path: "/products-list" },
-      { name: "Add Product", path: "/add-product" },
-      { name: "Billing", path: "/billing" },
-      { name: "Invoices", path: "/invoices" },
-      { name: "Single Invoice", path: "/single-invoice" },
-      { name: "Create Invoice", path: "/create-invoice" },
-      { name: "Transactions", path: "/transactions" },
-      { name: "Single Transaction", path: "/single-transaction" },
-    ],
-  },
-  {
-    name: "Billing & Plans",
-    icon: <CartIcon />,
-    subItems: [
-      { name: "Billing Dashboard", path: "/saas/billing/dashboard" },
-      { name: "Cancel Subscription", path: "/saas/billing/cancel-subscription" },
-      { name: "Upgrade to Pro", path: "/saas/billing/upgrade-to-pro" },
-      { name: "Update Billing Address", path: "/saas/billing/update-billing-address" },
-      { name: "Add New Card", path: "/saas/billing/add-new-card" },
-      {
-        name: "Invoicing",
-        subItems: [
-          { name: "Invoices", path: "/saas/invoicing/invoices" },
-          { name: "Payment History", path: "/saas/invoicing/payment-history" },
-          { name: "Failed Payments", path: "/saas/invoicing/failed-payments" },
-          { name: "Refunds", path: "/saas/invoicing/refunds" },
-          { name: "Tax Settings", path: "/saas/invoicing/tax-settings" },
-        ],
-      },
-    ],
-  },
-  {
-    name: "Admin",
-    icon: <UserCircleIcon />,
-    subItems: [
-      { name: "User Management", path: "/saas/admin/entity/user-management" },
-      { name: "Tenant Management", path: "/saas/admin/entity/tenant-management" },
-      { name: "Organization Management", path: "/saas/admin/entity/organization-management" },
-      { name: "Role Management", path: "/saas/admin/entity/role-management" },
-      {
-        name: "Email & Notifications",
-        subItems: [
-          { name: "Templates", path: "/saas/email-notifications/templates" },
-          { name: "Settings", path: "/saas/email-notifications/settings" },
-          { name: "Logs", path: "/saas/email-notifications/logs" },
-          { name: "Campaigns", path: "/saas/email-notifications/campaigns" },
-        ],
-      },
-    ],
-  },
-  {
-    name: "System Admin",
-    icon: <LockIcon />,
-    subItems: [
-      { name: "Organization Admins", path: "/saas/admin/system-admin/organization-admins" },
-      { name: "API Configuration", path: "/saas/admin/system-admin/api-configuration" },
-      { name: "Default Integrations", path: "/saas/admin/system-admin/default-integrations" },
-      { name: "Integrations", path: "/saas/admin/system-admin/integrations" },
-      { name: "Multi-Tenant", path: "/multi-tenant", new: true },
-      {
-        name: "Subscriptions",
-        subItems: [
-          { name: "Plans", path: "/saas/subscriptions/plans" },
-          { name: "Features", path: "/saas/subscriptions/features" },
-          { name: "Usage Limits", path: "/saas/subscriptions/usage-limits" },
-          { name: "History", path: "/saas/subscriptions/history" },
-          { name: "Migration", path: "/saas/subscriptions/migration" },
-        ],
-      },
-      {
-        name: "Webhooks",
-        subItems: [
-          { name: "Management", path: "/saas/webhooks/management" },
-          { name: "Events", path: "/saas/webhooks/events" },
-          { name: "Logs", path: "/saas/webhooks/logs" },
-          { name: "Testing", path: "/saas/webhooks/testing" },
-        ],
-      },
-      {
-        name: "White-Label",
-        subItems: [
-          { name: "Branding", path: "/saas/white-label/branding" },
-          { name: "Domain Settings", path: "/saas/white-label/domain-settings" },
-          { name: "Email Customization", path: "/saas/white-label/email-customization" },
-          { name: "Theme Settings", path: "/saas/white-label/theme-settings" },
-          { name: "Custom CSS", path: "/saas/white-label/custom-css" },
-        ],
-      },
-    ],
-  },
-  {
-    name: "SaaS",
-    icon: <ShootingStarIcon />,
-    new: true,
-    subItems: [
-      { name: "Dashboard", path: "/saas/dashboard" },
-      {
-        name: "Usage & Metering",
-        subItems: [
-          { name: "Dashboard", path: "/saas/usage-metering/dashboard" },
-          { name: "Metered Billing", path: "/saas/usage-metering/metered-billing" },
-          { name: "Reports", path: "/saas/usage-metering/reports" },
-          { name: "Alerts", path: "/saas/usage-metering/alerts" },
-          { name: "Rate Limits", path: "/saas/usage-metering/rate-limits" },
-        ],
-      },
-      {
-        name: "Security",
-        subItems: [
-          { name: "Settings", path: "/saas/security/settings" },
-          { name: "SSO Configuration", path: "/saas/security/sso-configuration" },
-          { name: "Session Management", path: "/saas/security/session-management" },
-          { name: "IP Restrictions", path: "/saas/security/ip-restrictions" },
-          { name: "Audit Logs", path: "/saas/security/audit-logs" },
-          { name: "Compliance", path: "/saas/security/compliance" },
-        ],
-      },
-      {
-        name: "Feature Flags",
-        subItems: [
-          { name: "Flags", path: "/saas/feature-flags/flags" },
-          { name: "Environments", path: "/saas/feature-flags/environments" },
-          { name: "Targeting", path: "/saas/feature-flags/targeting" },
-          { name: "History", path: "/saas/feature-flags/history" },
-        ],
-      },
-      {
-        name: "Analytics",
-        subItems: [
-          { name: "Dashboard", path: "/saas/analytics/dashboard" },
-          { name: "Custom Reports", path: "/saas/analytics/custom-reports" },
-          { name: "Events", path: "/saas/analytics/events" },
-          { name: "Exports", path: "/saas/analytics/exports" },
-        ],
-      },
-      {
-        name: "Integrations",
-        subItems: [
-          { name: "All Integrations", path: "/saas/integrations/list" },
-          { name: "CRM", path: "/saas/integrations/crm" },
-          { name: "Email Marketing", path: "/saas/integrations/email-marketing" },
-          { name: "Telephony", path: "/saas/integrations/telephony" },
-          { name: "Payments", path: "/saas/integrations/payments" },
-          { name: "Analytics", path: "/saas/integrations/analytics" },
-          { name: "Accounting", path: "/saas/integrations/accounting" },
-          { name: "E-commerce", path: "/saas/integrations/ecommerce" },
-          { name: "Social Media", path: "/saas/integrations/social-media" },
-          { name: "Customer Support", path: "/saas/integrations/customer-support" },
-          { name: "API Connections", path: "/saas/integrations/api-connections" },
-          { name: "OAuth Apps", path: "/saas/integrations/oauth-apps" },
-          { name: "Settings", path: "/saas/integrations/settings" },
-        ],
-      },
-      {
-        name: "Data Management",
-        subItems: [
-          { name: "Export Jobs", path: "/saas/data-management/export-jobs" },
-          { name: "Import Templates", path: "/saas/data-management/import-templates" },
-          { name: "Data Mapping", path: "/saas/data-management/data-mapping" },
-          { name: "History", path: "/saas/data-management/history" },
-        ],
-      },
-      {
-        name: "Custom Report Builder",
-        subItems: [
-          { name: "Builder", path: "/saas/custom-report-builder/builder" },
-          { name: "Saved Reports", path: "/saas/custom-report-builder/saved-reports" },
-          { name: "Templates", path: "/saas/custom-report-builder/templates" },
-          { name: "Data Sources", path: "/saas/custom-report-builder/data-sources" },
-          { name: "Sharing", path: "/saas/custom-report-builder/sharing" },
-        ],
-      },
-    ],
-  },
-  {
-    icon: <CalenderIcon />,
-    name: "Calendar",
-    path: "/calendar",
-  },
-  {
-    icon: <UserCircleIcon />,
-    name: "User Profile",
-    subItems: [
-      { name: "Edit Profile", path: "/profile?tab=profile" },
-      { name: "Account Settings", path: "/profile?tab=account" },
-      { name: "Change Password", path: "/profile?tab=password" },
-    ],
-  },
-  {
-    name: "Task",
-    icon: <TaskIcon />,
-    subItems: [
-      { name: "List", path: "/task-list", pro: false },
-      { name: "Kanban", path: "/task-kanban", pro: false },
-    ],
-  },
-  {
-    name: "Forms",
-    icon: <ListIcon />,
-    subItems: [
-      { name: "Form Elements", path: "/form-elements", pro: false },
-      { name: "Form Layout", path: "/form-layout", pro: false },
-    ],
-  },
-  {
-    name: "Tables",
-    icon: <TableIcon />,
-    subItems: [
-      { name: "Basic Tables", path: "/basic-tables", pro: false },
-      { name: "Data Tables", path: "/data-tables", pro: false },
-    ],
-  },
-  {
-    name: "Pages",
-    icon: <PageIcon />,
-    subItems: [
-      { name: "File Manager", path: "/file-manager" },
-      { name: "Pricing Tables", path: "/pricing-tables" },
-      { name: "FAQ", path: "/faq" },
-      { name: "API Keys", path: "/api-keys", new: true },
-      { name: "Integrations", path: "/integrations", new: true },
-      { name: "Blank Page", path: "/blank" },
-      { name: "404 Error", path: "/error-404" },
-      { name: "500 Error", path: "/error-500" },
-      { name: "503 Error", path: "/error-503" },
-      { name: "Coming Soon", path: "/coming-soon" },
-      { name: "Maintenance", path: "/maintenance" },
-      { name: "Success", path: "/success" },
-    ],
-  },
-];
-
-const othersItems: NavItem[] = [
-  {
-    icon: <PieChartIcon />,
-    name: "Charts",
-    subItems: [
-      { name: "Line Chart", path: "/line-chart", pro: false },
-      { name: "Bar Chart", path: "/bar-chart", pro: false },
-      { name: "Pie Chart", path: "/pie-chart", pro: false },
-    ],
-  },
-  {
-    icon: <BoxCubeIcon />,
-    name: "UI Elements",
-    subItems: [
-      { name: "Alerts", path: "/alerts" },
-      { name: "Avatar", path: "/avatars" },
-      { name: "Badge", path: "/badge" },
-      { name: "Breadcrumb", path: "/breadcrumb" },
-      { name: "Buttons", path: "/buttons" },
-      { name: "Buttons Group", path: "/buttons-group" },
-      { name: "Cards", path: "/cards" },
-      { name: "Carousel", path: "/carousel" },
-      { name: "Dropdowns", path: "/dropdowns" },
-      { name: "Images", path: "/images" },
-      { name: "Links", path: "/links" },
-      { name: "List", path: "/list" },
-      { name: "Modals", path: "/modals" },
-      { name: "Notification", path: "/notifications" },
-      { name: "Pagination", path: "/pagination" },
-      { name: "Popovers", path: "/popovers" },
-      { name: "Progressbar", path: "/progress-bar" },
-      { name: "Ribbons", path: "/ribbons" },
-      { name: "Spinners", path: "/spinners" },
-      { name: "Tabs", path: "/tabs" },
-      { name: "Tooltips", path: "/tooltips" },
-      { name: "Videos", path: "/videos" },
-    ],
-  },
-  {
-    icon: <PlugInIcon />,
-    name: "Authentication",
-    subItems: [
-      { name: "Sign In", path: "/signin", pro: false },
-      { name: "Sign Up", path: "/signup", pro: false },
-      { name: "Reset Password", path: "/reset-password" },
-      {
-        name: "Two Step Verification",
-        path: "/two-step-verification",
-      },
-    ],
-  },
-];
-
-const supportItems: NavItem[] = [
-  {
-    icon: <ChatIcon />,
-    name: "Chat",
-    path: "/chat",
-  },
-  {
-    icon: <MailIcon />,
-    name: "Email",
-    subItems: [
-      { name: "Inbox", path: "/inbox" },
-      { name: "Details", path: "/inbox-details" },
-    ],
-  },
-];
+const navigation = getNavigationItems();
 
 const AppSidebar: React.FC = () => {
   const { isExpanded, isMobileOpen, isHovered, setIsHovered } = useSidebar();
@@ -479,31 +72,28 @@ const AppSidebar: React.FC = () => {
 
   const filteredNavItems = useMemo(() => {
     console.log("[AppSidebar] Filtering nav items, isPlatformAdmin:", isPlatformAdmin);
-    const filterChildren = (items: NavChild[]): NavChild[] =>
+    const filterChildren = (items: NavItem[]): NavItem[] =>
       items
         .map((item) => {
-          const hasSubItems = (item as NavItem).subItems !== undefined;
-          if (hasSubItems) {
-            const navItem = item as NavItem;
-            if (!isPlatformAdmin && isPlatformOnlyPath(navItem.path)) {
-              console.log("[AppSidebar] Filtering out nav item (not Platform Admin):", navItem.name, navItem.path);
+          if (item.subItems) {
+            if (!isPlatformAdmin && isPlatformOnlyPath(item.path)) {
+              console.log("[AppSidebar] Filtering out nav item (not Platform Admin):", item.name, item.path);
               return null;
             }
-            const filtered = filterChildren(navItem.subItems ?? []);
-            if (!navItem.path && filtered.length === 0) {
+            const filtered = filterChildren(item.subItems ?? []);
+            if (!item.path && filtered.length === 0) {
               return null;
             }
-            return { ...navItem, subItems: filtered };
+            return { ...item, subItems: filtered };
           }
 
-          const leaf = item as NavLeaf;
-          if (!isPlatformAdmin && isPlatformOnlyPath(leaf.path)) {
-            console.log("[AppSidebar] Filtering out leaf item (not Platform Admin):", leaf.name, leaf.path);
+          if (!isPlatformAdmin && isPlatformOnlyPath(item.path)) {
+            console.log("[AppSidebar] Filtering out leaf item (not Platform Admin):", item.name, item.path);
             return null;
           }
-          return leaf;
+          return item;
         })
-        .filter(Boolean) as NavChild[];
+        .filter(Boolean) as NavItem[];
 
     const filterRoot = (items: NavItem[]) =>
       items
@@ -523,9 +113,9 @@ const AppSidebar: React.FC = () => {
         .filter(Boolean) as NavItem[];
 
     return {
-      main: filterRoot(navItems),
-      support: filterRoot(supportItems),
-      others: filterRoot(othersItems),
+      main: filterRoot(navigation.main),
+      support: filterRoot(navigation.support),
+      others: filterRoot(navigation.others),
     };
   }, [isPlatformAdmin]);
 
@@ -630,7 +220,7 @@ const AppSidebar: React.FC = () => {
               <ul className="mt-2 space-y-1 ml-9" role="menu">
                 {nav.subItems.map((subItem, subIndex) => {
                   // Check if subItem is a nested menu (has subItems) or a regular link
-                  const isNestedMenu = 'subItems' in subItem && subItem.subItems && !('path' in subItem);
+                  const isNestedMenu = Boolean(subItem.subItems && !subItem.path);
                   const isNestedOpen = openSubmenu?.type === menuType && 
                     openSubmenu?.index === index && 
                     openSubmenu?.subIndex === subIndex;
@@ -652,7 +242,7 @@ const AppSidebar: React.FC = () => {
                         {isNestedOpen && (
                           <ul className="mt-1 ml-4 space-y-1" role="menu">
                             {subItem.subItems?.map((nestedItem) => {
-                              if ('path' in nestedItem && nestedItem.path) {
+                              if (nestedItem.path) {
                                 return (
                                   <li key={nestedItem.name} role="none">
                                     <Link
@@ -678,7 +268,7 @@ const AppSidebar: React.FC = () => {
                   }
 
                   // Regular submenu item with path
-                  if ('path' in subItem && subItem.path) {
+                  if (subItem.path) {
                     return (
                       <li key={subItem.name} role="none">
                         <Link
@@ -750,19 +340,14 @@ const AppSidebar: React.FC = () => {
     
     // Use a labeled loop to break out of nested loops
     outerLoop: for (const menuType of ["main", "support", "others"] as const) {
-      const items =
-        menuType === "main"
-          ? navItems
-          : menuType === "support"
-          ? supportItems
-          : othersItems;
+      const items = filteredNavItems[menuType];
       for (let index = 0; index < items.length; index++) {
         const nav = items[index];
         if (nav.subItems) {
           for (let subIndex = 0; subIndex < nav.subItems.length; subIndex++) {
             const subItem = nav.subItems[subIndex];
             // Check if subItem has nested subItems
-            if ('subItems' in subItem && subItem.subItems) {
+            if (subItem.subItems && !subItem.path) {
               for (const nestedItem of subItem.subItems) {
                 if (nestedItem.path && isActive(nestedItem.path)) {
                   setOpenSubmenu({
@@ -791,7 +376,7 @@ const AppSidebar: React.FC = () => {
     if (!submenuMatched) {
       setOpenSubmenu(null);
     }
-  }, [pathname, isActive]);
+  }, [pathname, isActive, filteredNavItems]);
 
   useEffect(() => {
     // Set the height of the submenu items when the submenu is opened

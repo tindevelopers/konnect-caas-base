@@ -11,6 +11,7 @@ import React from "react";
 import {
   AiIcon,
   BoxCubeIcon,
+  BoltIcon,
   CalenderIcon,
   CallIcon,
   CartIcon,
@@ -53,6 +54,30 @@ export const mainNavItems: NavItem[] = [
     path: "/saas/dashboard",
   },
   {
+    name: "CRM",
+    icon: createIcon(UserCircleIcon),
+    new: true,
+    subItems: [
+      { name: "Contacts", path: "/crm/contacts" },
+      { name: "Companies", path: "/crm/companies" },
+      { name: "Deals", path: "/crm/deals" },
+      { name: "Tasks", path: "/crm/tasks" },
+    ],
+  },
+  {
+    icon: createIcon(CallIcon),
+    name: "Support",
+    new: true,
+    subItems: [
+      { name: "Support List", path: "/support-tickets" },
+      { name: "Support Reply", path: "/support-ticket-reply" },
+      { name: "Tickets", path: "/saas/support/tickets" },
+      { name: "Categories", path: "/saas/support/categories" },
+      { name: "Knowledge Base", path: "/saas/support/knowledge-base" },
+      { name: "Settings", path: "/saas/support/settings" },
+    ],
+  },
+  {
     name: "AI Assistant",
     icon: createIcon(AiIcon),
     new: true,
@@ -73,14 +98,14 @@ export const mainNavItems: NavItem[] = [
         name: "Integration Secrets",
         path: "/ai/integration-secrets",
       },
-        {
-          name: "Telemetry",
-          path: "/ai/telemetry",
-        },
-        {
-          name: "Webhook Events",
-          path: "/ai/webhooks",
-        },
+      {
+        name: "Telemetry",
+        path: "/ai/telemetry",
+      },
+      {
+        name: "Webhook Events",
+        path: "/ai/webhooks",
+      },
       {
         name: "Text Generator",
         path: "/text-generator",
@@ -96,6 +121,63 @@ export const mainNavItems: NavItem[] = [
       {
         name: "Video Generator",
         path: "/video-generator",
+      },
+    ],
+  },
+  {
+    name: "Campaigns",
+    icon: createIcon(ShootingStarIcon),
+    new: true,
+    subItems: [
+      { name: "All Campaigns", path: "/campaigns" },
+      { name: "New Campaign", path: "/campaigns/new" },
+    ],
+  },
+  {
+    name: "Integrations",
+    icon: createIcon(PlugInIcon),
+    subItems: [
+      { name: "Telephony (Telnyx)", path: "/saas/integrations/telephony" },
+      { name: "All Integrations", path: "/saas/integrations/list" },
+      { name: "CRM", path: "/saas/integrations/crm" },
+    ],
+  },
+  {
+    name: "Real-Time Communications",
+    icon: createIcon(BoltIcon),
+    // Stubs for now; pages will be placeholders until we wire real functionality.
+    subItems: [
+      {
+        name: "Messaging",
+        subItems: [
+          { name: "Programmable Messaging", path: "/rtc/messaging/programmable-messaging" },
+          { name: "Compliance", path: "/rtc/messaging/compliance" },
+          { name: "Settings", path: "/rtc/messaging/settings" },
+          { name: "Debug", path: "/rtc/messaging/debug" },
+          { name: "Reports", path: "/rtc/messaging/reports" },
+        ],
+      },
+      {
+        name: "Voice",
+        subItems: [
+          { name: "Programmable Voice", path: "/rtc/voice/programmable-voice" },
+          { name: "SIP Trunking", path: "/rtc/voice/sip-trunking" },
+          { name: "Microsoft Teams", path: "/rtc/voice/microsoft-teams" },
+          { name: "Settings", path: "/rtc/voice/settings" },
+          { name: "External Voice Integrations", path: "/rtc/voice/external-voice-integrations" },
+          { name: "Debug", path: "/rtc/voice/debug" },
+          { name: "Reports", path: "/rtc/voice/reports" },
+        ],
+      },
+      {
+        name: "Numbers",
+        subItems: [
+          { name: "Buy Numbers", path: "/rtc/numbers/buy-numbers" },
+          { name: "Manage Numbers", path: "/rtc/numbers/manage-numbers" },
+          { name: "Port Numbers", path: "/rtc/numbers/port-numbers" },
+          { name: "Compliance", path: "/rtc/numbers/compliance" },
+          { name: "Reports", path: "/rtc/numbers/reports" },
+        ],
       },
     ],
   },
@@ -143,6 +225,15 @@ export const mainNavItems: NavItem[] = [
       { name: "Tenant Management", path: "/saas/admin/entity/tenant-management" },
       { name: "Organization Management", path: "/saas/admin/entity/organization-management" },
       { name: "Role Management", path: "/saas/admin/entity/role-management" },
+      {
+        name: "Email & Notifications",
+        subItems: [
+          { name: "Templates", path: "/saas/email-notifications/templates" },
+          { name: "Settings", path: "/saas/email-notifications/settings" },
+          { name: "Logs", path: "/saas/email-notifications/logs" },
+          { name: "Campaigns", path: "/saas/email-notifications/campaigns" },
+        ],
+      },
     ],
   },
   {
@@ -344,19 +435,6 @@ export const supportNavItems: NavItem[] = [
     icon: createIcon(ChatIcon),
     name: "Chat",
     path: "/chat",
-  },
-  {
-    icon: createIcon(CallIcon),
-    name: "Support",
-    new: true,
-    subItems: [
-      { name: "Support List", path: "/support-tickets" },
-      { name: "Support Reply", path: "/support-ticket-reply" },
-      { name: "Tickets", path: "/saas/support/tickets" },
-      { name: "Categories", path: "/saas/support/categories" },
-      { name: "Knowledge Base", path: "/saas/support/knowledge-base" },
-      { name: "Settings", path: "/saas/support/settings" },
-    ],
   },
   {
     icon: createIcon(MailIcon),
