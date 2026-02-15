@@ -4,6 +4,7 @@ import { TelnyxApiError } from "@tinadmin/telnyx-ai-platform/server";
 import { trackApiCall } from "@/src/core/telemetry";
 import { ensureTenantId } from "@/core/multi-tenancy/validation";
 import { createClient } from "@/core/database/server";
+import { createAdminClient } from "@/core/database/admin-client";
 import { getTelnyxTransport } from "./client";
 import { OMIT_FEATURES_FOR_COUNTRIES } from "@/src/core/telnyx/country-constraints";
 
@@ -342,7 +343,48 @@ export async function listAvailableLocalitiesAction(args: {
   }
 }
 
-// Search-based locality suggestions (when inventory_coverage doesn't have the city)
+// Database-backed locality prefix search (chi -> Chicago, etc.)
+export async function searchLocalitiesFromDbAction(args: {
+  countryCode: string;
+  localityQuery: string;
+  phoneNumberType?: string;
+}): Promise<{ ok: true; localities: string[] } | { ok: false; error: string }> {
+  const q = args.localityQuery?.trim();
+  if (!q || q.length < 2) return { ok: true, localities: [] };
+
+  try {
+    // Use admin client: telnyx_localities is platform-wide reference data, no tenant/session required
+    const supabase = createAdminClient();
+    const countryCode = args.countryCode.trim().toUpperCase();
+    const phoneNumberType = args.phoneNumberType?.trim() || "local";
+    const prefix = q.replace(/%/g, "\\%").replace(/_/g, "\\_");
+
+    // Try requested type first; fall back to "local" for types we may not have (mobile, national)
+    const typesToTry = [phoneNumberType];
+    if (!["local", "toll_free"].includes(phoneNumberType)) {
+      typesToTry.push("local");
+    }
+
+    const { data, error } = await supabase
+      .from("telnyx_localities")
+      .select("locality")
+      .eq("country_code", countryCode)
+      .eq("source", "telnyx")
+      .in("phone_number_type", typesToTry)
+      .ilike("locality", `${prefix}%`)
+      .order("locality")
+      .limit(25);
+
+    if (error) return { ok: false, error: error.message };
+
+    const localities = [...new Set((data ?? []).map((r) => r.locality).filter(Boolean))];
+    return { ok: true, localities };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Unknown error" };
+  }
+}
+
+// Search-based locality suggestions (fallback when DB has no match - uses Telnyx exact search)
 export async function searchLocalitySuggestionsAction(args: {
   countryCode: string;
   localityQuery: string;

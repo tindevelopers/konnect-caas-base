@@ -28,17 +28,17 @@ import {
   createNumberReservationAction,
   extendNumberReservationAction,
   listAvailableAreaCodesAction,
-  listAvailableLocalitiesAction,
   listCountryCoverageAction,
   listRequirementGroupsAction,
   searchAvailablePhoneNumbersAction,
-  searchLocalitySuggestionsAction,
+  searchLocalitiesFromDbAction,
   type PhoneNumberPattern,
   type TelnyxAvailablePhoneNumber,
   type TelnyxNumberOrder,
   type TelnyxNumberReservation,
 } from "@/app/actions/telnyx/numbers";
 import { OMIT_FEATURES_FOR_COUNTRIES } from "@/src/core/telnyx/country-constraints";
+import { ACTIVE_SUPPLIERS, COMING_SOON_SUPPLIERS } from "@/src/core/numbers/suppliers";
 
 const TELNYX_FEATURES = [
   "sms",
@@ -67,18 +67,27 @@ function formatPrice(value?: string, currency = "USD") {
   return `${symbol}${Number(value).toFixed(2)}`;
 }
 
+/** Format location like Telnyx portal: "CHICAGO ZONE 11, CHICAGO, IL, US" */
 function formatLocation(regionInfo?: Array<{ region_type: string; region_name: string }>) {
   if (!regionInfo?.length) return "-";
-  const locality = regionInfo.find((x) => x.region_type === "locality")?.region_name;
-  const location = regionInfo.find((x) => x.region_type === "location")?.region_name;
-  const rateCenter = regionInfo.find((x) => x.region_type === "rate_center")?.region_name;
-  const state = regionInfo.find((x) => x.region_type === "state")?.region_name;
-  const countryCode = regionInfo.find((x) => x.region_type === "country_code")?.region_name;
-  const city = locality || location || rateCenter || state;
-  if (city && countryCode) return `${city.toUpperCase()}, ${countryCode}`;
-  if (city) return city.toUpperCase();
-  if (countryCode) return countryCode;
-  return "-";
+  const get = (type: string) =>
+    regionInfo.find((x) => (x.region_type ?? "").toLowerCase() === type.toLowerCase())?.region_name?.trim();
+  const rateCenter = get("rate_center");
+  const location = get("location");
+  const locality = get("locality");
+  const state = get("state");
+  const countryCode = get("country_code");
+
+  // Build Telnyx-style: ZONE/Rate Center, City, State, Country (omit duplicates)
+  const parts: string[] = [];
+  const seen = new Set<string>();
+  for (const val of [rateCenter, location, locality, state, countryCode]) {
+    if (val && !seen.has(val.toUpperCase())) {
+      seen.add(val.toUpperCase());
+      parts.push(val.toUpperCase());
+    }
+  }
+  return parts.length ? parts.join(", ") : "-";
 }
 
 // Telnyx-style feature icons (outline, light grey)
@@ -171,9 +180,7 @@ export default function BuyNumbersPage() {
     }
   }, [areaCodes, nationalDestinationCode]);
 
-  const [localities, setLocalities] = useState<string[]>([]);
-  const [localitiesLoading, setLocalitiesLoading] = useState(false);
-  const [localitySearchSuggestions, setLocalitySearchSuggestions] = useState<string[]>([]);
+  const [localitySuggestions, setLocalitySuggestions] = useState<string[]>([]);
   const [localitySearchLoading, setLocalitySearchLoading] = useState(false);
   const [localityDropdownOpen, setLocalityDropdownOpen] = useState(false);
   const localityInputRef = useRef<HTMLInputElement>(null);
@@ -181,27 +188,9 @@ export default function BuyNumbersPage() {
   const localitySearchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (!countryCode.trim()) {
-      setLocalities([]);
-      return;
-    }
-    setLocalitiesLoading(true);
-    setLocalities([]);
-    listAvailableLocalitiesAction({
-      countryCode: countryCode.trim().toUpperCase(),
-      phoneNumberType: phoneNumberType.trim() || undefined,
-    }).then((res) => {
-      if (res.ok) {
-        setLocalities(res.localities);
-      }
-      setLocalitiesLoading(false);
-    });
-  }, [countryCode, phoneNumberType]);
-
-  useEffect(() => {
     const q = locality.trim();
     if (q.length < 2 || !countryCode.trim()) {
-      setLocalitySearchSuggestions([]);
+      setLocalitySuggestions([]);
       setLocalitySearchLoading(false);
       return;
     }
@@ -210,13 +199,16 @@ export default function BuyNumbersPage() {
     }
     localitySearchTimeoutRef.current = setTimeout(() => {
       setLocalitySearchLoading(true);
-      searchLocalitySuggestionsAction({
+      searchLocalitiesFromDbAction({
         countryCode: countryCode.trim().toUpperCase(),
         localityQuery: q,
-        phoneNumberType: phoneNumberType.trim() || undefined,
+        phoneNumberType: phoneNumberType.trim() || "local",
       }).then((res) => {
-        if (res.ok) setLocalitySearchSuggestions(res.localities);
-        else setLocalitySearchSuggestions([]);
+        if (res.ok) {
+          setLocalitySuggestions(res.localities.map((city) => `${city} (${countryCode})`));
+        } else {
+          setLocalitySuggestions([]);
+        }
         setLocalitySearchLoading(false);
       });
     }, 150);
@@ -224,49 +216,6 @@ export default function BuyNumbersPage() {
       if (localitySearchTimeoutRef.current) clearTimeout(localitySearchTimeoutRef.current);
     };
   }, [locality, countryCode, phoneNumberType]);
-
-  const localitySuggestions = useMemo(() => {
-    const q = locality.trim().toLowerCase();
-    if (!q) return [];
-    const countryName = countries.find((c) => c.code === countryCode)?.name ?? countryCode;
-    const format = (city: string) => `${city} (${countryName})`;
-
-    const matches = (city: string) => city.toLowerCase().startsWith(q);
-
-    const seen = new Set<string>();
-    const add = (city: string) => {
-      if (matches(city) && !seen.has(city.toLowerCase())) {
-        seen.add(city.toLowerCase());
-        return true;
-      }
-      return false;
-    };
-
-    const fromInventory = localities.filter((c) => add(c));
-    const fromSearch = localitySearchSuggestions.filter((c) => add(c));
-
-    const baseCityFromZone = (s: string) => s.replace(/\s+ZONE\s+\d+$/i, "").replace(/\s+-\s+.*$/, "").trim();
-    const all = [...fromInventory, ...fromSearch];
-    const withBase = new Set<string>(all);
-    for (const city of all) {
-      const base = baseCityFromZone(city);
-      if (base && base !== city && base.toLowerCase().startsWith(q)) {
-        withBase.add(base);
-      }
-    }
-
-    const sorted = Array.from(withBase).sort((a, b) => {
-      const aLower = a.toLowerCase();
-      const bLower = b.toLowerCase();
-      const aBase = baseCityFromZone(a);
-      const bBase = baseCityFromZone(b);
-      if (aBase === a && bBase !== b) return -1;
-      if (aBase !== a && bBase === b) return 1;
-      return aLower.localeCompare(bLower, undefined, { sensitivity: "base" });
-    });
-
-    return sorted.slice(0, 20).map(format);
-  }, [locality, localities, localitySearchSuggestions, countryCode, countries]);
 
   const handleLocalitySelect = useCallback((display: string) => {
     const match = display.match(/^(.+?)\s*\(/);
@@ -585,7 +534,25 @@ export default function BuyNumbersPage() {
       <div className="relative">
         <section className="min-w-0 space-y-6">
           <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white/90">Search</h2>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white/90">Search</h2>
+              <div className="flex items-center gap-2 text-sm">
+                <span className="text-gray-500 dark:text-gray-400">Inventory from:</span>
+                {ACTIVE_SUPPLIERS.map((s) => (
+                  <span
+                    key={s.id}
+                    className="rounded-md bg-green-50 px-2 py-0.5 font-medium text-green-700 dark:bg-green-900/30 dark:text-green-400"
+                  >
+                    {s.name}
+                  </span>
+                ))}
+                {COMING_SOON_SUPPLIERS.length > 0 && (
+                  <span className="rounded-md border border-dashed border-gray-300 px-2 py-0.5 text-gray-500 dark:border-gray-600 dark:text-gray-400">
+                    {COMING_SOON_SUPPLIERS.map((s) => s.name).join(", ")} — Coming soon
+                  </span>
+                )}
+              </div>
+            </div>
 
             <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
               <div>
@@ -648,7 +615,7 @@ export default function BuyNumbersPage() {
                 <div className="flex gap-2" ref={localityInputRef}>
                   <Input
                     id="locality"
-                    placeholder="e.g. chi → Chicago, mia → Miami"
+                    placeholder="Cities with Telnyx inventory only (e.g. Chino, Abilene)"
                     value={locality}
                     onChange={(e) => {
                       setLocality(e.target.value);
@@ -663,7 +630,7 @@ export default function BuyNumbersPage() {
                     ref={localityDropdownRef}
                     className="absolute top-full left-0 z-20 mt-1 max-h-60 w-full min-w-[200px] overflow-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900"
                   >
-                    {localitySearchLoading || localitiesLoading ? (
+                    {localitySearchLoading ? (
                       <div className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
                         Loading cities…
                       </div>
@@ -880,7 +847,9 @@ export default function BuyNumbersPage() {
                           <td className="py-3 pr-4">
                             <span className="font-medium">{r.phone_number}</span>
                           </td>
-                          <td className="py-3 pr-4 font-medium">{location}</td>
+                          <td className="py-3 pr-4 min-w-[180px] font-medium" title={location}>
+                            {location}
+                          </td>
                           <td className="py-3 pr-4">
                             <span className="inline-flex items-center gap-1.5">
                               <LineTypeIcon type={phoneNumberType || "local"} className="h-4 w-4 text-gray-500" />
