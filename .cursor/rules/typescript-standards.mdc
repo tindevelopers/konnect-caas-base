@@ -1,0 +1,45 @@
+---
+description: TypeScript coding standards
+globs: "**/*.ts,**/*.tsx"
+alwaysApply: false
+---
+
+# TypeScript Standards
+
+## Strict Mode
+
+TypeScript strict mode is enabled. Follow these rules:
+
+- No `any` — use `unknown` and narrow with type guards
+- Always type function parameters and return types for exported functions
+- Use `import type` for type-only imports
+
+## Error Handling
+
+```typescript
+// ❌ BAD — swallowing errors
+try { await fetchData(); } catch (e) {}
+
+// ✅ GOOD — log and rethrow or handle
+try {
+  await fetchData();
+} catch (error) {
+  console.error('Failed to fetch data:', error);
+  throw error;
+}
+```
+
+## Path Aliases
+
+```typescript
+// Use path aliases (configured in tsconfig.json)
+import { something } from '@/core/domain';        // → ./src/core/domain
+import { Component } from '@/components/ui/Button'; // → ./components/ui/Button
+import { util } from '@tinadmin/core';              // → workspace package
+```
+
+## Async/Await
+
+- Prefer `async/await` over `.then()` chains
+- Always handle promise rejections
+- Use `Promise.all()` for independent concurrent operations

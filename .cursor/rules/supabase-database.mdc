@@ -1,0 +1,49 @@
+---
+description: Supabase and database conventions
+globs: "supabase/**/*.sql,apps/tenant/app/actions/**/*.ts"
+alwaysApply: false
+---
+
+# Supabase & Database Conventions
+
+## Client Usage
+
+```typescript
+// Regular client — respects RLS (use for tenant-scoped queries)
+import { createClient } from '@/core/database/server';
+
+// Admin client — bypasses RLS (use for cross-tenant or system operations)
+import { createAdminClient } from '@/core/database/admin-client';
+```
+
+## Multi-Tenancy Rules
+
+- **Every table** must have a `tenant_id` column (except system tables)
+- **Every query** must be scoped by `tenant_id` (RLS enforces this)
+- **RLS policies** are mandatory on all tenant-scoped tables
+- Use `import type { Database } from '@/core/database'` for type safety
+
+## Migrations
+
+- Location: `supabase/migrations/`
+- Naming: `YYYYMMDDHHMMSS_description.sql`
+- Always include RLS policies when creating new tables
+- Use `IF NOT EXISTS` for idempotent migrations
+- Include both `up` logic (create) in the migration
+
+## Common Patterns
+
+```sql
+-- New tenant-scoped table
+CREATE TABLE IF NOT EXISTS public.my_table (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  tenant_id UUID NOT NULL REFERENCES public.tenants(id),
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+ALTER TABLE public.my_table ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Tenant isolation" ON public.my_table
+  FOR ALL USING (tenant_id = (SELECT current_setting('app.current_tenant_id')::UUID));
+```

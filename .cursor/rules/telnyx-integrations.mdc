@@ -1,0 +1,41 @@
+---
+description: Telnyx integration patterns (voice, messaging, AI assistants)
+globs: "apps/tenant/src/core/telnyx/**/*.ts,apps/tenant/app/actions/telnyx/**/*.ts"
+alwaysApply: false
+---
+
+# Telnyx Integration Patterns
+
+## SDK & Libraries
+
+- `@telnyx/ai-agent-lib` — AI assistant management
+- `@telnyx/webrtc` — WebRTC for browser-based calls
+- Telnyx REST API v2 for voice, messaging, numbers
+
+## Configuration
+
+- Telnyx config: `apps/tenant/src/core/telnyx/config.ts`
+- Voice router: `apps/tenant/src/core/telnyx/voice-router.ts`
+- Webhook transport: `apps/tenant/src/core/telnyx/webhook-transport.ts`
+
+## Server Actions
+
+Place Telnyx actions in `app/actions/telnyx/`:
+- `assistants.ts` — AI assistant CRUD
+- `messagingProfiles.ts` — messaging profile management
+- `numbers.ts` — phone number management
+
+## Webhook Handling
+
+- Webhooks arrive at `app/api/webhooks/telnyx/`
+- Always verify webhook signatures
+- Use the call event handler at `app/api/webhooks/telnyx/call-events/route.ts`
+
+## Skills Available
+
+Cursor has skills for Telnyx APIs — reference them for SDK examples:
+- Voice (Call Control)
+- Messaging (SMS/MMS)
+- Numbers (search/order)
+- AI Assistants
+- Verify (OTP/lookup)

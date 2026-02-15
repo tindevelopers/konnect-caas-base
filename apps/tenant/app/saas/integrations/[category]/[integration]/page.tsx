@@ -28,7 +28,36 @@ interface IntegrationConfig {
     label: string;
     type: "switch" | "select" | "text";
     options?: string[];
+    placeholder?: string;
+    required?: boolean;
   }>;
+}
+
+function readPathValue(obj: unknown, path: string) {
+  if (!obj || typeof obj !== "object") return undefined;
+  const parts = path.split(".").filter(Boolean);
+  let current: any = obj;
+  for (const part of parts) {
+    if (!current || typeof current !== "object") return undefined;
+    current = current[part];
+  }
+  return current;
+}
+
+function setPathValue(target: Record<string, unknown>, path: string, value: unknown) {
+  const parts = path.split(".").filter(Boolean);
+  if (parts.length === 0) return;
+
+  let current: Record<string, unknown> = target;
+  for (let i = 0; i < parts.length - 1; i++) {
+    const key = parts[i];
+    const existing = current[key];
+    if (!existing || typeof existing !== "object") {
+      current[key] = {};
+    }
+    current = current[key] as Record<string, unknown>;
+  }
+  current[parts[parts.length - 1]] = value;
 }
 
 const integrationConfigs: Record<string, IntegrationConfig> = {
@@ -106,6 +135,29 @@ const integrationConfigs: Record<string, IntegrationConfig> = {
     fields: [
       { name: "apiKey", label: "API Key", type: "password", required: true },
       { name: "messagingProfileId", label: "Messaging Profile ID", type: "text", required: false },
+    ],
+    additionalSettings: [
+      {
+        name: "voiceRouting.inboundAssistantId",
+        label: "Inbound Assistant ID",
+        type: "text" as const,
+        placeholder: "asst_...",
+        required: true,
+      },
+      {
+        name: "voiceRouting.operatorSipUri",
+        label: "Operator SIP URI (press 0 escape)",
+        type: "text" as const,
+        placeholder: "sip:operator@pbx.example.com",
+        required: true,
+      },
+      {
+        name: "voiceRouting.escapeDigit",
+        label: "Escape Digit",
+        type: "text" as const,
+        placeholder: "0",
+        required: false,
+      },
     ],
   },
   
@@ -403,11 +455,14 @@ export default function IntegrationDetailPage() {
   };
 
   const [formData, setFormData] = useState<Record<string, string>>({});
+  const [settingsData, setSettingsData] = useState<Record<string, string>>({});
   const [showSecrets, setShowSecrets] = useState<Record<string, boolean>>({});
   const [isConnected, setIsConnected] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const additionalSettingsTitle =
+    integrationName === "telnyx" ? "Voice Routing" : "Additional Settings";
 
   useEffect(() => {
     async function loadConfig() {
@@ -415,6 +470,19 @@ export default function IntegrationDetailPage() {
         const existing = await fetchIntegrationConfig(integrationName);
         if (existing?.credentials && typeof existing.credentials === "object") {
           setFormData(existing.credentials as Record<string, string>);
+        }
+        if (config.additionalSettings && config.additionalSettings.length > 0) {
+          const existingSettings =
+            (existing?.settings && typeof existing.settings === "object"
+              ? (existing.settings as Record<string, unknown>)
+              : {}) ?? {};
+          const nextSettingsData: Record<string, string> = {};
+          for (const setting of config.additionalSettings) {
+            const rawValue = readPathValue(existingSettings, setting.name);
+            if (rawValue === undefined || rawValue === null) continue;
+            nextSettingsData[setting.name] = String(rawValue);
+          }
+          setSettingsData(nextSettingsData);
         }
         if (existing?.status === "connected") {
           setIsConnected(true);
@@ -428,6 +496,31 @@ export default function IntegrationDetailPage() {
     loadConfig();
   }, [integrationName]);
 
+  const buildSettingsPayload = () => {
+    if (!config.additionalSettings || config.additionalSettings.length === 0) {
+      return null;
+    }
+
+    const payload: Record<string, unknown> = {};
+    for (const setting of config.additionalSettings) {
+      const raw = settingsData[setting.name] ?? "";
+
+      if (setting.type === "switch") {
+        setPathValue(payload, setting.name, raw === "true");
+      } else {
+        // Keep values as strings; callers can parse later if needed.
+        const trimmed = String(raw).trim();
+        if (setting.required && trimmed.length === 0) {
+          throw new Error(`${setting.label} is required`);
+        }
+        if (trimmed.length === 0) continue;
+        setPathValue(payload, setting.name, trimmed);
+      }
+    }
+
+    return payload;
+  };
+
   const handleConnect = async () => {
     setError(null);
     setIsSaving(true);
@@ -437,6 +530,7 @@ export default function IntegrationDetailPage() {
         const val = formData[f.name];
         if (val) credentials[f.name] = val;
       });
+      const settings = buildSettingsPayload();
       if (integrationName === "gohighlevel") {
         if (!credentials.apiKey || !credentials.locationId) {
           throw new Error("GoHighLevel API key and Location ID are required");
@@ -452,6 +546,7 @@ export default function IntegrationDetailPage() {
           provider: integrationName,
           category: config.category,
           credentials,
+          settings,
           status: "connected",
         });
       }
@@ -471,12 +566,34 @@ export default function IntegrationDetailPage() {
         provider: integrationName,
         category: config.category,
         credentials: {},
+        settings: null,
         status: "disconnected",
       });
       setIsConnected(false);
       setFormData({});
+      setSettingsData({});
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to disconnect");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleSaveSettings = async () => {
+    setError(null);
+    setIsSaving(true);
+    try {
+      const settings = buildSettingsPayload();
+      await saveIntegrationConfig({
+        provider: integrationName,
+        category: config.category,
+        // Preserve existing credentials while updating settings.
+        credentials: formData,
+        settings,
+        status: "connected",
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save settings");
     } finally {
       setIsSaving(false);
     }
@@ -615,6 +732,62 @@ export default function IntegrationDetailPage() {
                 </div>
               ))}
             </div>
+
+            {config.additionalSettings && config.additionalSettings.length > 0 && (
+              <div className="mt-6 rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-gray-950/20">
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
+                  {additionalSettingsTitle}
+                </h3>
+                <div className="mt-4 space-y-4">
+                  {config.additionalSettings.map((setting) => (
+                    <div key={setting.name}>
+                      <Label htmlFor={setting.name}>
+                        {setting.label}
+                        {setting.required && <span className="text-red-500">*</span>}
+                      </Label>
+                      <div className="mt-2">
+                        {setting.type === "select" ? (
+                          <select
+                            id={setting.name}
+                            value={settingsData[setting.name] || ""}
+                            onChange={(e) =>
+                              setSettingsData((prev) => ({ ...prev, [setting.name]: e.target.value }))
+                            }
+                            className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-sm text-gray-800 focus:border-brand-300 focus:ring-2 focus:ring-brand-500/10 focus:outline-hidden dark:border-gray-700 dark:bg-gray-800 dark:text-white/90"
+                          >
+                            <option value="">Select {setting.label}</option>
+                            {setting.options?.map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                        ) : setting.type === "switch" ? (
+                          <Switch
+                            id={setting.name}
+                            checked={settingsData[setting.name] === "true"}
+                            onChange={(checked) =>
+                              setSettingsData((prev) => ({ ...prev, [setting.name]: String(checked) }))
+                            }
+                          />
+                        ) : (
+                          <Input
+                            id={setting.name}
+                            type="text"
+                            value={settingsData[setting.name] || ""}
+                            onChange={(e) =>
+                              setSettingsData((prev) => ({ ...prev, [setting.name]: e.target.value }))
+                            }
+                            placeholder={setting.placeholder}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="mt-6 flex flex-col gap-3">
               {error && (
                 <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
@@ -674,31 +847,58 @@ export default function IntegrationDetailPage() {
             {/* Additional Settings */}
             {config.additionalSettings && config.additionalSettings.length > 0 && (
               <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
-                <h2 className="mb-4 text-lg font-semibold text-gray-900 dark:text-white">
-                  Additional Settings
-                </h2>
+                <div className="mb-4 flex items-center justify-between">
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                    {additionalSettingsTitle}
+                  </h2>
+                  <Button variant="outline" size="sm" onClick={handleSaveSettings} disabled={isSaving}>
+                    {isSaving ? "Saving…" : "Save settings"}
+                  </Button>
+                </div>
                 <div className="space-y-4">
                   {config.additionalSettings.map((setting) => (
-                    <div key={setting.name} className="flex items-center justify-between">
-                      <div>
-                        <Label htmlFor={setting.name}>{setting.label}</Label>
+                    <div key={setting.name}>
+                      <Label htmlFor={setting.name}>
+                        {setting.label}
+                        {setting.required && <span className="text-red-500">*</span>}
+                      </Label>
+                      <div className="mt-2">
+                        {setting.type === "switch" ? (
+                          <Switch
+                            id={setting.name}
+                            checked={settingsData[setting.name] === "true"}
+                            onChange={(checked) =>
+                              setSettingsData((prev) => ({ ...prev, [setting.name]: String(checked) }))
+                            }
+                          />
+                        ) : setting.type === "select" ? (
+                          <select
+                            id={setting.name}
+                            value={settingsData[setting.name] || ""}
+                            onChange={(e) =>
+                              setSettingsData((prev) => ({ ...prev, [setting.name]: e.target.value }))
+                            }
+                            className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-sm text-gray-800 focus:border-brand-300 focus:ring-2 focus:ring-brand-500/10 focus:outline-hidden dark:border-gray-700 dark:bg-gray-800 dark:text-white/90"
+                          >
+                            <option value="">Select {setting.label}</option>
+                            {setting.options?.map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <Input
+                            id={setting.name}
+                            type="text"
+                            value={settingsData[setting.name] || ""}
+                            onChange={(e) =>
+                              setSettingsData((prev) => ({ ...prev, [setting.name]: e.target.value }))
+                            }
+                            placeholder={setting.placeholder}
+                          />
+                        )}
                       </div>
-                      {setting.type === "switch" ? (
-                        <Switch id={setting.name} defaultChecked />
-                      ) : setting.type === "select" ? (
-                        <select
-                          id={setting.name}
-                          className="h-9 rounded-lg border border-gray-300 bg-transparent px-3 text-sm text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-white/90"
-                        >
-                          {setting.options?.map((option) => (
-                            <option key={option} value={option}>
-                              {option}
-                            </option>
-                          ))}
-                        </select>
-                      ) : (
-                        <Input id={setting.name} type="text" className="w-48" />
-                      )}
                     </div>
                   ))}
                 </div>

@@ -280,34 +280,63 @@ export async function signIn(data: SignInData) {
 
   console.log("[signIn] Auth successful, user ID:", authData.user.id);
 
-  // Get user with tenant context using admin client
-  const userResult: { data: UserWithRelations | null; error: any } = await adminClient
-    .from("users")
-    .select(`
-      *,
-      roles:role_id (
-        id,
-        name,
-        description,
-        coverage,
-        permissions
-      ),
-      tenants:tenant_id (
-        id,
-        name,
-        domain
-      )
-    `)
+  // Avoid embedded relationship selects here: they can fail when FK metadata isn't present
+  // (common during early local DB setups), producing unhelpful errors like
+  // "Database error querying schema".
+  const baseUserResult: { data: UserRow | null; error: any } = await (adminClient.from("users") as any)
+    .select("*")
     .eq("id", authData.user.id)
     .single();
-  
-  const user = userResult.data;
-  const userError = userResult.error;
 
-  if (userError || !user) {
-    console.error("[signIn] Error fetching user:", userError);
-    throw userError || new Error("Failed to fetch user");
+  const baseUser = baseUserResult.data;
+  const baseUserError = baseUserResult.error;
+
+  if (baseUserError || !baseUser) {
+    console.error("[signIn] Error fetching user row:", baseUserError);
+    const msg = String(baseUserError?.message || baseUserError || "Failed to fetch user");
+    if (msg.includes("Database error querying schema")) {
+      throw new Error(
+        "Database error querying schema. This usually means PostgREST could not load the database schema " +
+          "(broken/missing migrations, missing foreign keys, or invalid SQL objects). " +
+          "Check your Supabase logs and confirm migrations have been applied."
+      );
+    }
+    throw baseUserError || new Error("Failed to fetch user");
   }
+
+  // Load role + tenant separately (tolerate missing FK relationships).
+  let role: UserWithRelations["roles"] = null;
+  let tenant: UserWithRelations["tenants"] = null;
+
+  try {
+    if ((baseUser as any).role_id) {
+      const roleRes: { data: any | null; error: any } = await (adminClient.from("roles") as any)
+        .select("id, name, description, coverage, permissions")
+        .eq("id", (baseUser as any).role_id)
+        .maybeSingle();
+      if (!roleRes.error && roleRes.data) role = roleRes.data;
+    }
+  } catch (e) {
+    console.warn("[signIn] Failed to load role (continuing)", e);
+  }
+
+  try {
+    if ((baseUser as any).tenant_id) {
+      const tenantRes: { data: any | null; error: any } = await (adminClient.from("tenants") as any)
+        .select("id, name, domain")
+        .eq("id", (baseUser as any).tenant_id)
+        .maybeSingle();
+      if (!tenantRes.error && tenantRes.data) tenant = tenantRes.data;
+    }
+  } catch (e) {
+    console.warn("[signIn] Failed to load tenant (continuing)", e);
+  }
+
+  const user: UserWithRelations = {
+    ...(baseUser as any),
+    roles: role,
+    tenants: tenant,
+  };
 
   console.log("[signIn] User fetched successfully:");
   console.log("[signIn]   - User ID:", user.id);

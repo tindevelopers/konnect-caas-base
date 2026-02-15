@@ -1,0 +1,43 @@
+---
+description: Next.js App Router patterns for this project
+globs: apps/tenant/app/**/*.{ts,tsx}
+alwaysApply: false
+---
+
+# Next.js App Router Patterns
+
+## Server Actions
+
+```typescript
+"use server";
+
+import { createClient } from "@/core/database/server";
+import { getCurrentTenant } from "@/core/multi-tenancy/server";
+
+export async function myAction(formData: FormData) {
+  const supabase = await createClient();
+  const tenant = await getCurrentTenant();
+  // Always scope queries by tenant_id
+}
+```
+
+- Place in `app/actions/{domain}/` with kebab-case filenames
+- Always get tenant context and scope DB queries by `tenant_id`
+- Use `createClient()` for RLS-scoped queries, `createAdminClient()` to bypass RLS
+
+## API Routes
+
+```typescript
+// app/api/{resource}/route.ts
+import { NextRequest, NextResponse } from "next/server";
+
+export async function POST(request: NextRequest) {
+  // Validate, authenticate, then process
+}
+```
+
+## Layouts & Pages
+
+- Use route groups `(group-name)` for shared layouts without URL segments
+- Server Components by default; add `"use client"` only when needed
+- Keep data fetching in Server Components or server actions

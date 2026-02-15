@@ -32,6 +32,7 @@ import {
   listRequirementGroupsAction,
   searchAvailablePhoneNumbersAction,
   searchLocalitiesFromDbAction,
+  searchLocalitySuggestionsAction,
   type PhoneNumberPattern,
   type TelnyxAvailablePhoneNumber,
   type TelnyxNumberOrder,
@@ -39,6 +40,7 @@ import {
 } from "@/app/actions/telnyx/numbers";
 import { OMIT_FEATURES_FOR_COUNTRIES } from "@/src/core/telnyx/country-constraints";
 import { ACTIVE_SUPPLIERS, COMING_SOON_SUPPLIERS } from "@/src/core/numbers/suppliers";
+import { isPlatformAdmin } from "@/app/actions/organization-admins";
 
 const TELNYX_FEATURES = [
   "sms",
@@ -183,9 +185,14 @@ export default function BuyNumbersPage() {
   const [localitySuggestions, setLocalitySuggestions] = useState<string[]>([]);
   const [localitySearchLoading, setLocalitySearchLoading] = useState(false);
   const [localityDropdownOpen, setLocalityDropdownOpen] = useState(false);
+  const [showSuppliers, setShowSuppliers] = useState(false);
   const localityInputRef = useRef<HTMLInputElement>(null);
   const localityDropdownRef = useRef<HTMLDivElement>(null);
   const localitySearchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    isPlatformAdmin().then(setShowSuppliers).catch(() => setShowSuppliers(false));
+  }, []);
 
   useEffect(() => {
     const q = locality.trim();
@@ -203,12 +210,17 @@ export default function BuyNumbersPage() {
         countryCode: countryCode.trim().toUpperCase(),
         localityQuery: q,
         phoneNumberType: phoneNumberType.trim() || "local",
-      }).then((res) => {
-        if (res.ok) {
-          setLocalitySuggestions(res.localities.map((city) => `${city} (${countryCode})`));
-        } else {
-          setLocalitySuggestions([]);
+      }).then(async (res) => {
+        let localities: string[] = res.ok ? res.localities : [];
+        if (localities.length === 0) {
+          const fallback = await searchLocalitySuggestionsAction({
+            countryCode: countryCode.trim().toUpperCase(),
+            localityQuery: q,
+            phoneNumberType: phoneNumberType.trim() || undefined,
+          });
+          if (fallback.ok) localities = fallback.localities;
         }
+        setLocalitySuggestions(localities.map((city) => `${city} (${countryCode})`));
         setLocalitySearchLoading(false);
       });
     }, 150);
@@ -536,22 +548,24 @@ export default function BuyNumbersPage() {
           <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white/90">Search</h2>
-              <div className="flex items-center gap-2 text-sm">
-                <span className="text-gray-500 dark:text-gray-400">Inventory from:</span>
-                {ACTIVE_SUPPLIERS.map((s) => (
-                  <span
-                    key={s.id}
-                    className="rounded-md bg-green-50 px-2 py-0.5 font-medium text-green-700 dark:bg-green-900/30 dark:text-green-400"
-                  >
-                    {s.name}
-                  </span>
-                ))}
-                {COMING_SOON_SUPPLIERS.length > 0 && (
-                  <span className="rounded-md border border-dashed border-gray-300 px-2 py-0.5 text-gray-500 dark:border-gray-600 dark:text-gray-400">
-                    {COMING_SOON_SUPPLIERS.map((s) => s.name).join(", ")} — Coming soon
-                  </span>
-                )}
-              </div>
+              {showSuppliers && (
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="text-gray-500 dark:text-gray-400">Inventory from:</span>
+                  {ACTIVE_SUPPLIERS.map((s) => (
+                    <span
+                      key={s.id}
+                      className="rounded-md bg-green-50 px-2 py-0.5 font-medium text-green-700 dark:bg-green-900/30 dark:text-green-400"
+                    >
+                      {s.name}
+                    </span>
+                  ))}
+                  {COMING_SOON_SUPPLIERS.length > 0 && (
+                    <span className="rounded-md border border-dashed border-gray-300 px-2 py-0.5 text-gray-500 dark:border-gray-600 dark:text-gray-400">
+                      {COMING_SOON_SUPPLIERS.map((s) => s.name).join(", ")} — Coming soon
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -615,7 +629,7 @@ export default function BuyNumbersPage() {
                 <div className="flex gap-2" ref={localityInputRef}>
                   <Input
                     id="locality"
-                    placeholder="Cities with Telnyx inventory only (e.g. Chino, Abilene)"
+                    placeholder="e.g. Miami, Chino, Abilene"
                     value={locality}
                     onChange={(e) => {
                       setLocality(e.target.value);

@@ -457,16 +457,46 @@ export async function getCallInstructionsAction(assistantId: string) {
       throw new Error("Assistant ID is required.");
     }
 
+    let tenantId: string | null = null;
+    try {
+      tenantId = await ensureTenantId().catch(() => null);
+    } catch {
+      tenantId = null;
+    }
+
     const h = await headers();
     const host = h.get("x-forwarded-host") || h.get("host") || "localhost:3010";
     const proto = h.get("x-forwarded-proto") || (host.includes("localhost") ? "http" : "https");
     const baseUrl = `${proto}://${host}`;
 
+    const webhookUrlBase = `${baseUrl}/api/webhooks/telnyx/call-events`;
+    const webhookUrlWithTenant = tenantId
+      ? `${webhookUrlBase}?tenantId=${tenantId}`
+      : `${webhookUrlBase}?tenantId=YOUR_TENANT_ID`;
+
     return {
       assistantId,
-      webhookUrl: `${baseUrl}/api/webhooks/telnyx/call-events`,
+      webhookUrl: webhookUrlBase,
+      webhookUrlWithTenant,
+      tenantId,
       tenantHeader: "x-tenant-id",
       tenantQueryParam: "tenantId",
+      requiredEnv: [
+        // For webhook verification (Voice API v2).
+        "TELNYX_PUBLIC_KEY",
+        // For Call Control commands if not using per-tenant integration config.
+        "TELNYX_API_KEY",
+        // For decrypting integration credentials if encryption is enabled.
+        "INTEGRATION_CREDENTIALS_KEY",
+        // For storing webhook events.
+        "SUPABASE_SERVICE_ROLE_KEY",
+        "NEXT_PUBLIC_SUPABASE_URL",
+      ],
+      localTunnelNotes: [
+        "Telnyx must reach your webhook over the public internet (localhost won't work).",
+        "If testing locally, use a tunnel (ngrok) and paste the HTTPS URL above into the Telnyx Voice API Application.",
+        "ngrok setup: `ngrok config add-authtoken <token>` then `ngrok http 3010`.",
+      ],
       steps: [
         "Create or open your Call Control App in Telnyx Mission Control.",
         "Set the Webhook URL to the value shown below.",

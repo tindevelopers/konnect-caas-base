@@ -98,6 +98,22 @@ async function main() {
   const countries = [
     { code: "US", types: ["local", "toll_free"] as const },
     { code: "CA", types: ["local"] as const },
+    { code: "GB", types: ["local", "toll_free", "national"] as const },
+    { code: "IE", types: ["local"] as const },
+    { code: "FR", types: ["local"] as const },
+    { code: "DE", types: ["local"] as const },
+    { code: "ES", types: ["local"] as const },
+    { code: "IT", types: ["local"] as const },
+    { code: "NL", types: ["local"] as const },
+    { code: "BE", types: ["local"] as const },
+    { code: "AT", types: ["local"] as const },
+    { code: "CH", types: ["local"] as const },
+    { code: "PT", types: ["local"] as const },
+    { code: "LU", types: ["local"] as const },
+    { code: "SE", types: ["local"] as const },
+    { code: "NO", types: ["local"] as const },
+    { code: "DK", types: ["local"] as const },
+    { code: "FI", types: ["local"] as const },
   ];
 
   const rows: { country_code: string; locality: string; phone_number_type: string; source: string }[] = [];
@@ -105,19 +121,23 @@ async function main() {
 
   for (const { code, types } of countries) {
     for (const phoneNumberType of types) {
-      console.log(`Fetching localities for ${code} / ${phoneNumberType}...`);
-      const localities = await fetchLocalitiesFromTelnyx(code, phoneNumberType);
-      console.log(`  Found ${localities.length} localities`);
-      for (const locality of localities) {
-        const key = `${code}|${locality.trim()}|${phoneNumberType}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        rows.push({
-          country_code: code,
-          locality: locality.trim(),
-          phone_number_type: phoneNumberType,
-          source: "telnyx",
-        });
+      try {
+        console.log(`Fetching localities for ${code} / ${phoneNumberType}...`);
+        const localities = await fetchLocalitiesFromTelnyx(code, phoneNumberType);
+        console.log(`  Found ${localities.length} localities`);
+        for (const locality of localities) {
+          const key = `${code}|${locality.trim()}|${phoneNumberType}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          rows.push({
+            country_code: code,
+            locality: locality.trim(),
+            phone_number_type: phoneNumberType,
+            source: "telnyx",
+          });
+        }
+      } catch (err) {
+        console.warn(`  Skipped ${code}/${phoneNumberType}:`, (err as Error).message);
       }
     }
   }

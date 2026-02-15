@@ -1,0 +1,35 @@
+---
+description: React component patterns and conventions
+globs: apps/tenant/components/**/*.tsx
+alwaysApply: false
+---
+
+# React Component Conventions
+
+## File Organization
+
+- `components/ui/` — reusable UI primitives (buttons, inputs, modals)
+- `components/{domain}/` — domain-specific components (crm, ai, auth, saas, tenant)
+- `components/form/` — form components
+- `components/tables/` — table components
+
+## Patterns
+
+- **Functional components only** (no class components)
+- **PascalCase** filenames matching component name (`AssistantActions.tsx`)
+- Use `"use client"` directive only when the component needs browser APIs, state, or effects
+- Prefer Server Components for data display
+- Extract reusable logic into custom hooks
+
+## Context Providers
+
+Available contexts (import from `@/context/`):
+- `SidebarContext` — sidebar open/close state
+- `ThemeContext` — light/dark theme
+- `WhiteLabelContext` — tenant branding/white-label config
+
+## Styling
+
+- Tailwind CSS v4 utility classes (no `tailwind.config.js` — config is in `globals.css` via `@theme`)
+- Use existing design tokens (brand colors, spacing) from the theme
+- No inline styles unless dynamically computed
