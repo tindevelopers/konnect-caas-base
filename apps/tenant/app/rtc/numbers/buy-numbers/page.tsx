@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   PhoneIcon,
   DevicePhoneMobileIcon,
@@ -13,9 +14,10 @@ import {
   PhotoIcon,
   ExclamationTriangleIcon,
   MapPinIcon,
-  EllipsisHorizontalIcon,
+  PrinterIcon,
 } from "@heroicons/react/24/outline";
 import PageBreadcrumb from "@/components/common/PageBreadCrumb";
+import { Tooltip } from "@/components/ui/tooltip/Tooltip";
 import Button from "@/components/ui/button/Button";
 import Alert from "@/components/ui/alert/Alert";
 import Input from "@/components/form/input/InputField";
@@ -25,8 +27,12 @@ import {
   createNumberOrderAction,
   createNumberReservationAction,
   extendNumberReservationAction,
+  listAvailableAreaCodesAction,
+  listAvailableLocalitiesAction,
   listCountryCoverageAction,
+  listRequirementGroupsAction,
   searchAvailablePhoneNumbersAction,
+  searchLocalitySuggestionsAction,
   type PhoneNumberPattern,
   type TelnyxAvailablePhoneNumber,
   type TelnyxNumberOrder,
@@ -75,15 +81,27 @@ function formatLocation(regionInfo?: Array<{ region_type: string; region_name: s
   return "-";
 }
 
+// Telnyx-style feature icons (outline, light grey)
 const FEATURE_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   voice: PhoneIcon,
   sms: ChatBubbleLeftRightIcon,
   mms: PhotoIcon,
-  fax: PhoneIcon,
+  fax: PrinterIcon,
   emergency: ExclamationTriangleIcon,
   hd_voice: PhoneIcon,
   international_sms: ChatBubbleLeftRightIcon,
   local_calling: MapPinIcon,
+};
+
+const FEATURE_LABELS: Record<string, string> = {
+  voice: "Voice available",
+  sms: "SMS available",
+  mms: "MMS available",
+  fax: "Fax available",
+  emergency: "Emergency available",
+  hd_voice: "HD Voice available",
+  international_sms: "International SMS available",
+  local_calling: "Local Calling available",
 };
 
 function unique<T>(arr: T[]) {
@@ -108,6 +126,8 @@ export default function BuyNumbersPage() {
   const [countriesLoading, setCountriesLoading] = useState(true);
   const [countryCode, setCountryCode] = useState("US");
   const [phoneNumberType, setPhoneNumberType] = useState<string>("local");
+  const [nationalDestinationCode, setNationalDestinationCode] = useState("");
+  const [locality, setLocality] = useState("");
 
   useEffect(() => {
     listCountryCoverageAction().then((res) => {
@@ -124,10 +144,156 @@ export default function BuyNumbersPage() {
     });
   }, []);
 
+  const [areaCodes, setAreaCodes] = useState<string[]>([]);
+  const [areaCodesLoading, setAreaCodesLoading] = useState(false);
+  useEffect(() => {
+    if (!countryCode.trim()) {
+      setAreaCodes([]);
+      return;
+    }
+    setAreaCodesLoading(true);
+    setAreaCodes([]);
+    listAvailableAreaCodesAction({
+      countryCode: countryCode.trim().toUpperCase(),
+      phoneNumberType: phoneNumberType.trim() || undefined,
+    }).then((res) => {
+      if (res.ok && res.areaCodes.length > 0) {
+        setAreaCodes(res.areaCodes);
+      }
+      setAreaCodesLoading(false);
+    });
+  }, [countryCode, phoneNumberType]);
+
+  // Clear NDC when country/type changes and current value is not in new area codes
+  useEffect(() => {
+    if (areaCodes.length > 0 && nationalDestinationCode && !areaCodes.includes(nationalDestinationCode)) {
+      setNationalDestinationCode("");
+    }
+  }, [areaCodes, nationalDestinationCode]);
+
+  const [localities, setLocalities] = useState<string[]>([]);
+  const [localitiesLoading, setLocalitiesLoading] = useState(false);
+  const [localitySearchSuggestions, setLocalitySearchSuggestions] = useState<string[]>([]);
+  const [localitySearchLoading, setLocalitySearchLoading] = useState(false);
+  const [localityDropdownOpen, setLocalityDropdownOpen] = useState(false);
+  const localityInputRef = useRef<HTMLInputElement>(null);
+  const localityDropdownRef = useRef<HTMLDivElement>(null);
+  const localitySearchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!countryCode.trim()) {
+      setLocalities([]);
+      return;
+    }
+    setLocalitiesLoading(true);
+    setLocalities([]);
+    listAvailableLocalitiesAction({
+      countryCode: countryCode.trim().toUpperCase(),
+      phoneNumberType: phoneNumberType.trim() || undefined,
+    }).then((res) => {
+      if (res.ok) {
+        setLocalities(res.localities);
+      }
+      setLocalitiesLoading(false);
+    });
+  }, [countryCode, phoneNumberType]);
+
+  useEffect(() => {
+    const q = locality.trim();
+    if (q.length < 2 || !countryCode.trim()) {
+      setLocalitySearchSuggestions([]);
+      setLocalitySearchLoading(false);
+      return;
+    }
+    if (localitySearchTimeoutRef.current) {
+      clearTimeout(localitySearchTimeoutRef.current);
+    }
+    localitySearchTimeoutRef.current = setTimeout(() => {
+      setLocalitySearchLoading(true);
+      searchLocalitySuggestionsAction({
+        countryCode: countryCode.trim().toUpperCase(),
+        localityQuery: q,
+        phoneNumberType: phoneNumberType.trim() || undefined,
+      }).then((res) => {
+        if (res.ok) setLocalitySearchSuggestions(res.localities);
+        else setLocalitySearchSuggestions([]);
+        setLocalitySearchLoading(false);
+      });
+    }, 150);
+    return () => {
+      if (localitySearchTimeoutRef.current) clearTimeout(localitySearchTimeoutRef.current);
+    };
+  }, [locality, countryCode, phoneNumberType]);
+
+  const localitySuggestions = useMemo(() => {
+    const q = locality.trim().toLowerCase();
+    if (!q) return [];
+    const countryName = countries.find((c) => c.code === countryCode)?.name ?? countryCode;
+    const format = (city: string) => `${city} (${countryName})`;
+
+    const matches = (city: string) => city.toLowerCase().startsWith(q);
+
+    const seen = new Set<string>();
+    const add = (city: string) => {
+      if (matches(city) && !seen.has(city.toLowerCase())) {
+        seen.add(city.toLowerCase());
+        return true;
+      }
+      return false;
+    };
+
+    const fromInventory = localities.filter((c) => add(c));
+    const fromSearch = localitySearchSuggestions.filter((c) => add(c));
+
+    const baseCityFromZone = (s: string) => s.replace(/\s+ZONE\s+\d+$/i, "").replace(/\s+-\s+.*$/, "").trim();
+    const all = [...fromInventory, ...fromSearch];
+    const withBase = new Set<string>(all);
+    for (const city of all) {
+      const base = baseCityFromZone(city);
+      if (base && base !== city && base.toLowerCase().startsWith(q)) {
+        withBase.add(base);
+      }
+    }
+
+    const sorted = Array.from(withBase).sort((a, b) => {
+      const aLower = a.toLowerCase();
+      const bLower = b.toLowerCase();
+      const aBase = baseCityFromZone(a);
+      const bBase = baseCityFromZone(b);
+      if (aBase === a && bBase !== b) return -1;
+      if (aBase !== a && bBase === b) return 1;
+      return aLower.localeCompare(bLower, undefined, { sensitivity: "base" });
+    });
+
+    return sorted.slice(0, 20).map(format);
+  }, [locality, localities, localitySearchSuggestions, countryCode, countries]);
+
+  const handleLocalitySelect = useCallback((display: string) => {
+    const match = display.match(/^(.+?)\s*\(/);
+    const cityOnly = match ? match[1].trim() : display;
+    setLocality(cityOnly);
+    setLocalityDropdownOpen(false);
+  }, []);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      const target = e.target as Node;
+      if (
+        localityDropdownOpen &&
+        localityInputRef.current &&
+        !localityInputRef.current.contains(target) &&
+        localityDropdownRef.current &&
+        !localityDropdownRef.current.contains(target)
+      ) {
+        setLocalityDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [localityDropdownOpen]);
+
   const [searchPhoneNumber, setSearchPhoneNumber] = useState("");
   const [phoneNumberPattern, setPhoneNumberPattern] = useState<PhoneNumberPattern>("contains");
-  const [nationalDestinationCode, setNationalDestinationCode] = useState("");
-  const [locality, setLocality] = useState("");
   const [administrativeArea, setAdministrativeArea] = useState("");
   const [rateCenter, setRateCenter] = useState("");
 
@@ -146,6 +312,7 @@ export default function BuyNumbersPage() {
 
   const [advancedOpen, setAdvancedOpen] = useState(true);
   const [rightPanelTab, setRightPanelTab] = useState<"cart" | "order">("cart");
+  const [cartOrderOpen, setCartOrderOpen] = useState(false);
   const [selectedNumbers, setSelectedNumbers] = useState<string[]>([]);
   const selectedSet = useMemo(() => new Set(selectedNumbers), [selectedNumbers]);
 
@@ -156,6 +323,30 @@ export default function BuyNumbersPage() {
   const [messagingProfileId, setMessagingProfileId] = useState("");
   const [billingGroupId, setBillingGroupId] = useState("");
   const [customerReference, setCustomerReference] = useState("");
+  const [requirementGroupId, setRequirementGroupId] = useState("");
+
+  const [requirementGroups, setRequirementGroups] = useState<{ id: string; country_code?: string; phone_number_type?: string; status?: string }[]>([]);
+  const [requirementGroupsLoading, setRequirementGroupsLoading] = useState(false);
+
+  useEffect(() => {
+    setRequirementGroupsLoading(true);
+    setRequirementGroups([]);
+    listRequirementGroupsAction({ pageNumber: 1, pageSize: 100 })
+      .then((res) => {
+        const list = res?.data ?? [];
+        if (list.length) {
+          const filtered = list.filter(
+            (rg: { country_code?: string; phone_number_type?: string; status?: string }) =>
+              rg.country_code === countryCode &&
+              (rg.phone_number_type === phoneNumberType || !phoneNumberType) &&
+              rg.status === "fulfilled"
+          );
+          setRequirementGroups(filtered.length ? filtered : list);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setRequirementGroupsLoading(false));
+  }, [countryCode, phoneNumberType]);
 
   const [isOrdering, setIsOrdering] = useState(false);
   const [order, setOrder] = useState<TelnyxNumberOrder | null>(null);
@@ -174,13 +365,16 @@ export default function BuyNumbersPage() {
     try {
       if (!countryCode.trim()) throw new Error("Country code is required.");
 
+      const localityFormatted = locality.trim()
+        ? locality.trim().replace(/\b\w/g, (c) => c.toUpperCase())
+        : undefined;
       const res = await searchAvailablePhoneNumbersAction({
         countryCode: countryCode.trim().toUpperCase(),
         phoneNumberType: phoneNumberType.trim() || undefined,
         phoneNumber: searchPhoneNumber.trim() || undefined,
         phoneNumberPattern: searchPhoneNumber.trim() ? phoneNumberPattern : undefined,
         nationalDestinationCode: nationalDestinationCode.trim() || undefined,
-        locality: locality.trim() || undefined,
+        locality: localityFormatted,
         administrativeArea: administrativeArea.trim() || undefined,
         rateCenter: rateCenter.trim() || undefined,
         features,
@@ -290,12 +484,32 @@ export default function BuyNumbersPage() {
         throw new Error("No reserved/selected numbers to order.");
       }
 
+      // Compute average cost from search results for billing
+      const matchedResults = results.filter((r) => toOrder.includes(r.phone_number));
+      let avgUpfront = 0;
+      let avgMonthly = 0;
+      let costCurrency = "USD";
+      if (matchedResults.length > 0) {
+        avgUpfront =
+          matchedResults.reduce((s, r) => s + Number(r.cost_information?.upfront_cost ?? 0), 0) /
+          matchedResults.length;
+        avgMonthly =
+          matchedResults.reduce((s, r) => s + Number(r.cost_information?.monthly_cost ?? 0), 0) /
+          matchedResults.length;
+        costCurrency = matchedResults[0]?.cost_information?.currency ?? "USD";
+      }
+
       const res = await createNumberOrderAction({
         phoneNumbers: toOrder,
         connectionId: connectionId.trim() || undefined,
         messagingProfileId: messagingProfileId.trim() || undefined,
         billingGroupId: billingGroupId.trim() || undefined,
         customerReference: customerReference.trim() || undefined,
+        requirementGroupId: requirementGroupId.trim() || undefined,
+        costInfo:
+          avgUpfront > 0 || avgMonthly > 0
+            ? { upfrontCost: avgUpfront, monthlyCost: avgMonthly, currency: costCurrency }
+            : undefined,
       });
       const created = res?.data ?? null;
       if (!created?.id) throw new Error("Order created but no id was returned.");
@@ -312,13 +526,49 @@ export default function BuyNumbersPage() {
 
   return (
     <div>
-      <PageBreadcrumb pageTitle="Buy Numbers" />
-
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold text-gray-900 dark:text-white/90">Buy Numbers</h1>
-        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-          Search Telnyx inventory, reserve numbers in a cart, then place an order.
-        </p>
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold text-gray-900 dark:text-white/90">Buy Numbers</h1>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            Search Telnyx inventory, reserve numbers in a cart, then place an order.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setRightPanelTab("cart");
+              setCartOrderOpen(true);
+            }}
+            className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+          >
+            <ShoppingCartIcon className="h-5 w-5" />
+            Cart
+            {reservation?.phone_numbers?.length ? (
+              <span className="rounded-full bg-brand-100 px-2 py-0.5 text-xs dark:bg-brand-900/30">
+                {reservation.phone_numbers.length}
+              </span>
+            ) : null}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setRightPanelTab("order");
+              setCartOrderOpen(true);
+            }}
+            className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+          >
+            <Cog6ToothIcon className="h-5 w-5" />
+            Order
+          </button>
+          <nav className="ml-2 flex items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400">
+            <Link href="/" className="hover:text-gray-700 dark:hover:text-gray-300">
+              Home
+            </Link>
+            <span>&gt;</span>
+            <span className="text-gray-800 dark:text-white/90">Buy Numbers</span>
+          </nav>
+        </div>
       </div>
 
       {error && (
@@ -332,7 +582,7 @@ export default function BuyNumbersPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1fr_340px]">
+      <div className="relative">
         <section className="min-w-0 space-y-6">
           <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white/90">Search</h2>
@@ -393,24 +643,48 @@ export default function BuyNumbersPage() {
             </div>
 
             <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
-              <div>
+              <div className="relative">
                 <Label htmlFor="locality">Locality (city)</Label>
-                <div className="flex gap-2">
+                <div className="flex gap-2" ref={localityInputRef}>
                   <Input
                     id="locality"
-                    placeholder="e.g. Austin, London"
+                    placeholder="e.g. chi → Chicago, mia → Miami"
                     value={locality}
-                    onChange={(e) => setLocality(e.target.value)}
+                    onChange={(e) => {
+                      setLocality(e.target.value);
+                      setLocalityDropdownOpen(true);
+                    }}
+                    onFocus={() => locality.trim() && setLocalityDropdownOpen(true)}
                     className="flex-1"
                   />
-                  <button
-                    type="button"
-                    title="City lookup"
-                    className="flex h-11 items-center justify-center rounded-lg border border-gray-300 px-3 text-gray-500 hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800"
-                  >
-                    <EllipsisHorizontalIcon className="h-5 w-5" />
-                  </button>
                 </div>
+                {localityDropdownOpen && locality.trim() && (
+                  <div
+                    ref={localityDropdownRef}
+                    className="absolute top-full left-0 z-20 mt-1 max-h-60 w-full min-w-[200px] overflow-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900"
+                  >
+                    {localitySearchLoading || localitiesLoading ? (
+                      <div className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
+                        Loading cities…
+                      </div>
+                    ) : localitySuggestions.length > 0 ? (
+                      localitySuggestions.map((item) => (
+                        <button
+                          key={item}
+                          type="button"
+                          onClick={() => handleLocalitySelect(item)}
+                          className="w-full px-4 py-2 text-left text-sm text-gray-800 hover:bg-gray-50 dark:text-white/90 dark:hover:bg-gray-800"
+                        >
+                          {item}
+                        </button>
+                      ))
+                    ) : (
+                      <div className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
+                        No matching cities found
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
               <div>
                 <Label htmlFor="admin">Administrative area (state/region)</Label>
@@ -423,12 +697,34 @@ export default function BuyNumbersPage() {
               </div>
               <div>
                 <Label htmlFor="ndc">National destination code (area code)</Label>
-                <Input
-                  id="ndc"
-                  placeholder="e.g. 312"
-                  value={nationalDestinationCode}
-                  onChange={(e) => setNationalDestinationCode(e.target.value)}
-                />
+                {areaCodes.length > 0 ? (
+                  <select
+                    id="ndc"
+                    value={nationalDestinationCode}
+                    onChange={(e) => setNationalDestinationCode(e.target.value)}
+                    disabled={areaCodesLoading}
+                    className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-sm text-gray-800 shadow-theme-xs focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:focus:border-brand-800"
+                  >
+                    <option value="">Select…</option>
+                    {areaCodes.map((code) => (
+                      <option key={code} value={code}>
+                        {code}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <Input
+                    id="ndc"
+                    placeholder={
+                      areaCodesLoading
+                        ? "Loading area codes…"
+                        : "e.g. 312 (or type manually if not listed)"
+                    }
+                    value={nationalDestinationCode}
+                    onChange={(e) => setNationalDestinationCode(e.target.value)}
+                    disabled={areaCodesLoading}
+                  />
+                )}
               </div>
               <div>
                 <Label htmlFor="rate-center">Rate center</Label>
@@ -598,12 +894,18 @@ export default function BuyNumbersPage() {
                               {r.features?.length ? (
                                 r.features.map((f) => {
                                   const Icon = FEATURE_ICONS[f.name] ?? PhoneIcon;
+                                  const label = FEATURE_LABELS[f.name] ?? `${f.name} available`;
                                   return (
-                                    <Icon
+                                    <Tooltip
                                       key={f.name}
-                                      className="h-4 w-4 text-gray-500"
-                                      title={f.name}
-                                    />
+                                      content={label}
+                                      position="top"
+                                      theme="dark"
+                                    >
+                                      <span className="inline-flex cursor-default">
+                                        <Icon className="h-4 w-4 text-gray-500" />
+                                      </span>
+                                    </Tooltip>
                                   );
                                 })
                               ) : (
@@ -638,46 +940,65 @@ export default function BuyNumbersPage() {
           </div>
         </section>
 
-        <aside className="flex flex-col">
-          <div className="rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
-            <div className="flex border-b border-gray-200 dark:border-gray-800">
-              <button
-                type="button"
-                onClick={() => setRightPanelTab("cart")}
-                className={`flex flex-1 items-center justify-center gap-2 px-4 py-3 text-sm font-medium transition-colors ${
-                  rightPanelTab === "cart"
-                    ? "border-b-2 border-brand-500 text-brand-600 dark:text-brand-400"
-                    : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
-                }`}
-              >
-                <ShoppingCartIcon className="h-5 w-5" />
-                Cart
-                {reservation?.phone_numbers?.length ? (
-                  <span className="rounded-full bg-brand-100 px-2 py-0.5 text-xs dark:bg-brand-900/30">
-                    {reservation.phone_numbers.length}
-                  </span>
-                ) : null}
-              </button>
-              <button
-                type="button"
-                onClick={() => setRightPanelTab("order")}
-                className={`flex flex-1 items-center justify-center gap-2 px-4 py-3 text-sm font-medium transition-colors ${
-                  rightPanelTab === "order"
-                    ? "border-b-2 border-brand-500 text-brand-600 dark:text-brand-400"
-                    : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
-                }`}
-              >
-                <Cog6ToothIcon className="h-5 w-5" />
-                Order
-              </button>
-            </div>
+        {cartOrderOpen && (
+          <>
+            <div
+              className="fixed inset-0 z-40 bg-black/20 dark:bg-black/40"
+              onClick={() => setCartOrderOpen(false)}
+              aria-hidden="true"
+            />
+            <aside className="fixed right-0 top-0 z-50 flex h-full w-full max-w-md flex-col border-l border-gray-200 bg-white shadow-xl dark:border-gray-800 dark:bg-gray-900">
+              <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-4 py-3 dark:border-gray-800">
+                <h2 className="text-base font-semibold text-gray-900 dark:text-white/90">
+                  {rightPanelTab === "cart" ? "Cart (Reservation)" : "Order settings"}
+                </h2>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setRightPanelTab("cart")}
+                    className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium transition-colors ${
+                      rightPanelTab === "cart"
+                        ? "bg-brand-50 text-brand-600 dark:bg-brand-900/20 dark:text-brand-400"
+                        : "text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
+                    }`}
+                  >
+                    <ShoppingCartIcon className="h-4 w-4" />
+                    Cart
+                    {reservation?.phone_numbers?.length ? (
+                      <span className="rounded-full bg-brand-100 px-1.5 py-0.5 text-xs dark:bg-brand-900/30">
+                        {reservation.phone_numbers.length}
+                      </span>
+                    ) : null}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRightPanelTab("order")}
+                    className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium transition-colors ${
+                      rightPanelTab === "order"
+                        ? "bg-brand-50 text-brand-600 dark:bg-brand-900/20 dark:text-brand-400"
+                        : "text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
+                    }`}
+                  >
+                    <Cog6ToothIcon className="h-4 w-4" />
+                    Settings
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCartOrderOpen(false)}
+                    className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
+                  >
+                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
 
-            <div className="p-6">
+              <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6 pt-4">
               {rightPanelTab === "cart" ? (
                 <>
-                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white/90">Cart (Reservation)</h2>
                   {!reservation ? (
-                    <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
                       No active reservation yet. Reserve selected numbers to start a 30-minute hold window.
                     </p>
                   ) : (
@@ -705,18 +1026,31 @@ export default function BuyNumbersPage() {
                         )}
                       </div>
 
-                      <Button variant="outline" onClick={handleExtendReservation} disabled={isReserving}>
-                        {isReserving ? "Extending…" : "Extend reservation"}
-                      </Button>
+                      <div className="flex flex-col gap-2">
+                        <Button onClick={handleCreateOrder} disabled={isOrdering}>
+                          {isOrdering ? "Placing order…" : "Place order"}
+                        </Button>
+                        <Button variant="outline" onClick={handleExtendReservation} disabled={isReserving}>
+                          {isReserving ? "Extending…" : "Extend reservation"}
+                        </Button>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                          Need to assign connection, messaging profile, or billing group? Use the Settings tab.
+                        </p>
+                      </div>
                     </div>
                   )}
                 </>
               ) : (
                 <>
-                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white/90">Order settings</h2>
-                  <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
                     Optional: attach your numbers to a connection, messaging profile, and billing group.
                   </p>
+                  <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm dark:border-amber-800 dark:bg-amber-950/30">
+                    <p className="font-medium text-amber-800 dark:text-amber-200">Client pricing vs Telnyx cost</p>
+                    <p className="mt-1 text-amber-700 dark:text-amber-300">
+                      To charge clients one price while buying at Telnyx&apos;s cost: define a product/price catalog (client price), integrate with Stripe or your billing system to charge before placing the order, then place the order with Telnyx at their price. The margin is the difference.
+                    </p>
+                  </div>
 
                   <div className="mt-4 space-y-4">
                     <div>
@@ -755,6 +1089,33 @@ export default function BuyNumbersPage() {
                         onChange={(e) => setCustomerReference(e.target.value)}
                       />
                     </div>
+                    <div>
+                      <Label htmlFor="reqgrp">Requirement group (regulatory)</Label>
+                      <select
+                        id="reqgrp"
+                        value={requirementGroupId}
+                        onChange={(e) => setRequirementGroupId(e.target.value)}
+                        className="mt-1 block w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800"
+                      >
+                        <option value="">None</option>
+                        {requirementGroupsLoading ? (
+                          <option disabled>Loading…</option>
+                        ) : (
+                          requirementGroups.map((rg) => (
+                            <option key={rg.id} value={rg.id}>
+                              {rg.id.slice(0, 8)}… {rg.country_code} / {rg.phone_number_type} ({rg.status ?? "-"})
+                            </option>
+                          ))
+                        )}
+                      </select>
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        Required for some countries (CH, DK, IT, NO, PT, SE). Create in{" "}
+                        <Link href="/rtc/numbers/compliance" className="text-brand-600 hover:underline dark:text-brand-400">
+                          Compliance
+                        </Link>
+                        .
+                      </p>
+                    </div>
 
                     <Button onClick={handleCreateOrder} disabled={isOrdering}>
                       {isOrdering ? "Creating order…" : "Create number order"}
@@ -776,9 +1137,10 @@ export default function BuyNumbersPage() {
                   )}
                 </>
               )}
-            </div>
-          </div>
-        </aside>
+              </div>
+            </aside>
+          </>
+        )}
       </div>
     </div>
   );

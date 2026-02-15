@@ -27,6 +27,32 @@ async function parseError(response: Response) {
   }
 }
 
+function extractErrorMessage(details: unknown, status: number): string {
+  const fallback = `Telnyx API request failed (${status})`;
+  if (typeof details === "string" && details.trim()) return details.trim();
+  if (!details || typeof details !== "object") return fallback;
+  const d = details as Record<string, unknown>;
+  if (typeof d.message === "string" && d.message.trim()) return d.message.trim();
+  const errors = d.errors;
+  if (Array.isArray(errors) && errors.length) {
+    const parts: string[] = [];
+    for (const err of errors.slice(0, 3)) {
+      if (err && typeof err === "object") {
+        const e = err as Record<string, unknown>;
+        const title = typeof e.title === "string" ? e.title.trim() : "";
+        const detail = typeof e.detail === "string" ? e.detail.trim() : "";
+        const code = typeof e.code === "string" ? e.code.trim() : "";
+        const part = [code && `(${code})`, title, detail].filter(Boolean).join(" ");
+        if (part) parts.push(part);
+      }
+    }
+    if (parts.length) return `${fallback}: ${parts.join("; ")}`;
+  }
+  if (typeof d.error === "string" && d.error.trim()) return d.error.trim();
+  if (typeof d.detail === "string" && d.detail.trim()) return d.detail.trim();
+  return fallback;
+}
+
 export function createTelnyxClient(config: TelnyxClientConfig): TelnyxTransport {
   const baseUrl = config.baseUrl ?? "https://api.telnyx.com/v2";
 
@@ -46,12 +72,7 @@ export function createTelnyxClient(config: TelnyxClientConfig): TelnyxTransport 
 
       if (!response.ok) {
         const details = await parseError(response);
-        const message =
-          typeof details === "string"
-            ? details
-            : details && typeof details === "object" && "message" in details
-            ? String((details as { message?: string }).message)
-            : `Telnyx API request failed (${response.status})`;
+        const message = extractErrorMessage(details, response.status);
         throw new TelnyxApiError(message, response.status, details);
       }
 

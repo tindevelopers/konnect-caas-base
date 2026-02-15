@@ -43,15 +43,22 @@ function extractTelnyxErrorDetail(details: unknown): string | null {
 
   const errors = d.errors;
   if (Array.isArray(errors) && errors.length) {
-    const first = errors[0] as unknown;
-    if (first && typeof first === "object") {
-      const e = first as Record<string, unknown>;
-      const title = typeof e.title === "string" ? e.title.trim() : "";
-      const detail = typeof e.detail === "string" ? e.detail.trim() : "";
-      const code = typeof e.code === "string" ? e.code.trim() : "";
-      return [code && `(${code})`, title, detail].filter(Boolean).join(" ").trim() || null;
+    const parts: string[] = [];
+    for (const err of errors.slice(0, 3)) {
+      if (err && typeof err === "object") {
+        const e = err as Record<string, unknown>;
+        const title = typeof e.title === "string" ? e.title.trim() : "";
+        const detail = typeof e.detail === "string" ? e.detail.trim() : "";
+        const code = typeof e.code === "string" ? e.code.trim() : "";
+        const part = [code && `(${code})`, title, detail].filter(Boolean).join(" ");
+        if (part) parts.push(part);
+      }
     }
+    if (parts.length) return parts.join("; ");
   }
+
+  if (typeof d.error === "string" && d.error.trim()) return d.error.trim();
+  if (typeof d.detail === "string" && d.detail.trim()) return d.detail.trim();
 
   return null;
 }
@@ -173,6 +180,207 @@ export async function listCountryCoverageAction(): Promise<
       .sort((a, b) => a.name.localeCompare(b.name));
 
     return { ok: true, countries };
+  } catch (e) {
+    return { ok: false, error: enhanceTelnyxError(e).message };
+  }
+}
+
+// -----------------------------
+// Inventory coverage (available area codes / NDCs)
+// -----------------------------
+
+export type TelnyxInventoryCoverageItem = {
+  record_type?: string;
+  group?: string;
+  group_type?: string;
+  phone_number_type?: string;
+  administrative_area?: string;
+  count?: number;
+};
+
+type InventoryCoverageMeta = {
+  total_results?: number;
+  total_pages?: number;
+  page_number?: number;
+  page_size?: number;
+};
+
+export async function listAvailableAreaCodesAction(args: {
+  countryCode: string;
+  phoneNumberType?: string;
+}): Promise<{ ok: true; areaCodes: string[] } | { ok: false; error: string }> {
+  const { tenantId, userId } = await getTelemetryContext();
+
+  try {
+    const transport = await getTelnyxTransport("integrations.read");
+    const countryCode = args.countryCode.trim().toUpperCase();
+    const isUs = countryCode === "US";
+
+    const filter: Record<string, unknown> = {
+      country_code: countryCode,
+      groupBy: isUs ? "npa" : "national_destination_code",
+    };
+    if (args.phoneNumberType?.trim()) {
+      filter.phone_number_type = args.phoneNumberType.trim();
+    }
+
+    const PAGE_SIZE = 100;
+    const allGroups: string[] = [];
+    let pageNumber = 1;
+    let hasMore = true;
+
+    while (hasMore) {
+      const path = `/inventory_coverage${buildTelnyxFilterQuery({
+        filter,
+        page: { number: pageNumber, size: PAGE_SIZE },
+      })}`;
+
+      const res = await trackApiCall(
+        "listInventoryCoverage",
+        TELNYX_PROVIDER,
+        async () => {
+          return transport.request<{
+            data: TelnyxInventoryCoverageItem[];
+            meta?: InventoryCoverageMeta;
+          }>(path, { method: "GET" });
+        },
+        { tenantId, userId, requestData: { countryCode, phoneNumberType: args.phoneNumberType, page: pageNumber } }
+      );
+
+      const items = res?.data ?? [];
+      for (const x of items) {
+        if (typeof x.group === "string" && x.group.length > 0) {
+          allGroups.push(x.group);
+        }
+      }
+
+      const meta = res?.meta as InventoryCoverageMeta | undefined;
+      const totalPages = meta?.total_pages;
+      hasMore =
+        items.length >= PAGE_SIZE &&
+        (totalPages === undefined || pageNumber < totalPages);
+      pageNumber += 1;
+    }
+
+    const areaCodes = [...new Set(allGroups)].sort((a, b) =>
+      a.localeCompare(b, undefined, { numeric: true })
+    );
+
+    return { ok: true, areaCodes };
+  } catch (e) {
+    return { ok: false, error: enhanceTelnyxError(e).message };
+  }
+}
+
+// -----------------------------
+// Inventory coverage (available localities / cities)
+// -----------------------------
+
+export async function listAvailableLocalitiesAction(args: {
+  countryCode: string;
+  phoneNumberType?: string;
+}): Promise<{ ok: true; localities: string[] } | { ok: false; error: string }> {
+  const { tenantId, userId } = await getTelemetryContext();
+
+  try {
+    const transport = await getTelnyxTransport("integrations.read");
+    const countryCode = args.countryCode.trim().toUpperCase();
+
+    const filter: Record<string, unknown> = {
+      country_code: countryCode,
+      groupBy: "locality",
+    };
+    if (args.phoneNumberType?.trim()) {
+      filter.phone_number_type = args.phoneNumberType.trim();
+    }
+
+    const PAGE_SIZE = 100;
+    const allGroups: string[] = [];
+    let pageNumber = 1;
+    let hasMore = true;
+
+    while (hasMore) {
+      const path = `/inventory_coverage${buildTelnyxFilterQuery({
+        filter,
+        page: { number: pageNumber, size: PAGE_SIZE },
+      })}`;
+
+      const res = await trackApiCall(
+        "listInventoryCoverageLocalities",
+        TELNYX_PROVIDER,
+        async () => {
+          return transport.request<{
+            data: TelnyxInventoryCoverageItem[];
+            meta?: InventoryCoverageMeta;
+          }>(path, { method: "GET" });
+        },
+        { tenantId, userId, requestData: { countryCode, phoneNumberType: args.phoneNumberType, page: pageNumber } }
+      );
+
+      const items = res?.data ?? [];
+      for (const x of items) {
+        if (typeof x.group === "string" && x.group.length > 0) {
+          allGroups.push(x.group);
+        }
+      }
+
+      const meta = res?.meta as InventoryCoverageMeta | undefined;
+      const totalPages = meta?.total_pages;
+      hasMore =
+        items.length >= PAGE_SIZE &&
+        (totalPages === undefined || pageNumber < totalPages);
+      pageNumber += 1;
+    }
+
+    const localities = [...new Set(allGroups)].sort((a, b) =>
+      a.localeCompare(b, undefined, { sensitivity: "base" })
+    );
+
+    return { ok: true, localities };
+  } catch (e) {
+    return { ok: false, error: enhanceTelnyxError(e).message };
+  }
+}
+
+// Search-based locality suggestions (when inventory_coverage doesn't have the city)
+export async function searchLocalitySuggestionsAction(args: {
+  countryCode: string;
+  localityQuery: string;
+  phoneNumberType?: string;
+}): Promise<{ ok: true; localities: string[] } | { ok: false; error: string }> {
+  const q = args.localityQuery?.trim();
+  if (!q || q.length < 2) return { ok: true, localities: [] };
+
+  try {
+    const localityForSearch = q.charAt(0).toUpperCase() + q.slice(1).toLowerCase();
+    const res = await searchAvailablePhoneNumbersAction({
+      countryCode: args.countryCode.trim().toUpperCase(),
+      phoneNumberType: args.phoneNumberType?.trim() || undefined,
+      locality: localityForSearch,
+      limit: 25,
+      reservable: false,
+    });
+
+    const data = res?.data ?? [];
+    const seen = new Set<string>();
+    const localities: string[] = [];
+
+    for (const item of data) {
+      const regions = item.region_information ?? [];
+      for (const r of regions) {
+        const name = r.region_name?.trim();
+        if (!name) continue;
+        const type = (r.region_type ?? "").toLowerCase();
+        if (type === "locality" || type === "location" || type === "rate_center") {
+          if (!seen.has(name)) {
+            seen.add(name);
+            localities.push(name);
+          }
+        }
+      }
+    }
+
+    return { ok: true, localities: localities.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" })) };
   } catch (e) {
     return { ok: false, error: enhanceTelnyxError(e).message };
   }
@@ -484,6 +692,13 @@ export async function createNumberOrderAction(args: {
   messagingProfileId?: string;
   billingGroupId?: string;
   customerReference?: string;
+  requirementGroupId?: string;
+  /** Optional cost info from search results for billing/markup tracking */
+  costInfo?: {
+    upfrontCost?: number;
+    monthlyCost?: number;
+    currency?: string;
+  };
 }) {
   const { tenantId, userId } = await getTelemetryContext();
 
@@ -493,15 +708,20 @@ export async function createNumberOrderAction(args: {
 
   try {
     const transport = await getTelnyxTransport("integrations.write");
+    const reqGroupId = args.requirementGroupId?.trim();
     const body: Record<string, unknown> = {
-      phone_numbers: args.phoneNumbers.map((phone_number) => ({ phone_number })),
+      phone_numbers: args.phoneNumbers.map((phone_number) => {
+        const entry: Record<string, string> = { phone_number };
+        if (reqGroupId) entry.requirement_group_id = reqGroupId;
+        return entry;
+      }),
     };
     if (args.connectionId?.trim()) body.connection_id = args.connectionId.trim();
     if (args.messagingProfileId?.trim()) body.messaging_profile_id = args.messagingProfileId.trim();
     if (args.billingGroupId?.trim()) body.billing_group_id = args.billingGroupId.trim();
     if (args.customerReference?.trim()) body.customer_reference = args.customerReference.trim();
 
-    return trackApiCall(
+    const result = await trackApiCall(
       "createNumberOrder",
       TELNYX_PROVIDER,
       async () => {
@@ -521,8 +741,77 @@ export async function createNumberOrderAction(args: {
         },
       }
     );
+
+    // Record costs for billing (best-effort, non-blocking)
+    if (tenantId && result?.data?.id) {
+      const orderId = result.data.id;
+      const currency = args.costInfo?.currency ?? "USD";
+      const numCount = args.phoneNumbers.length;
+
+      void recordNumberOrderCosts({
+        tenantId,
+        orderId,
+        upfrontCost: (args.costInfo?.upfrontCost ?? 0) * numCount,
+        monthlyCost: (args.costInfo?.monthlyCost ?? 0) * numCount,
+        currency,
+        phoneNumbers: args.phoneNumbers,
+      });
+    }
+
+    return result;
   } catch (e) {
     throw enhanceTelnyxError(e);
+  }
+}
+
+/**
+ * Record number order costs in tenant_usage_costs (fire-and-forget).
+ */
+async function recordNumberOrderCosts(args: {
+  tenantId: string;
+  orderId: string;
+  upfrontCost: number;
+  monthlyCost: number;
+  currency: string;
+  phoneNumbers: string[];
+}) {
+  try {
+    // Dynamic import to avoid circular deps
+    const { recordCostAndBillAction } = await import("@/app/actions/billing/usage-costs");
+
+    if (args.upfrontCost > 0) {
+      await recordCostAndBillAction({
+        tenantId: args.tenantId,
+        costType: "number_upfront",
+        costAmount: args.upfrontCost,
+        units: args.phoneNumbers.length,
+        currency: args.currency,
+        sourceId: args.orderId,
+        sourceType: "telnyx_number_order",
+        metadata: {
+          phone_numbers: args.phoneNumbers,
+          upfront_cost: args.upfrontCost,
+        },
+      });
+    }
+
+    if (args.monthlyCost > 0) {
+      await recordCostAndBillAction({
+        tenantId: args.tenantId,
+        costType: "number_monthly",
+        costAmount: args.monthlyCost,
+        units: args.phoneNumbers.length,
+        currency: args.currency,
+        sourceId: args.orderId,
+        sourceType: "telnyx_number_order",
+        metadata: {
+          phone_numbers: args.phoneNumbers,
+          monthly_cost: args.monthlyCost,
+        },
+      });
+    }
+  } catch (error) {
+    console.error("[recordNumberOrderCosts] Error recording costs (non-fatal):", error);
   }
 }
 

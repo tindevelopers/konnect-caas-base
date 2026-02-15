@@ -11,11 +11,19 @@ import {
   CheckCircleIcon,
   MagnifyingGlassIcon,
   XMarkIcon,
+  CurrencyDollarIcon,
+  PencilIcon,
+  CheckIcon,
 } from "@heroicons/react/24/outline";
 import Image from "next/image";
 import Link from "next/link";
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { getAllTenants, createTenant, type CreateTenantData } from "@/app/actions/tenants";
+import {
+  getTenantPricingSettingsAction,
+  upsertTenantPricingSettingsAction,
+  getPlatformPricingSettingsAction,
+} from "@/app/actions/billing/pricing";
 import { PermissionGate } from "@/core/permissions";
 import type { Database } from "@/core/database";
 
@@ -66,9 +74,54 @@ export default function TenantManagementPage() {
     status: "active",
   });
 
+  // Markup state
+  const [platformMarkup, setPlatformMarkup] = useState<number>(25);
+  const [tenantMarkups, setTenantMarkups] = useState<Record<string, number | null>>({});
+  const [editingMarkupTenantId, setEditingMarkupTenantId] = useState<string | null>(null);
+  const [editingMarkupValue, setEditingMarkupValue] = useState("");
+  const [savingMarkup, setSavingMarkup] = useState(false);
+
+  const loadMarkups = useCallback(async () => {
+    try {
+      const platform = await getPlatformPricingSettingsAction();
+      setPlatformMarkup(platform.markup_percent);
+    } catch {
+      // Non-fatal
+    }
+  }, []);
+
+  async function loadTenantMarkup(tenantId: string) {
+    try {
+      const pricing = await getTenantPricingSettingsAction(tenantId);
+      setTenantMarkups((prev) => ({ ...prev, [tenantId]: pricing?.markup_percent ?? null }));
+    } catch {
+      // Non-fatal
+    }
+  }
+
+  async function handleSaveMarkup(tenantId: string) {
+    setSavingMarkup(true);
+    try {
+      const val = editingMarkupValue.trim();
+      const markup = val === "" ? null : parseFloat(val);
+      if (markup != null && (isNaN(markup) || markup < 0 || markup > 999)) {
+        setError("Markup must be between 0 and 999, or empty for platform default.");
+        return;
+      }
+      await upsertTenantPricingSettingsAction({ tenantId, markupPercent: markup });
+      setTenantMarkups((prev) => ({ ...prev, [tenantId]: markup }));
+      setEditingMarkupTenantId(null);
+    } catch (e: any) {
+      setError(e.message ?? "Failed to save markup");
+    } finally {
+      setSavingMarkup(false);
+    }
+  }
+
   useEffect(() => {
     loadTenants();
-  }, []);
+    void loadMarkups();
+  }, [loadMarkups]);
 
   const loadTenants = async () => {
     try {
@@ -79,6 +132,10 @@ export default function TenantManagementPage() {
       const tenantsData = await getAllTenants();
       
       setTenants(tenantsData as Tenant[]);
+      // Load markup for each tenant
+      for (const t of tenantsData) {
+        void loadTenantMarkup(t.id);
+      }
     } catch (err: any) {
       // Better error serialization
       let errorDetails = "Unknown error";
@@ -302,6 +359,56 @@ export default function TenantManagementPage() {
                           <div className="flex items-center gap-2 text-gray-600 dark:text-gray-300">
                             <GlobeAltIcon className="h-4 w-4" />
                             <span>{tenant.region}</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-gray-600 dark:text-gray-300">
+                            <CurrencyDollarIcon className="h-4 w-4" />
+                            {editingMarkupTenantId === tenant.id ? (
+                              <span className="flex items-center gap-1">
+                                <input
+                                  type="number"
+                                  min={0}
+                                  max={999}
+                                  step={0.01}
+                                  value={editingMarkupValue}
+                                  onChange={(e) => setEditingMarkupValue(e.target.value)}
+                                  className="w-16 rounded border border-gray-300 px-1 py-0.5 text-xs dark:border-gray-600 dark:bg-gray-800"
+                                  placeholder={String(platformMarkup)}
+                                />
+                                <span className="text-xs">%</span>
+                                <button
+                                  onClick={() => handleSaveMarkup(tenant.id)}
+                                  disabled={savingMarkup}
+                                  className="rounded p-0.5 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20"
+                                >
+                                  <CheckIcon className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => setEditingMarkupTenantId(null)}
+                                  className="rounded p-0.5 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
+                                >
+                                  <XMarkIcon className="h-3.5 w-3.5" />
+                                </button>
+                              </span>
+                            ) : (
+                              <span className="flex items-center gap-1">
+                                <span>
+                                  {tenantMarkups[tenant.id] != null
+                                    ? `${tenantMarkups[tenant.id]}% markup`
+                                    : `${platformMarkup}% markup (default)`}
+                                </span>
+                                <button
+                                  onClick={() => {
+                                    setEditingMarkupTenantId(tenant.id);
+                                    setEditingMarkupValue(
+                                      tenantMarkups[tenant.id] != null ? String(tenantMarkups[tenant.id]) : ""
+                                    );
+                                  }}
+                                  className="rounded p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                                >
+                                  <PencilIcon className="h-3.5 w-3.5" />
+                                </button>
+                              </span>
+                            )}
                           </div>
                         </div>
                         {tenant.features && tenant.features.length > 0 && (
