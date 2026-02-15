@@ -359,7 +359,8 @@ export async function searchLocalitiesFromDbAction(args: {
     const phoneNumberType = args.phoneNumberType?.trim() || "local";
     const prefix = q.replace(/%/g, "\\%").replace(/_/g, "\\_");
 
-    // Try requested type first; fall back to "local" for types we may not have (mobile, national)
+    // Try requested type first; fall back to "local" for types we may not have (mobile, national).
+    // UK/Europe: national and local often share localities; toll_free is country-wide.
     const typesToTry = [phoneNumberType];
     if (!["local", "toll_free"].includes(phoneNumberType)) {
       typesToTry.push("local");
