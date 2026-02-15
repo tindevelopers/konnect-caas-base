@@ -1,7 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { createHmac } from "crypto";
+import { createHmac, createPublicKey, verify as cryptoVerify } from "crypto";
 import { createAdminClient } from "@/core/database/admin-client";
 import { telnyxWebhookConfig } from "@/src/core/telnyx/config";
+import { handleTelnyxInboundVoiceEvent } from "@/src/core/telnyx/voice-router";
 
 function resolveTenantId(request: NextRequest, payload: Record<string, unknown>) {
   const headerTenant = request.headers.get("x-tenant-id");
@@ -19,7 +20,11 @@ function resolveTenantId(request: NextRequest, payload: Record<string, unknown>)
 }
 
 function resolveEventType(payload: Record<string, unknown>) {
-  const data = payload.data as Record<string, unknown> | undefined;
+  const data =
+    (payload.data as Record<string, unknown> | undefined) ||
+    ((payload.metadata as Record<string, unknown> | undefined)?.event as
+      | Record<string, unknown>
+      | undefined);
   return (
     (data?.event_type as string | undefined) ||
     (payload.event_type as string | undefined) ||
@@ -29,7 +34,11 @@ function resolveEventType(payload: Record<string, unknown>) {
 }
 
 function resolveExternalId(payload: Record<string, unknown>) {
-  const data = payload.data as Record<string, unknown> | undefined;
+  const data =
+    (payload.data as Record<string, unknown> | undefined) ||
+    ((payload.metadata as Record<string, unknown> | undefined)?.event as
+      | Record<string, unknown>
+      | undefined);
   const nestedPayload = (data?.payload as Record<string, unknown> | undefined) ?? {};
   return (
     (nestedPayload.call_control_id as string | undefined) ||
@@ -90,13 +99,71 @@ function verifyTelnyxSignature(
   }
 }
 
+function normalizePublicKeyToPem(publicKey: string) {
+  const trimmed = publicKey.trim();
+  if (!trimmed) return "";
+
+  // If it already looks like PEM, use it as-is.
+  if (trimmed.includes("BEGIN PUBLIC KEY")) {
+    return trimmed;
+  }
+
+  // Otherwise treat it as base64 DER and wrap into PEM.
+  const base64 = trimmed.replace(/\s+/g, "");
+  const lines = base64.match(/.{1,64}/g) ?? [base64];
+  return [
+    "-----BEGIN PUBLIC KEY-----",
+    ...lines,
+    "-----END PUBLIC KEY-----",
+  ].join("\n");
+}
+
+/**
+ * Verify Telnyx webhook signature using ED25519 (API v2 webhook signing).
+ * Signature is computed over `${timestamp}|${payload}` and Base64-encoded.
+ */
+function verifyTelnyxEd25519Signature(args: {
+  rawBody: string;
+  timestamp: string;
+  signature: string;
+  publicKey: string;
+}): boolean {
+  const { rawBody, timestamp, signature, publicKey } = args;
+  if (!rawBody || !timestamp || !signature || !publicKey) return false;
+
+  try {
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const ts = Number(timestamp);
+    if (!Number.isFinite(ts)) return false;
+
+    // Basic replay protection (allow 5 minutes clock skew).
+    if (Math.abs(nowSeconds - ts) > 5 * 60) {
+      console.warn("[TelnyxWebhook] Timestamp outside allowed window", {
+        nowSeconds,
+        ts,
+      });
+      return false;
+    }
+
+    const message = Buffer.from(`${timestamp}|${rawBody}`, "utf8");
+    const sig = Buffer.from(signature, "base64");
+    const pem = normalizePublicKeyToPem(publicKey);
+    const key = createPublicKey(pem);
+    return cryptoVerify(null, message, key, sig);
+  } catch (error) {
+    console.error("Error verifying Telnyx ED25519 signature:", error);
+    return false;
+  }
+}
+
 export async function OPTIONS() {
   return new NextResponse(null, {
     status: 200,
     headers: {
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, x-tenant-id",
+      "Access-Control-Allow-Headers":
+        "Content-Type, x-tenant-id, telnyx-signature, telnyx-signature-ed25519, telnyx-timestamp",
     },
   });
 }
@@ -105,10 +172,38 @@ export async function POST(request: NextRequest) {
   // Get raw body for signature verification (must be before JSON parsing)
   const rawBody = await request.text();
   
-  // Verify signature if webhook secret is configured
-  if (telnyxWebhookConfig.isConfigured()) {
+  // Prefer ED25519 (API v2 / Standard Webhooks compatible) if the headers are present.
+  const ed25519Signature =
+    request.headers.get("telnyx-signature-ed25519") ||
+    request.headers.get("Telnyx-Signature-Ed25519");
+  const ed25519Timestamp =
+    request.headers.get("telnyx-timestamp") || request.headers.get("Telnyx-Timestamp");
+
+  if (ed25519Signature && ed25519Timestamp) {
+    if (telnyxWebhookConfig.isEd25519Configured()) {
+      const isValid = verifyTelnyxEd25519Signature({
+        rawBody,
+        timestamp: ed25519Timestamp,
+        signature: ed25519Signature,
+        publicKey: telnyxWebhookConfig.publicKey,
+      });
+
+      if (!isValid) {
+        console.error("Telnyx webhook ED25519 signature verification failed");
+        return NextResponse.json(
+          { error: "Invalid webhook signature" },
+          { status: 401 }
+        );
+      }
+    } else {
+      console.warn(
+        "TELNYX_PUBLIC_KEY not configured. ED25519 webhook signature verification is disabled."
+      );
+    }
+  } else if (telnyxWebhookConfig.isConfigured()) {
+    // Legacy HMAC verification (primarily used by some Telnyx products/configs).
     const signature = request.headers.get("telnyx-signature");
-    
+
     if (!signature) {
       return NextResponse.json(
         { error: "Missing telnyx-signature header" },
@@ -131,7 +226,7 @@ export async function POST(request: NextRequest) {
     }
   } else {
     console.warn(
-      "TELNYX_WEBHOOK_SECRET not configured. Webhook signature verification is disabled."
+      "TELNYX webhook verification not configured. Signature verification is disabled."
     );
   }
 
@@ -191,5 +286,190 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // Update campaign recipients if this is a campaign call
+  try {
+    await updateCampaignRecipientFromCallEvent(adminClient, tenantId, eventType, externalId, payload);
+  } catch (error) {
+    console.error("[TelnyxWebhook] Error updating campaign recipient:", {
+      tenantId,
+      eventType,
+      externalId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  // Execute inbound call-control logic (best-effort).
+  try {
+    await handleTelnyxInboundVoiceEvent({ tenantId, payload });
+  } catch (error) {
+    console.error("[TelnyxWebhook] Error handling inbound voice event:", {
+      tenantId,
+      eventType,
+      externalId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  // Record AI call costs on call completion (best-effort, fire-and-forget)
+  try {
+    await recordAiCallCostFromEvent(tenantId, eventType, externalId, payload);
+  } catch (error) {
+    console.error("[TelnyxWebhook] Error recording AI call cost:", {
+      tenantId,
+      eventType,
+      externalId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
   return NextResponse.json({ status: "ok" });
+}
+
+async function updateCampaignRecipientFromCallEvent(
+  adminClient: ReturnType<typeof createAdminClient>,
+  tenantId: string,
+  eventType: string,
+  externalId: string | null,
+  payload: Record<string, unknown>
+) {
+  const data = payload.data as Record<string, unknown> | undefined;
+  const inner = data?.payload as Record<string, unknown> | undefined;
+  const cid =
+    externalId ??
+    (inner?.call_control_id as string | undefined) ??
+    (data?.call_control_id as string | undefined);
+  const callControlId = typeof cid === "string" ? cid : null;
+  if (!callControlId) return;
+
+  const { data: recipient } = await (adminClient.from("campaign_recipients") as any)
+    .select("id, campaign_id")
+    .eq("tenant_id", tenantId)
+    .eq("call_control_id", callControlId)
+    .single();
+
+  if (!recipient) return;
+
+  const norm = eventType.toLowerCase();
+  let status: string | null = null;
+
+  if (norm === "call.answered") {
+    status = "in_progress";
+  } else if (norm === "call.hangup" || norm === "call.completed") {
+    const data = payload.data as Record<string, unknown> | undefined;
+    const inner = data?.payload as Record<string, unknown> | undefined;
+    const cause = (inner?.hangup_cause ?? data?.hangup_cause) as string | undefined;
+    const causeNorm = (cause ?? "").toLowerCase();
+    if (causeNorm.includes("normal") || causeNorm.includes("clearing")) {
+      status = "completed";
+    } else if (causeNorm.includes("busy") || causeNorm.includes("no_answer") || causeNorm.includes("no-answer")) {
+      status = "no_answer";
+    } else if (causeNorm.includes("voicemail")) {
+      status = "voicemail";
+    } else {
+      status = "completed";
+    }
+  }
+
+  if (status) {
+    const updates: Record<string, unknown> = { status };
+    if (status === "completed" || status === "no_answer" || status === "voicemail") {
+      updates.completed_at = new Date().toISOString();
+    }
+    await (adminClient.from("campaign_recipients") as any)
+      .update(updates)
+      .eq("id", recipient.id);
+
+    await (adminClient.from("campaign_events") as any).insert({
+      tenant_id: tenantId,
+      campaign_id: recipient.campaign_id,
+      recipient_id: recipient.id,
+      event_type: eventType,
+      channel: "voice",
+      payload,
+    });
+  }
+}
+
+/**
+ * Record AI call costs when a call ends.
+ * Extracts duration from the webhook payload and records an estimated cost.
+ * If a conversation_id is available, attempts to fetch actual cost from Telnyx API.
+ */
+async function recordAiCallCostFromEvent(
+  tenantId: string,
+  eventType: string,
+  externalId: string | null,
+  payload: Record<string, unknown>
+) {
+  const norm = eventType.toLowerCase();
+  // Only process call completion events
+  if (norm !== "call.hangup" && norm !== "call.completed" && norm !== "call.machine.detection.ended") {
+    return;
+  }
+
+  const data = payload.data as Record<string, unknown> | undefined;
+  const inner = (data?.payload as Record<string, unknown> | undefined) ?? {};
+
+  // Extract call duration (seconds)
+  const durationSec =
+    Number(inner.duration_secs ?? inner.duration ?? data?.duration_secs ?? data?.duration ?? 0);
+
+  if (durationSec <= 0) return; // No billable duration
+
+  const durationMin = durationSec / 60;
+
+  // Check if this was an AI assistant call
+  const isAiCall =
+    Boolean(inner.ai_assistant_id ?? data?.ai_assistant_id) ||
+    Boolean(inner.conversation_id ?? data?.conversation_id);
+
+  if (!isAiCall) return; // Only bill AI calls
+
+  const conversationId =
+    (inner.conversation_id as string | undefined) ??
+    (data?.conversation_id as string | undefined) ??
+    externalId;
+
+  // Estimated cost: Telnyx Conversational AI = ~$0.08/min + $0.002/min call control
+  // This is a conservative estimate; real cost comes from Telnyx billing API
+  const ESTIMATED_COST_PER_MINUTE = 0.082;
+  const estimatedCost = durationMin * ESTIMATED_COST_PER_MINUTE;
+
+  // Try to fetch actual cost from Telnyx conversation API (best-effort)
+  let actualCost = estimatedCost;
+  if (conversationId) {
+    try {
+      const { getTelnyxTransport } = await import("@/app/actions/telnyx/client");
+      const transport = await getTelnyxTransport("integrations.read");
+      const convResponse = await transport.request<any>(`/ai/conversations/${conversationId}`, {
+        method: "GET",
+      });
+      const totalCost = Number(convResponse?.data?.total_cost ?? convResponse?.total_cost ?? 0);
+      if (totalCost > 0) {
+        actualCost = totalCost;
+      }
+    } catch {
+      // Use estimated cost if API call fails
+    }
+  }
+
+  // Record the cost
+  const { recordCostAndBillAction } = await import("@/app/actions/billing/usage-costs");
+  await recordCostAndBillAction({
+    tenantId,
+    costType: "ai_minutes",
+    costAmount: actualCost,
+    units: durationMin,
+    currency: "USD",
+    sourceId: conversationId ?? externalId ?? undefined,
+    sourceType: "telnyx_conversation",
+    metadata: {
+      event_type: eventType,
+      duration_seconds: durationSec,
+      duration_minutes: durationMin,
+      estimated: actualCost === estimatedCost,
+      conversation_id: conversationId,
+      call_control_id: externalId,
+    },
+  });
 }
