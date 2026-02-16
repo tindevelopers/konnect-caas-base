@@ -1,0 +1,53 @@
+---
+description: Core project conventions for the konnect-caas-base monorepo
+alwaysApply: true
+---
+
+# Project Overview
+
+Multi-tenant SaaS platform (CRM, billing, AI assistants, real-time comms) built with:
+- **Next.js 16** (App Router) / **React 19** / **TypeScript 5.9**
+- **Supabase** (PostgreSQL 17, RLS for tenant isolation)
+- **Telnyx** (voice, messaging, AI assistants)
+- **Stripe** (billing/subscriptions)
+- **Tailwind CSS v4** (theme via `@theme` in globals.css)
+- **Turbo** monorepo with **pnpm** workspaces
+
+## Monorepo Structure
+
+```
+apps/tenant/         → Main tenant dashboard (port 3010)
+apps/portal/         → Customer support portal
+apps/admin/          → System admin app
+packages/@tinadmin/core/        → Core SaaS modules
+packages/@tinadmin/ui-admin/    → Admin UI components
+packages/@tinadmin/ui-consumer/ → Consumer UI components
+packages/@tinadmin/telnyx-ai-platform/ → Telnyx AI integration
+packages/@tinadmin/config/      → Shared config
+packages/integrations/crm/      → CRM provider interfaces
+packages/integrations/calendar/  → Calendar provider interfaces
+supabase/            → Database migrations
+```
+
+## Import Conventions
+
+```typescript
+// Core modules (domain-based)
+import { signIn } from '@/core/auth';
+import { getCurrentTenant } from '@/core/multi-tenancy/server';
+import { createClient } from '@/core/database/server';
+import { createAdminClient } from '@/core/database/admin-client';
+
+// Type imports — always use `import type`
+import type { Database } from '@/core/database';
+
+// Never import internal files directly; use domain index files
+```
+
+## Key Patterns
+
+- **Server actions**: `"use server"` directive, in `app/actions/{domain}/`
+- **API routes**: `app/api/` following App Router conventions
+- **Multi-tenancy**: all tables have `tenant_id`, RLS enforced
+- **Provider pattern**: factory pattern for CRM, email, calendar integrations
+- **Naming**: PascalCase components, kebab-case routes/actions

@@ -136,6 +136,19 @@ export default function TenantSwitcher({ className = "" }: TenantSwitcherProps) 
           setImpersonationError(payload?.error || "Failed to start impersonation.");
           return;
         }
+      } else {
+        // Regular users: set tenant cookie so server-side actions get tenant context
+        const response = await fetch("/api/tenant/select", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tenantId: newTenantId }),
+        });
+
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}));
+          setImpersonationError(payload?.error || "Failed to select tenant.");
+          return;
+        }
       }
 
       // Keep a client-side reference for UI state.

@@ -3,8 +3,17 @@
  * Test script to verify the testCallAssistantAction functionality
  */
 
-const TELNYX_API_KEY = process.env.TELNYX_API_KEY || "KEY019C39D74582E639A3A1A7A217FEAE88_kc8ztBC7c2o5WSKvfsRViL";
-const ASSISTANT_ID = process.env.ASSISTANT_ID || "assistant-4c654859-7631-4627-8b99-78ef1010160a";
+const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
+const ASSISTANT_ID = process.env.ASSISTANT_ID;
+
+if (!TELNYX_API_KEY) {
+  console.error("❌ TELNYX_API_KEY is required. Set it in .env.local or pass as env var.");
+  process.exit(1);
+}
+if (!ASSISTANT_ID) {
+  console.error("❌ ASSISTANT_ID is required. Set it in .env.local or pass as env var.");
+  process.exit(1);
+}
 
 console.log("🧪 Testing Test Call Assistant Action...\n");
 console.log("Assistant ID:", ASSISTANT_ID);

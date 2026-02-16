@@ -25,8 +25,12 @@ interface AssistantActionsProps {
 interface CallInstructions {
   assistantId: string;
   webhookUrl: string;
+  webhookUrlWithTenant?: string;
+  tenantId?: string | null;
   tenantHeader: string;
   tenantQueryParam: string;
+  requiredEnv?: string[];
+  localTunnelNotes?: string[];
   steps: string[];
 }
 
@@ -479,6 +483,29 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
                   {instructions.webhookUrl}
                 </div>
               </div>
+
+              {instructions.webhookUrlWithTenant && (
+                <div>
+                  <p className="mb-1 font-medium text-gray-800 dark:text-white/90">
+                    Webhook URL (copy/paste)
+                  </p>
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 font-mono text-xs dark:border-gray-800 dark:bg-gray-900/60">
+                    {instructions.webhookUrlWithTenant}
+                  </div>
+                </div>
+              )}
+
+              {instructions.tenantId && (
+                <div>
+                  <p className="mb-1 font-medium text-gray-800 dark:text-white/90">
+                    Tenant ID
+                  </p>
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 font-mono text-xs dark:border-gray-800 dark:bg-gray-900/60">
+                    {instructions.tenantId}
+                  </div>
+                </div>
+              )}
+
               <div>
                 <p className="mb-1 font-medium text-gray-800 dark:text-white/90">
                   Assistant ID
@@ -495,6 +522,31 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
                   Header: {instructions.tenantHeader} • Query: {instructions.tenantQueryParam}
                 </div>
               </div>
+
+              {instructions.requiredEnv && instructions.requiredEnv.length > 0 && (
+                <div>
+                  <p className="mb-1 font-medium text-gray-800 dark:text-white/90">
+                    Env vars to set (deploy/local)
+                  </p>
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 font-mono text-xs dark:border-gray-800 dark:bg-gray-900/60">
+                    {instructions.requiredEnv.join("\n")}
+                  </div>
+                </div>
+              )}
+
+              {instructions.localTunnelNotes && instructions.localTunnelNotes.length > 0 && (
+                <div>
+                  <p className="mb-1 font-medium text-gray-800 dark:text-white/90">
+                    Local tunnel notes
+                  </p>
+                  <ul className="list-disc pl-5 space-y-1 text-gray-600 dark:text-gray-300">
+                    {instructions.localTunnelNotes.map((note) => (
+                      <li key={note}>{note}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
               <ol className="list-decimal pl-5 space-y-1 text-gray-600 dark:text-gray-300">
                 {instructions.steps.map((step) => (
                   <li key={step}>{step}</li>
