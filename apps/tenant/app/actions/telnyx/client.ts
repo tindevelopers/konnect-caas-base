@@ -148,6 +148,7 @@ export async function getTelnyxTransport(
           platformConfig?.credentials as Record<string, unknown> | null | undefined
         );
       } catch (e) {
+        const errMsg = e instanceof Error ? e.message : String(e);
         // #region agent log
         fetch("http://127.0.0.1:7251/ingest/383b5b76-17df-49d2-b319-3ebc9439ed93", {
           method: "POST",
@@ -155,14 +156,23 @@ export async function getTelnyxTransport(
           body: JSON.stringify({
             location: "client.ts:getTelnyxTransport",
             message: "getPlatformIntegrationConfig threw",
-            data: { errMsg: e instanceof Error ? e.message : String(e).slice(0, 100) },
+            data: { errMsg: errMsg.slice(0, 100) },
             timestamp: Date.now(),
             hypothesisId: "C",
             runId: "getTransport",
           }),
         }).catch(() => {});
         // #endregion
-        throw e;
+        // On Vercel/production, missing INTEGRATION_CREDENTIALS_KEY or Supabase env causes
+        // getPlatformIntegrationConfig to throw; treat as "no platform key" so we surface the
+        // friendly "Telnyx API key not configured" instead of a masked server error.
+        const isConfigEnvError =
+          /INTEGRATION_CREDENTIALS_KEY|SUPABASE_SERVICE_ROLE_KEY|NEXT_PUBLIC_SUPABASE_URL/i.test(errMsg);
+        if (isConfigEnvError) {
+          platformKey = undefined;
+        } else {
+          throw e;
+        }
       }
       // #region agent log
       fetch("http://127.0.0.1:7251/ingest/383b5b76-17df-49d2-b319-3ebc9439ed93", {
