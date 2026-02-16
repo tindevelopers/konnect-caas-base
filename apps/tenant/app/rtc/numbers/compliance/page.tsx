@@ -59,12 +59,26 @@ export default function NumbersCompliancePage() {
   async function loadRequirements() {
     setIsLoadingRequirements(true);
     try {
-      const res = await listRequirementsAction({ pageNumber: 1, pageSize: 25, sort: "country_code" });
+      const res = await listRequirementsAction({ pageNumber: 1, pageSize: 200, sort: "country_code" });
       setRequirements(res.data ?? []);
     } finally {
       setIsLoadingRequirements(false);
     }
   }
+
+  // Derive dropdown options from compliance requirements (like Telnyx portal)
+  const countryOptions = useMemo(() => {
+    const codes = [...new Set(requirements.map((r) => r.country_code).filter(Boolean))] as string[];
+    return codes.sort((a, b) => a.localeCompare(b));
+  }, [requirements]);
+  const phoneNumberTypeOptions = useMemo(() => {
+    const types = [...new Set(requirements.map((r) => r.phone_number_type).filter(Boolean))] as string[];
+    return types.sort((a, b) => (a ?? "").localeCompare(b ?? ""));
+  }, [requirements]);
+  const actionOptions = useMemo(() => {
+    const actions = [...new Set(requirements.map((r) => r.action).filter(Boolean))] as string[];
+    return actions.sort((a, b) => (a ?? "").localeCompare(b ?? ""));
+  }, [requirements]);
 
   async function loadGroups() {
     setIsLoadingGroups(true);
@@ -83,6 +97,20 @@ export default function NumbersCompliancePage() {
       setError(e instanceof Error ? e.message : "Failed to load compliance data");
     });
   }, []);
+
+  // Sync form state when requirements load so dropdowns show valid selections
+  useEffect(() => {
+    if (requirements.length === 0) return;
+    if (countryOptions.length > 0 && !countryOptions.includes(countryCode)) {
+      setCountryCode(countryOptions[0]);
+    }
+    if (phoneNumberTypeOptions.length > 0 && !phoneNumberTypeOptions.includes(phoneNumberType)) {
+      setPhoneNumberType(phoneNumberTypeOptions[0] as typeof phoneNumberType);
+    }
+    if (actionOptions.length > 0 && !actionOptions.includes(action)) {
+      setAction(actionOptions[0] as "ordering" | "porting");
+    }
+  }, [countryOptions, phoneNumberTypeOptions, actionOptions]);
 
   async function handleCreateGroup() {
     setError(null);
@@ -279,33 +307,70 @@ export default function NumbersCompliancePage() {
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
                   <Label htmlFor="cc">Country</Label>
-                  <Input id="cc" value={countryCode} onChange={(e) => setCountryCode(e.target.value)} />
+                  <select
+                    id="cc"
+                    value={countryOptions.includes(countryCode) ? countryCode : countryOptions[0] ?? ""}
+                    onChange={(e) => setCountryCode(e.target.value)}
+                    disabled={countryOptions.length === 0}
+                    className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-sm text-gray-800 shadow-theme-xs focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 disabled:opacity-60 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:focus:border-brand-800"
+                  >
+                    <option value="">
+                      {countryOptions.length === 0 ? "Loading…" : "Select…"}
+                    </option>
+                    {countryOptions.map((code) => (
+                      <option key={code} value={code}>
+                        {code}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div>
                   <Label htmlFor="act">Action</Label>
                   <select
                     id="act"
-                    value={action}
-                    onChange={(e) => setAction(e.target.value as any)}
-                    className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-sm text-gray-800 shadow-theme-xs focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:focus:border-brand-800"
+                    value={actionOptions.includes(action) ? action : actionOptions[0] ?? "ordering"}
+                    onChange={(e) => setAction(e.target.value as "ordering" | "porting")}
+                    disabled={actionOptions.length === 0}
+                    className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-sm text-gray-800 shadow-theme-xs focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 disabled:opacity-60 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:focus:border-brand-800"
                   >
-                    <option value="ordering">ordering</option>
-                    <option value="porting">porting</option>
+                    {actionOptions.length === 0 ? (
+                      <>
+                        <option value="ordering">ordering</option>
+                        <option value="porting">porting</option>
+                      </>
+                    ) : (
+                      actionOptions.map((a) => (
+                        <option key={a} value={a}>
+                          {a}
+                        </option>
+                      ))
+                    )}
                   </select>
                 </div>
                 <div className="sm:col-span-2">
                   <Label htmlFor="pnt">Phone number type</Label>
                   <select
                     id="pnt"
-                    value={phoneNumberType}
-                    onChange={(e) => setPhoneNumberType(e.target.value as any)}
-                    className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-sm text-gray-800 shadow-theme-xs focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:focus:border-brand-800"
+                    value={phoneNumberTypeOptions.includes(phoneNumberType) ? phoneNumberType : phoneNumberTypeOptions[0] ?? "local"}
+                    onChange={(e) => setPhoneNumberType(e.target.value as typeof phoneNumberType)}
+                    disabled={phoneNumberTypeOptions.length === 0}
+                    className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-sm text-gray-800 shadow-theme-xs focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 disabled:opacity-60 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:focus:border-brand-800"
                   >
-                    <option value="local">local</option>
-                    <option value="toll_free">toll_free</option>
-                    <option value="mobile">mobile</option>
-                    <option value="national">national</option>
-                    <option value="shared_cost">shared_cost</option>
+                    {phoneNumberTypeOptions.length === 0 ? (
+                      <>
+                        <option value="local">local</option>
+                        <option value="toll_free">toll_free</option>
+                        <option value="mobile">mobile</option>
+                        <option value="national">national</option>
+                        <option value="shared_cost">shared_cost</option>
+                      </>
+                    ) : (
+                      phoneNumberTypeOptions.map((t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ))
+                    )}
                   </select>
                 </div>
               </div>
@@ -320,7 +385,10 @@ export default function NumbersCompliancePage() {
                 />
               </div>
 
-              <Button onClick={handleCreateGroup} disabled={isSaving}>
+              <Button
+                onClick={handleCreateGroup}
+                disabled={isSaving || countryOptions.length === 0 || !countryCode}
+              >
                 {isSaving ? "Creating…" : "Create group"}
               </Button>
             </div>

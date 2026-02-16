@@ -154,36 +154,56 @@ export async function listAssistantsAction() {
       }),
     }).catch(() => {});
     // #endregion
+    // Next.js strips error.message in production; set digest so the client can show it (digest is left intact)
+    const setDigest = (e: Error, msg: string) => {
+      (e as Error & { digest?: string }).digest = msg;
+      return e;
+    };
     // Improve error messages for common issues
     if (error instanceof Error) {
       if (error.message.includes("401") || error.message.includes("Unauthorized")) {
-        throw new Error(
-          "Telnyx API authentication failed (401). Please verify your API key is valid and has the correct permissions. " +
-          "Check your Telnyx API key in System Admin → Integrations → Telnyx"
+        throw setDigest(
+          new Error(
+            "Telnyx API authentication failed (401). Please verify your API key is valid and has the correct permissions. " +
+              "Check your Telnyx API key in System Admin → Integrations → Telnyx"
+          ),
+          "Telnyx API authentication failed (401). Please verify your API key in System Admin → Integrations → Telnyx."
         );
       }
       if (error.message.includes("Tenant context missing")) {
-        throw new Error(
+        throw setDigest(
+          new Error(
+            "Tenant context missing. Please select a tenant or configure the platform default Telnyx integration."
+          ),
           "Tenant context missing. Please select a tenant or configure the platform default Telnyx integration."
         );
       }
       if (error.message.includes("not configured") || error.message.includes("API key")) {
-        throw new Error(
-          "Telnyx API key not configured. " +
-          "Please configure Telnyx integration: System Admin → Integrations → Telephony → Telnyx, " +
-          "or set TELNYX_API_KEY environment variable."
+        throw setDigest(
+          new Error(
+            "Telnyx API key not configured. " +
+              "Please configure Telnyx integration: System Admin → Integrations → Telephony → Telnyx, " +
+              "or set TELNYX_API_KEY environment variable."
+          ),
+          "Telnyx API key not configured. Configure in System Admin → Integrations or set TELNYX_API_KEY."
         );
       }
       if (
         /INTEGRATION_CREDENTIALS_KEY|SUPABASE_SERVICE_ROLE|NEXT_PUBLIC_SUPABASE/i.test(error.message)
       ) {
-        throw new Error(
-          "Telnyx API key not configured. Set TELNYX_API_KEY in Vercel (or in System Admin → Integrations), or configure integration credentials on the server."
+        throw setDigest(
+          new Error(
+            "Telnyx API key not configured. Set TELNYX_API_KEY in Vercel (or in System Admin → Integrations), or configure integration credentials on the server."
+          ),
+          "Telnyx API key not configured. Set TELNYX_API_KEY or configure integration credentials on the server."
         );
       }
     }
-    // Never rethrow raw error in production so the client sees a clear message instead of the masked "Server Components render" text
-    throw new Error(
+    // Never rethrow raw error in production; digest ensures client sees this in prod (message is stripped)
+    throw setDigest(
+      new Error(
+        "Unable to load assistants. Please check your Telnyx integration (API key and tenant) and try again."
+      ),
       "Unable to load assistants. Please check your Telnyx integration (API key and tenant) and try again."
     );
   }

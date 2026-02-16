@@ -1,100 +1,86 @@
 #!/usr/bin/env tsx
 /**
- * Test script to verify Telnyx API is working correctly
+ * Test script to verify Telnyx API credentials and connectivity.
+ * Run from repo root: pnpm exec tsx apps/tenant/scripts/test-telnyx-api.ts
+ * Or from apps/tenant: pnpm exec tsx scripts/test-telnyx-api.ts
+ *
+ * Loads TELNYX_API_KEY from apps/tenant/.env.local or .env.local (root).
  */
 
-import { createTelnyxClient } from "@tinadmin/telnyx-ai-platform/server";
+import * as dotenv from "dotenv";
+import * as path from "path";
+import * as fs from "fs";
+
+// Load env: tenant .env.local first, then root .env.local (don't override)
+const tenantEnv = path.join(__dirname, "../.env.local");
+const rootEnv = path.join(__dirname, "../../../.env.local");
+if (fs.existsSync(tenantEnv)) dotenv.config({ path: tenantEnv });
+if (fs.existsSync(rootEnv)) dotenv.config({ path: rootEnv, override: false });
 
 const TELNYX_API_KEY = process.env.TELNYX_API_KEY || "";
+const TELNYX_BASE = "https://api.telnyx.com/v2";
+
+async function telnyxFetch<T = unknown>(path: string): Promise<T> {
+  const res = await fetch(`${TELNYX_BASE}${path}`, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${TELNYX_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    const msg = (body as { errors?: Array<{ title?: string; detail?: string }> })?.errors?.[0];
+    const detail = msg ? [msg.title, msg.detail].filter(Boolean).join(": ") : res.statusText;
+    throw new Error(`Telnyx API ${res.status}: ${detail}`);
+  }
+  return res.json() as Promise<T>;
+}
 
 async function testTelnyxAPI() {
-  console.log("🧪 Testing Telnyx API...\n");
+  console.log("🧪 Testing Telnyx API credentials...\n");
 
-  if (!TELNYX_API_KEY) {
-    console.error("❌ TELNYX_API_KEY environment variable is not set");
-    console.log("\nTo test:");
-    console.log("1. Set TELNYX_API_KEY in your .env.local file");
-    console.log("2. Or configure it via System Admin → Integrations → Telnyx");
+  if (!TELNYX_API_KEY?.trim()) {
+    console.error("❌ TELNYX_API_KEY is not set");
+    console.log("\nTo fix:");
+    console.log("  1. Set TELNYX_API_KEY in apps/tenant/.env.local or .env.local (root)");
+    console.log("  2. Or configure via System Admin → Integrations → Telnyx");
     process.exit(1);
   }
 
   try {
-    console.log("✅ Telnyx API Key found (length:", TELNYX_API_KEY.length, "chars)");
-    console.log("   Key preview:", TELNYX_API_KEY.substring(0, 10) + "...\n");
+    console.log("✅ TELNYX_API_KEY found (length:", TELNYX_API_KEY.length, "chars)");
+    console.log("   Preview:", TELNYX_API_KEY.substring(0, 10) + "...\n");
 
-    const client = createTelnyxClient({ apiKey: TELNYX_API_KEY });
-
-    // Test 1: List Assistants
-    console.log("Test 1: Listing AI Assistants...");
-    try {
-      const assistantsResponse = await client.request("/ai_assistants", {
-        method: "GET",
+    // Test 1: List AI Assistants (validates auth and AI product access)
+    console.log("Test 1: GET /ai/assistants...");
+    const assistantsRes = await telnyxFetch<{ data?: unknown[] }>("/ai/assistants");
+    const assistants = assistantsRes?.data ?? [];
+    console.log(`   ✅ Success — ${assistants.length} assistant(s)`);
+    if (assistants.length > 0) {
+      (assistants as { id?: string; name?: string; model?: string }[]).slice(0, 3).forEach((a, i) => {
+        console.log(`      ${i + 1}. ${a.name ?? a.id} (${a.model ?? "N/A"})`);
       });
-      
-      const assistants = (assistantsResponse as any)?.data || [];
-      console.log(`   ✅ Success! Found ${assistants.length} assistant(s)`);
-      
-      if (assistants.length > 0) {
-        console.log("\n   Assistants:");
-        assistants.slice(0, 5).forEach((assistant: any, index: number) => {
-          console.log(`   ${index + 1}. ${assistant.name || assistant.id}`);
-          console.log(`      ID: ${assistant.id}`);
-          console.log(`      Model: ${assistant.model || "N/A"}`);
-        });
-        if (assistants.length > 5) {
-          console.log(`   ... and ${assistants.length - 5} more`);
-        }
-      }
-    } catch (error: any) {
-      console.error("   ❌ Failed to list assistants");
-      if (error.message) {
-        console.error(`      Error: ${error.message}`);
-      }
-      if (error.statusCode) {
-        console.error(`      Status: ${error.statusCode}`);
-      }
-      throw error;
     }
 
-    // Test 2: List Models
-    console.log("\nTest 2: Listing available models...");
+    // Test 2: List AI Models (optional)
+    console.log("\nTest 2: GET /ai/models...");
     try {
-      const modelsResponse = await client.request("/ai_models", {
-        method: "GET",
-      });
-      
-      const models = (modelsResponse as any)?.data || [];
-      console.log(`   ✅ Success! Found ${models.length} model(s)`);
-      
-      if (models.length > 0) {
-        console.log("\n   Models (first 5):");
-        models.slice(0, 5).forEach((model: any, index: number) => {
-          console.log(`   ${index + 1}. ${model.name || model.id}`);
-        });
-      }
-    } catch (error: any) {
-      console.error("   ⚠️  Failed to list models (may not be available)");
-      if (error.message) {
-        console.error(`      Error: ${error.message}`);
-      }
+      const modelsRes = await telnyxFetch<{ data?: unknown[] }>("/ai/models");
+      const models = modelsRes?.data ?? [];
+      console.log(`   ✅ Success — ${models.length} model(s)`);
+    } catch (e) {
+      console.log("   ⚠️  Skipped or not available:", (e as Error).message);
     }
 
-    console.log("\n✅ Telnyx API is working correctly!");
-    console.log("\n📝 Next steps:");
-    console.log("   1. Test calling an assistant via the UI");
-    console.log("   2. Check telemetry at /ai/telemetry for API call logs");
-    console.log("   3. Verify webhook events at /ai/webhooks");
-
-  } catch (error: any) {
-    console.error("\n❌ Telnyx API test failed");
-    console.error("Error:", error.message || error);
-    
-    if (error.message?.includes("401") || error.message?.includes("Unauthorized")) {
-      console.error("\n💡 This looks like an authentication error.");
-      console.error("   Please verify your Telnyx API key is correct.");
-      console.error("   Get your API key from: Telnyx Mission Control → API Keys");
+    console.log("\n✅ Telnyx API credentials are valid.");
+    console.log("\n📝 Optional: TELNYX_PUBLIC_KEY / TELNYX_WEBHOOK_SECRET for webhook verification.");
+  } catch (error) {
+    const err = error as Error;
+    console.error("\n❌ Telnyx API test failed:", err.message);
+    if (err.message.includes("401") || err.message.includes("Unauthorized")) {
+      console.error("\n💡 Check your API key at: Telnyx Mission Control → API Keys");
     }
-    
     process.exit(1);
   }
 }

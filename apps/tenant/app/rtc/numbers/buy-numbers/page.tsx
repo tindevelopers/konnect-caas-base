@@ -44,6 +44,7 @@ import {
 } from "@/app/actions/telnyx/numbers";
 import { OMIT_FEATURES_FOR_COUNTRIES } from "@/src/core/telnyx/country-constraints";
 import { ACTIVE_SUPPLIERS, COMING_SOON_SUPPLIERS } from "@/src/core/numbers/suppliers";
+import { ISO_COUNTRIES } from "@/src/lib/isoCountries";
 import { isPlatformAdmin } from "@/app/actions/organization-admins";
 
 const TELNYX_FEATURES = [
@@ -203,14 +204,16 @@ export default function BuyNumbersPage() {
 
   useEffect(() => {
     listCountryCoverageAction().then((res) => {
-      if (res.ok) {
+      if (res.ok && res.countries.length > 0) {
         setCountries(res.countries);
         setCountryCode((prev) => {
-          if (res.countries.length === 0) return prev;
           if (res.countries.some((c) => c.code === prev)) return prev;
           const us = res.countries.find((c) => c.code === "US");
           return us?.code ?? res.countries[0].code;
         });
+      } else {
+        // Fallback when API fails or returns empty so country dropdown is always populated
+        setCountries(ISO_COUNTRIES);
       }
       setCountriesLoading(false);
     });
@@ -570,7 +573,7 @@ export default function BuyNumbersPage() {
     setInfo(null);
     setLoadingReservation(true);
     try {
-      const res = await listNumberReservationsAction({ pageNumber: 1, pageSize: 10 });
+      const res = await listNumberReservationsAction({ pageNumber: 1, pageSize: 50 });
       const reservations = res?.data ?? [];
       
       if (reservations.length === 0) {
@@ -747,6 +750,18 @@ export default function BuyNumbersPage() {
                   <> • Expires: {new Date(reservationExpiresAt).toLocaleString()}</>
                 )}
               </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setCartOrderOpen(true);
+                  setRightPanelTab("cart");
+                  handleFindMyReservations();
+                }}
+                disabled={loadingReservation}
+                className="mt-2 text-xs font-medium text-green-700 underline hover:text-green-800 dark:text-green-300 dark:hover:text-green-200 disabled:opacity-50"
+              >
+                {loadingReservation ? "Loading…" : "View all reservations"}
+              </button>
             </div>
             <Button
               size="sm"
@@ -827,8 +842,6 @@ export default function BuyNumbersPage() {
                 >
                   {countriesLoading ? (
                     <option value={countryCode}>Loading…</option>
-                  ) : countries.length === 0 ? (
-                    <option value="US">US (fallback)</option>
                   ) : (
                     countries.map((c) => (
                       <option key={c.code} value={c.code}>
@@ -1331,6 +1344,14 @@ export default function BuyNumbersPage() {
                     </div>
                   ) : (
                     <div className="mt-3 space-y-3">
+                      <button
+                        type="button"
+                        onClick={handleFindMyReservations}
+                        disabled={loadingReservation}
+                        className="text-xs font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300 disabled:opacity-50"
+                      >
+                        {loadingReservation ? "Loading…" : "View all reservations"}
+                      </button>
                       <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-800/50">
                         <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
                           Reservation ID
