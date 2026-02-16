@@ -62,7 +62,7 @@
     "tailwind-merge": "^2.6.0",
     "tailwindcss": "^4.0.0",
     "ws": "^8.19.0",
-    "xlsx": "^0.18.5"
+    "exceljs": "^4.4.0"
   },
   "devDependencies": {
     "@builder.io/dev-tools": "^1.25.0",

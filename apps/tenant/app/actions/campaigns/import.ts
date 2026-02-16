@@ -1,7 +1,7 @@
 "use server";
 
 import Papa from "papaparse";
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 import { createClient } from "@/core/database/server";
 import { getTenantForCrm } from "../crm/tenant-helper";
 import {
@@ -83,19 +83,30 @@ export async function parseFileContent(
       typeof fileContent === "string"
         ? Buffer.from(fileContent, "utf-8")
         : fileContent;
-    const workbook = XLSX.read(buffer, { type: "buffer" });
-    const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-    if (!firstSheet) {
+    const workbook = new ExcelJS.Workbook();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- ExcelJS accepts Node Buffer but types are strict
+await workbook.xlsx.load(buffer as any);
+    const worksheet = workbook.worksheets[0];
+    if (!worksheet) {
       return { rows: [], headers: [], errors: ["No sheet found in Excel file"] };
     }
-    const data = XLSX.utils.sheet_to_json<Record<string, unknown>>(firstSheet, {
-      defval: "",
-      raw: false,
+    const rows: Record<string, unknown>[] = [];
+    let headers: string[] = [];
+    worksheet.eachRow((row, rowNumber) => {
+      const values = row.values as (string | number | undefined)[];
+      if (!values) return;
+      const cells = values.slice(1); // ExcelJS uses 1-based index, first is empty
+      if (rowNumber === 1) {
+        headers = cells.map((c) => String(c ?? "").trim());
+        return;
+      }
+      const obj: Record<string, unknown> = {};
+      headers.forEach((h, i) => {
+        obj[h] = cells[i] ?? "";
+      });
+      rows.push(obj);
     });
-    const headers = data.length
-      ? Object.keys(data[0] as Record<string, unknown>)
-      : [];
-    return { rows: data, headers, errors };
+    return { rows, headers, errors };
   }
 
   return { rows: [], headers: [], errors: ["Unsupported file type"] };
