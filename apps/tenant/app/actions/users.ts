@@ -5,6 +5,7 @@ import { createAdminClient } from "@/core/database/admin-client";
 import type { Database } from "@/core/database";
 import { isPlatformAdmin } from "./organization-admins";
 import { requirePermission } from "@/core/permissions/middleware";
+import { getCurrentUserTenantId } from "@/core/multi-tenancy/validation";
 
 type User = Database["public"]["Tables"]["users"]["Row"] & {
   roles?: { 
@@ -148,6 +149,23 @@ export async function createUser(data: CreateUserData): Promise<{ success: boole
       throw new Error("Not authenticated");
     }
 
+    // Organization Admins can only create users in their own tenant; default tenant_id to current user's tenant
+    const isAdmin = await isPlatformAdmin();
+    let effectiveTenantId = data.tenant_id ?? null;
+    if (!isAdmin) {
+      const currentTenantId = await getCurrentUserTenantId();
+      if (effectiveTenantId) {
+        if (effectiveTenantId !== currentTenantId) {
+          throw new Error("You can only create users in your own organization.");
+        }
+      } else {
+        effectiveTenantId = currentTenantId;
+        if (!effectiveTenantId) {
+          throw new Error("Organization context is required to create a user.");
+        }
+      }
+    }
+
     // Validate email
     if (!data.email || !data.email.includes("@")) {
       throw new Error("Valid email is required");
@@ -216,7 +234,7 @@ export async function createUser(data: CreateUserData): Promise<{ success: boole
       id: authData.user.id,
       email: data.email,
       full_name: data.full_name,
-      tenant_id: data.tenant_id || null,
+      tenant_id: effectiveTenantId,
       role_id: roleId,
       plan: data.plan || "starter",
       status: data.status || "active",
@@ -419,13 +437,26 @@ export async function getAllRoles(): Promise<Array<{ id: string; name: string }>
 }
 
 /**
- * Get all tenants for dropdown
+ * Get all tenants for dropdown (Platform Admins see all; Organization Admins see only their tenant)
  */
 export async function getAllTenantsForUser(): Promise<Array<{ id: string; name: string; domain: string }>> {
   await requirePermission("users.read");
   
   try {
     const adminClient = createAdminClient();
+    const isAdmin = await isPlatformAdmin();
+    if (!isAdmin) {
+      const tenantId = await getCurrentUserTenantId();
+      if (!tenantId) return [];
+      const { data, error } = await adminClient
+        .from("tenants")
+        .select("id, name, domain")
+        .eq("id", tenantId)
+        .eq("status", "active")
+        .order("name");
+      if (error) throw error;
+      return (data || []) as Array<{ id: string; name: string; domain: string }>;
+    }
     const { data, error } = await adminClient
       .from("tenants")
       .select("id, name, domain")

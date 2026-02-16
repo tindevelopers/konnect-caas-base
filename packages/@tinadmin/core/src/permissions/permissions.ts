@@ -125,8 +125,10 @@ export async function getUserPermissions(
  */
 function mapRoleToPermissions(roleName: string, rolePermissions: string[]): UserPermissions {
   const permissions: Permission[] = [];
-  
-  if (roleName === "Organization Admin") {
+  // "Workspace Admin" was renamed to "Organization Admin" in migration; treat as alias for permissions
+  const effectiveRoleName = roleName === "Workspace Admin" ? "Organization Admin" : roleName;
+
+  if (effectiveRoleName === "Organization Admin") {
     permissions.push(
       "users.read",
       "users.write",
@@ -136,21 +138,23 @@ function mapRoleToPermissions(roleName: string, rolePermissions: string[]): User
       "roles.write",
       "settings.read",
       "settings.write",
-      "analytics.read"
+      "analytics.read",
+      "integrations.read",
+      "integrations.write"
     );
-  } else if (roleName === "Billing Owner") {
+  } else if (effectiveRoleName === "Billing Owner") {
     permissions.push(
       "billing.read",
       "billing.write",
       "analytics.read"
     );
-  } else if (roleName === "Developer") {
+  } else if (effectiveRoleName === "Developer") {
     permissions.push(
       "api.access",
       "settings.read",
       "analytics.read"
     );
-  } else if (roleName === "Viewer") {
+  } else if (effectiveRoleName === "Viewer") {
     permissions.push(
       "users.read",
       "tenants.read",
