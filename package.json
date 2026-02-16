@@ -93,6 +93,7 @@
     "clsx": "^2.1.1",
     "flatpickr": "^4.6.13",
     "next": "^16.1.6",
+    "papaparse": "^5.5.3",
     "prismjs": "^1.30.0",
     "react": "^19.2.3",
     "react-apexcharts": "^1.7.0",
