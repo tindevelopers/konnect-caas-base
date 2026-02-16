@@ -378,7 +378,8 @@ export async function searchLocalitiesFromDbAction(args: {
 
     if (error) return { ok: false, error: error.message };
 
-    const localities = [...new Set((data ?? []).map((r) => r.locality).filter(Boolean))];
+    const rows = (data ?? []) as Array<{ locality?: string | null }>;
+    const localities = [...new Set(rows.map((r) => r.locality).filter(Boolean))] as string[];
     return { ok: true, localities };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Unknown error" };
@@ -689,8 +690,7 @@ export async function listNumberReservationsAction(args?: { pageNumber?: number;
   try {
     const transport = await getTelnyxTransport("integrations.read");
     const qs = buildTelnyxFilterQuery({
-      "page[number]": args?.pageNumber ?? 1,
-      "page[size]": args?.pageSize ?? 25,
+      page: { number: args?.pageNumber ?? 1, size: args?.pageSize ?? 25 },
     });
     return trackApiCall(
       "listNumberReservations",
