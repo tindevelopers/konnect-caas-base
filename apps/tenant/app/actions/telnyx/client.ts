@@ -21,8 +21,8 @@ function extractApiKey(credentials?: Record<string, unknown> | null) {
 }
 
 /**
- * Resolves Telnyx API key in order: (1) tenant integration, (2) platform default, (3) TELNYX_API_KEY env.
- * Platform Admins can use platform defaults without selecting a tenant.
+ * Resolves Telnyx API key in order: (1) TELNYX_API_KEY env, (2) tenant integration, (3) platform default.
+ * Env takes precedence so local .env.local overrides DB config. Platform Admins can use platform defaults without selecting a tenant.
  */
 export async function getTelnyxTransport(
   requiredPermission: "integrations.read" | "integrations.write" = "integrations.read"
@@ -41,19 +41,62 @@ export async function getTelnyxTransport(
     "getTelnyxTransport",
     TELNYX_PROVIDER,
     async () => {
+      // #region agent log
+      fetch("http://127.0.0.1:7251/ingest/383b5b76-17df-49d2-b319-3ebc9439ed93", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          location: "client.ts:getTelnyxTransport",
+          message: "entry",
+          data: { perm: requiredPermission },
+          timestamp: Date.now(),
+          hypothesisId: "B",
+          runId: "getTransport",
+        }),
+      }).catch(() => {});
+      // #endregion
       const isAdmin = await isPlatformAdmin();
       let tenantId: string | null = null;
 
       // Try to get tenant ID, but don't fail if Platform Admin hasn't selected one
       try {
         tenantId = await ensureTenantId();
-      } catch {
+      } catch (e) {
+        // #region agent log
+        fetch("http://127.0.0.1:7251/ingest/383b5b76-17df-49d2-b319-3ebc9439ed93", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            location: "client.ts:getTelnyxTransport",
+            message: "ensureTenantId threw",
+            data: { isAdmin, err: e instanceof Error ? e.message : String(e).slice(0, 80) },
+            timestamp: Date.now(),
+            hypothesisId: "B",
+            runId: "getTransport",
+          }),
+        }).catch(() => {});
+        // #endregion
         // If not a Platform Admin and no tenant ID, we'll throw below
         if (!isAdmin) {
           throw new Error("Tenant context missing");
         }
         // Platform Admin without tenant selected - will use platform defaults
       }
+
+      // #region agent log
+      fetch("http://127.0.0.1:7251/ingest/383b5b76-17df-49d2-b319-3ebc9439ed93", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          location: "client.ts:getTelnyxTransport",
+          message: "after ensureTenantId",
+          data: { hasTenantId: !!tenantId },
+          timestamp: Date.now(),
+          hypothesisId: "B",
+          runId: "getTransport",
+        }),
+      }).catch(() => {});
+      // #endregion
 
       // Check permissions if we have a tenant ID
       if (tenantId) {
@@ -65,7 +108,28 @@ export async function getTelnyxTransport(
         throw new Error("Tenant context missing");
       }
 
-      // If we have a tenant ID, try tenant-specific config first
+      // Environment variable takes precedence (e.g. for local dev / overrides)
+      const envKey = process.env.TELNYX_API_KEY;
+      const hasEnvKey = !!(envKey && envKey.trim().length >= 10);
+      // #region agent log
+      fetch("http://127.0.0.1:7251/ingest/383b5b76-17df-49d2-b319-3ebc9439ed93", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          location: "client.ts:getTelnyxTransport",
+          message: "env key check",
+          data: { hasEnvKey },
+          timestamp: Date.now(),
+          hypothesisId: "C",
+          runId: "getTransport",
+        }),
+      }).catch(() => {});
+      // #endregion
+      if (hasEnvKey) {
+        return createTelnyxClient({ apiKey: envKey!.trim() });
+      }
+
+      // If we have a tenant ID, try tenant-specific config
       if (tenantId) {
         const tenantConfig = await getIntegrationConfig(tenantId, TELNYX_PROVIDER);
         const tenantKey = extractApiKey(
@@ -77,10 +141,43 @@ export async function getTelnyxTransport(
       }
 
       // Fall back to platform default
-      const platformConfig = await getPlatformIntegrationConfig(TELNYX_PROVIDER);
-      const platformKey = extractApiKey(
-        platformConfig?.credentials as Record<string, unknown> | null | undefined
-      );
+      let platformKey: string | undefined;
+      try {
+        const platformConfig = await getPlatformIntegrationConfig(TELNYX_PROVIDER);
+        platformKey = extractApiKey(
+          platformConfig?.credentials as Record<string, unknown> | null | undefined
+        );
+      } catch (e) {
+        // #region agent log
+        fetch("http://127.0.0.1:7251/ingest/383b5b76-17df-49d2-b319-3ebc9439ed93", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            location: "client.ts:getTelnyxTransport",
+            message: "getPlatformIntegrationConfig threw",
+            data: { errMsg: e instanceof Error ? e.message : String(e).slice(0, 100) },
+            timestamp: Date.now(),
+            hypothesisId: "C",
+            runId: "getTransport",
+          }),
+        }).catch(() => {});
+        // #endregion
+        throw e;
+      }
+      // #region agent log
+      fetch("http://127.0.0.1:7251/ingest/383b5b76-17df-49d2-b319-3ebc9439ed93", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          location: "client.ts:getTelnyxTransport",
+          message: "after platform config",
+          data: { hasPlatformKey: !!platformKey },
+          timestamp: Date.now(),
+          hypothesisId: "D",
+          runId: "getTransport",
+        }),
+      }).catch(() => {});
+      // #endregion
       if (platformKey) {
         // Validate API key format (Telnyx API keys typically start with "KEY" or are 20+ chars)
         if (platformKey.length < 10) {
@@ -92,14 +189,8 @@ export async function getTelnyxTransport(
         return createTelnyxClient({ apiKey: platformKey });
       }
 
-      // Final fallback to environment variable
-      const envKey = process.env.TELNYX_API_KEY;
-      if (envKey) {
-        return createTelnyxClient({ apiKey: envKey });
-      }
-
       throw new Error(
-        "Telnyx API key not configured. Set the system default (System Admin → Integrations), connect Telnyx for this organization (Integrations → Telephony → Telnyx), or set TELNYX_API_KEY."
+        "Telnyx API key not configured. Set TELNYX_API_KEY in .env.local, set the system default (System Admin → Integrations), or connect Telnyx for this organization (Integrations → Telephony → Telnyx)."
       );
     },
     {

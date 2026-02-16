@@ -83,11 +83,53 @@ function extractConversationId(response: unknown): string | null {
 }
 
 export async function listAssistantsAction() {
+  // #region agent log
+  fetch("http://127.0.0.1:7251/ingest/383b5b76-17df-49d2-b319-3ebc9439ed93", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      location: "assistants.ts:listAssistantsAction",
+      message: "entry",
+      data: {},
+      timestamp: Date.now(),
+      hypothesisId: "A",
+      runId: "listAssistants",
+    }),
+  }).catch(() => {});
+  // #endregion
   const { tenantId, userId } = await getTelemetryContext();
-  
+  // #region agent log
+  fetch("http://127.0.0.1:7251/ingest/383b5b76-17df-49d2-b319-3ebc9439ed93", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      location: "assistants.ts:listAssistantsAction",
+      message: "after getTelemetryContext",
+      data: { hasTenantId: !!tenantId },
+      timestamp: Date.now(),
+      hypothesisId: "A",
+      runId: "listAssistants",
+    }),
+  }).catch(() => {});
+  // #endregion
+
   try {
     const transport = await getTelnyxTransport("integrations.read");
-    
+    // #region agent log
+    fetch("http://127.0.0.1:7251/ingest/383b5b76-17df-49d2-b319-3ebc9439ed93", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        location: "assistants.ts:listAssistantsAction",
+        message: "after getTelnyxTransport",
+        data: {},
+        timestamp: Date.now(),
+        hypothesisId: "C",
+        runId: "listAssistants",
+      }),
+    }).catch(() => {});
+    // #endregion
+
     return trackApiCall(
       "listAssistants",
       TELNYX_PROVIDER,
@@ -95,6 +137,23 @@ export async function listAssistantsAction() {
       { tenantId, userId }
     );
   } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    // Server-side log for Vercel/production debugging (Next.js masks error message in prod)
+    console.error("[listAssistantsAction] caught:", errMsg);
+    // #region agent log
+    fetch("http://127.0.0.1:7251/ingest/383b5b76-17df-49d2-b319-3ebc9439ed93", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        location: "assistants.ts:listAssistantsAction",
+        message: "catch",
+        data: { errMsg: errMsg.slice(0, 120) },
+        timestamp: Date.now(),
+        hypothesisId: "E",
+        runId: "listAssistants",
+      }),
+    }).catch(() => {});
+    // #endregion
     // Improve error messages for common issues
     if (error instanceof Error) {
       if (error.message.includes("401") || error.message.includes("Unauthorized")) {
