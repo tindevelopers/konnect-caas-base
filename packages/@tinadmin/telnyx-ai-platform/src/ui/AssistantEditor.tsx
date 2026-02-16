@@ -131,7 +131,7 @@ export function AssistantEditor({
   });
   const [transcriptionModel, setTranscriptionModel] = useState("");
   const [enabledFeatures, setEnabledFeatures] = useState({
-    calls: false,
+    telephony: false,
     messaging: false,
   });
   const [dynamicVariables, setDynamicVariables] = useState<
@@ -168,7 +168,7 @@ export function AssistantEditor({
 
       const enabled = assistant.enabled_features ?? [];
       setEnabledFeatures({
-        calls: enabled.includes("calls"),
+        telephony: enabled.includes("telephony"),
         messaging: enabled.includes("messaging"),
       });
 
@@ -237,7 +237,7 @@ export function AssistantEditor({
     }
 
     const enabled: string[] = [];
-    if (enabledFeatures.calls) enabled.push("calls");
+    if (enabledFeatures.telephony) enabled.push("telephony");
     if (enabledFeatures.messaging) enabled.push("messaging");
 
     const dynamicVarsObject = dynamicVariables
@@ -573,16 +573,91 @@ export function AssistantEditor({
       )}
 
       {activeTab === "Widget" && (
-        <div>
-          <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-            Widget Settings (JSON)
-          </label>
-          <textarea
-            value={jsonFields.widget_settings ?? ""}
-            onChange={(e) => handleJsonChange("widget_settings", e.target.value)}
-            className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-xs font-mono dark:border-gray-700 dark:bg-gray-900"
-            rows={10}
-          />
+        <div className="space-y-6">
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm dark:border-amber-800 dark:bg-amber-950/30">
+            <p className="font-medium text-amber-800 dark:text-amber-200">
+              Widget for unauthenticated web calls
+            </p>
+            <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+              Enables users to interact with your AI assistant directly from your
+              website without authentication. Requires telephony and support for
+              unauthenticated web calls.
+            </p>
+            <div className="mt-4 flex items-center gap-4">
+              <label className="inline-flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
+                <input
+                  type="checkbox"
+                  checked={
+                    enabledFeatures.telephony &&
+                    (parseJsonField(
+                      jsonFields.telephony_settings ?? "",
+                      "telephony"
+                    ).value as Record<string, unknown>)?.supports_unauthenticated_web_calls ===
+                      true
+                  }
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setEnabledFeatures((prev) => ({
+                      ...prev,
+                      telephony: checked || prev.telephony,
+                    }));
+                    const telephonyResult = parseJsonField(
+                      jsonFields.telephony_settings ?? "",
+                      "Telephony settings"
+                    );
+                    const current =
+                      (telephonyResult.value as Record<string, unknown>) ?? {};
+                    handleJsonChange(
+                      "telephony_settings",
+                      stringify({
+                        ...current,
+                        supports_unauthenticated_web_calls: checked,
+                      })
+                    );
+                  }}
+                />
+                Enable widget for web calls
+              </label>
+              <button
+                type="button"
+                onClick={() => {
+                  setEnabledFeatures((prev) => ({ ...prev, telephony: true }));
+                  const telephonyResult = parseJsonField(
+                    jsonFields.telephony_settings ?? "",
+                    "Telephony settings"
+                  );
+                  const current =
+                    (telephonyResult.value as Record<string, unknown>) ?? {};
+                  handleJsonChange(
+                    "telephony_settings",
+                    stringify({
+                      ...current,
+                      supports_unauthenticated_web_calls: true,
+                    })
+                  );
+                }}
+                className="rounded-lg border border-amber-300 bg-amber-100 px-3 py-2 text-sm font-medium text-amber-900 hover:bg-amber-200 dark:border-amber-700 dark:bg-amber-900/50 dark:text-amber-100 dark:hover:bg-amber-900"
+              >
+                Enable now
+              </button>
+            </div>
+          </div>
+          <div>
+            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+              Widget Settings (JSON)
+            </label>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              Appearance and behavior (theme, start_call_text, default_state,
+              etc.).
+            </p>
+            <textarea
+              value={jsonFields.widget_settings ?? ""}
+              onChange={(e) => handleJsonChange("widget_settings", e.target.value)}
+              className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-xs font-mono dark:border-gray-700 dark:bg-gray-900"
+              rows={10}
+              placeholder='{"theme": "light", "default_state": "collapsed"}'
+            />
+          </div>
         </div>
       )}
 
@@ -596,12 +671,12 @@ export function AssistantEditor({
               <label className="inline-flex items-center gap-2">
                 <input
                   type="checkbox"
-                  checked={enabledFeatures.calls}
+                  checked={enabledFeatures.telephony}
                   onChange={(e) =>
-                    setEnabledFeatures((prev) => ({ ...prev, calls: e.target.checked }))
+                    setEnabledFeatures((prev) => ({ ...prev, telephony: e.target.checked }))
                   }
                 />
-                Calls
+                Telephony
               </label>
               <label className="inline-flex items-center gap-2">
                 <input

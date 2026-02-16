@@ -49,6 +49,9 @@ const templates: AssistantTemplate[] = [
         "You help users book and reschedule appointments. Ask for preferred times and confirm details.",
       greeting:
         "Hello! I can help schedule your appointment. What time works best?",
+      enabled_features: ["telephony"],
+      telephony_settings: { supports_unauthenticated_web_calls: true },
+      widget_settings: { theme: "light", default_state: "collapsed" },
     },
   },
 ];
