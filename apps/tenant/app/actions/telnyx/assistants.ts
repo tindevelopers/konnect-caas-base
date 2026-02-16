@@ -174,8 +174,18 @@ export async function listAssistantsAction() {
           "or set TELNYX_API_KEY environment variable."
         );
       }
+      if (
+        /INTEGRATION_CREDENTIALS_KEY|SUPABASE_SERVICE_ROLE|NEXT_PUBLIC_SUPABASE/i.test(error.message)
+      ) {
+        throw new Error(
+          "Telnyx API key not configured. Set TELNYX_API_KEY in Vercel (or in System Admin → Integrations), or configure integration credentials on the server."
+        );
+      }
     }
-    throw error;
+    // Never rethrow raw error in production so the client sees a clear message instead of the masked "Server Components render" text
+    throw new Error(
+      "Unable to load assistants. Please check your Telnyx integration (API key and tenant) and try again."
+    );
   }
 }
 
