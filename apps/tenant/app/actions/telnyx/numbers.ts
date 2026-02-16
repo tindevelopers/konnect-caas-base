@@ -662,6 +662,51 @@ export async function retrieveNumberReservationAction(reservationId: string) {
   }
 }
 
+export async function deleteNumberReservationAction(reservationId: string) {
+  const { tenantId, userId } = await getTelemetryContext();
+  if (!reservationId?.trim()) throw new Error("reservationId is required");
+
+  try {
+    const transport = await getTelnyxTransport("integrations.write");
+    return trackApiCall(
+      "deleteNumberReservation",
+      TELNYX_PROVIDER,
+      async () => {
+        return transport.request<TelnyxApiResponse<TelnyxNumberReservation>>(
+          `/number_reservations/${reservationId}`,
+          { method: "DELETE" }
+        );
+      },
+      { tenantId, userId, requestData: { reservationId } }
+    );
+  } catch (e) {
+    throw enhanceTelnyxError(e);
+  }
+}
+
+export async function listNumberReservationsAction(args?: { pageNumber?: number; pageSize?: number }) {
+  const { tenantId, userId } = await getTelemetryContext();
+  try {
+    const transport = await getTelnyxTransport("integrations.read");
+    const qs = buildTelnyxFilterQuery({
+      "page[number]": args?.pageNumber ?? 1,
+      "page[size]": args?.pageSize ?? 25,
+    });
+    return trackApiCall(
+      "listNumberReservations",
+      TELNYX_PROVIDER,
+      async () => {
+        return transport.request<TelnyxApiResponse<TelnyxNumberReservation[]>>(`/number_reservations?${qs}`, {
+          method: "GET",
+        });
+      },
+      { tenantId, userId, requestData: args }
+    );
+  } catch (e) {
+    throw enhanceTelnyxError(e);
+  }
+}
+
 export type TelnyxNumberOrderPhoneNumber = {
   id?: string;
   record_type?: string;
@@ -742,6 +787,8 @@ export async function createNumberOrderAction(args: {
     monthlyCost?: number;
     currency?: string;
   };
+  /** If true, bypass reservation and order directly (use when reservation expired) */
+  bypassReservation?: boolean;
 }) {
   const { tenantId, userId } = await getTelemetryContext();
 

@@ -15,6 +15,7 @@ import {
   ExclamationTriangleIcon,
   MapPinIcon,
   PrinterIcon,
+  XMarkIcon,
 } from "@heroicons/react/24/outline";
 import PageBreadcrumb from "@/components/common/PageBreadCrumb";
 import { Tooltip } from "@/components/ui/tooltip/Tooltip";
@@ -27,6 +28,9 @@ import {
   createNumberOrderAction,
   createNumberReservationAction,
   extendNumberReservationAction,
+  retrieveNumberReservationAction,
+  deleteNumberReservationAction,
+  listNumberReservationsAction,
   listAvailableAreaCodesAction,
   listCountryCoverageAction,
   listRequirementGroupsAction,
@@ -135,10 +139,67 @@ function LineTypeIcon({ type, className = "h-5 w-5" }: { type: string; className
 export default function BuyNumbersPage() {
   const [countries, setCountries] = useState<{ code: string; name: string }[]>([]);
   const [countriesLoading, setCountriesLoading] = useState(true);
-  const [countryCode, setCountryCode] = useState("US");
-  const [phoneNumberType, setPhoneNumberType] = useState<string>("local");
-  const [nationalDestinationCode, setNationalDestinationCode] = useState("");
-  const [locality, setLocality] = useState("");
+  const [countryCode, setCountryCode] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("buy_numbers_country_code") || "US";
+    }
+    return "US";
+  });
+  const [phoneNumberType, setPhoneNumberType] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("buy_numbers_phone_type") || "local";
+    }
+    return "local";
+  });
+  const [nationalDestinationCode, setNationalDestinationCode] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("buy_numbers_ndc") || "";
+    }
+    return "";
+  });
+  const [locality, setLocality] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("buy_numbers_locality") || "";
+    }
+    return "";
+  });
+  const [administrativeArea, setAdministrativeArea] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("buy_numbers_admin_area") || "";
+    }
+    return "";
+  });
+  const [rateCenter, setRateCenter] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("buy_numbers_rate_center") || "";
+    }
+    return "";
+  });
+
+  // Persist search form state to localStorage
+  useEffect(() => {
+    localStorage.setItem("buy_numbers_country_code", countryCode);
+  }, [countryCode]);
+
+  useEffect(() => {
+    localStorage.setItem("buy_numbers_phone_type", phoneNumberType);
+  }, [phoneNumberType]);
+
+  useEffect(() => {
+    localStorage.setItem("buy_numbers_ndc", nationalDestinationCode);
+  }, [nationalDestinationCode]);
+
+  useEffect(() => {
+    localStorage.setItem("buy_numbers_locality", locality);
+  }, [locality]);
+
+  useEffect(() => {
+    localStorage.setItem("buy_numbers_admin_area", administrativeArea);
+  }, [administrativeArea]);
+
+  useEffect(() => {
+    localStorage.setItem("buy_numbers_rate_center", rateCenter);
+  }, [rateCenter]);
 
   useEffect(() => {
     listCountryCoverageAction().then((res) => {
@@ -255,8 +316,6 @@ export default function BuyNumbersPage() {
 
   const [searchPhoneNumber, setSearchPhoneNumber] = useState("");
   const [phoneNumberPattern, setPhoneNumberPattern] = useState<PhoneNumberPattern>("contains");
-  const [administrativeArea, setAdministrativeArea] = useState("");
-  const [rateCenter, setRateCenter] = useState("");
 
   const [features, setFeatures] = useState<FeatureName[]>(["sms", "voice"]);
   const [limit, setLimit] = useState(50);
@@ -279,6 +338,46 @@ export default function BuyNumbersPage() {
 
   const [reservation, setReservation] = useState<TelnyxNumberReservation | null>(null);
   const [isReserving, setIsReserving] = useState(false);
+  const [loadingReservation, setLoadingReservation] = useState(false);
+  const [reservationIdInput, setReservationIdInput] = useState("");
+  const [availableReservations, setAvailableReservations] = useState<TelnyxNumberReservation[]>([]);
+  const [showReservationsList, setShowReservationsList] = useState(false);
+
+  // Load saved reservation ID from localStorage on mount
+  useEffect(() => {
+    const savedReservationId = localStorage.getItem("telnyx_active_reservation_id");
+    if (savedReservationId) {
+      setLoadingReservation(true);
+      retrieveNumberReservationAction(savedReservationId)
+        .then((res) => {
+          const data = res?.data;
+          if (data?.id) {
+            setReservation(data);
+            setInfo(`Loaded active reservation: ${data.id}`);
+            setCartOrderOpen(true);
+          } else {
+            localStorage.removeItem("telnyx_active_reservation_id");
+          }
+        })
+        .catch(() => {
+          localStorage.removeItem("telnyx_active_reservation_id");
+        })
+        .finally(() => {
+          setLoadingReservation(false);
+        });
+    }
+  }, []);
+
+  // Close panel with ESC key
+  useEffect(() => {
+    function handleEscape(e: KeyboardEvent) {
+      if (e.key === "Escape" && cartOrderOpen) {
+        setCartOrderOpen(false);
+      }
+    }
+    document.addEventListener("keydown", handleEscape);
+    return () => document.removeEventListener("keydown", handleEscape);
+  }, [cartOrderOpen]);
 
   const [connectionId, setConnectionId] = useState("");
   const [messagingProfileId, setMessagingProfileId] = useState("");
@@ -311,6 +410,7 @@ export default function BuyNumbersPage() {
 
   const [isOrdering, setIsOrdering] = useState(false);
   const [order, setOrder] = useState<TelnyxNumberOrder | null>(null);
+  const [orderError, setOrderError] = useState<string | null>(null);
 
   const selectedFromResults = useMemo(() => {
     const inResults = new Set(results.map((r) => r.phone_number));
@@ -377,6 +477,10 @@ export default function BuyNumbersPage() {
       else set.add(phoneNumber);
       return Array.from(set);
     });
+    // Show info message to guide user to reserve
+    if (!reservation) {
+      setInfo("Number added to selection. Click 'Reserve selected' to create a cart reservation.");
+    }
   }
 
   function selectAllOnPage() {
@@ -406,7 +510,12 @@ export default function BuyNumbersPage() {
       const created = res?.data ?? null;
       if (!created?.id) throw new Error("Reservation created but no id was returned.");
       setReservation(created);
+      // Save reservation ID to localStorage so user can return to it
+      localStorage.setItem("telnyx_active_reservation_id", created.id);
       setInfo(`Reserved ${created.phone_numbers?.length ?? selectedFromResults.length} numbers.`);
+      // Auto-open cart panel after successful reservation
+      setCartOrderOpen(true);
+      setRightPanelTab("cart");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Reservation failed");
     } finally {
@@ -430,9 +539,95 @@ export default function BuyNumbersPage() {
     }
   }
 
-  async function handleCreateOrder() {
+  async function handleLoadReservation() {
     setError(null);
     setInfo(null);
+    const id = reservationIdInput.trim();
+    if (!id) {
+      setError("Please enter a reservation ID");
+      return;
+    }
+    setLoadingReservation(true);
+    try {
+      const res = await retrieveNumberReservationAction(id);
+      const data = res?.data;
+      if (!data?.id) throw new Error("Reservation not found");
+      setReservation(data);
+      localStorage.setItem("telnyx_active_reservation_id", data.id);
+      setInfo(`Loaded reservation: ${data.id}`);
+      setCartOrderOpen(true);
+      setRightPanelTab("cart");
+      setReservationIdInput("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load reservation");
+    } finally {
+      setLoadingReservation(false);
+    }
+  }
+
+  async function handleFindMyReservations() {
+    setError(null);
+    setInfo(null);
+    setLoadingReservation(true);
+    try {
+      const res = await listNumberReservationsAction({ pageNumber: 1, pageSize: 10 });
+      const reservations = res?.data ?? [];
+      
+      if (reservations.length === 0) {
+        setInfo("No active reservations found. The reservation may have expired (30-minute limit).");
+        setAvailableReservations([]);
+        setShowReservationsList(false);
+        return;
+      }
+
+      // Show list of reservations for user to choose
+      setAvailableReservations(reservations);
+      setShowReservationsList(true);
+      setInfo(`Found ${reservations.length} active reservation${reservations.length > 1 ? 's' : ''}. Select one to load.`);
+      setCartOrderOpen(true);
+      setRightPanelTab("cart");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to find reservations");
+      setAvailableReservations([]);
+      setShowReservationsList(false);
+    } finally {
+      setLoadingReservation(false);
+    }
+  }
+
+  async function handleSelectReservation(selectedReservation: TelnyxNumberReservation) {
+    setReservation(selectedReservation);
+    localStorage.setItem("telnyx_active_reservation_id", selectedReservation.id);
+    setShowReservationsList(false);
+    setInfo(`Loaded reservation with ${selectedReservation.phone_numbers?.length ?? 0} number(s)`);
+  }
+
+  async function handleCancelReservation() {
+    if (!reservation?.id) return;
+    
+    if (!confirm(`Are you sure you want to cancel this reservation? The number(s) will be released and may be purchased by someone else.`)) {
+      return;
+    }
+
+    setError(null);
+    setInfo(null);
+    setIsReserving(true);
+    try {
+      await deleteNumberReservationAction(reservation.id);
+      localStorage.removeItem("telnyx_active_reservation_id");
+      setReservation(null);
+      setInfo("Reservation cancelled successfully. The number(s) have been released.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to cancel reservation");
+    } finally {
+      setIsReserving(false);
+    }
+  }
+
+  async function handleCreateOrder(bypassReservation = false) {
+    setError(null);
+    setInfo(null);
+    setOrderError(null);
     setIsOrdering(true);
 
     try {
@@ -471,13 +666,20 @@ export default function BuyNumbersPage() {
           avgUpfront > 0 || avgMonthly > 0
             ? { upfrontCost: avgUpfront, monthlyCost: avgMonthly, currency: costCurrency }
             : undefined,
+        bypassReservation,
       });
       const created = res?.data ?? null;
       if (!created?.id) throw new Error("Order created but no id was returned.");
       setOrder(created);
+      // Clear saved reservation since order is complete
+      localStorage.removeItem("telnyx_active_reservation_id");
+      setReservation(null);
+      setOrderError(null);
       setInfo(`Order created: ${created.id}`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to create order");
+      const errorMsg = e instanceof Error ? e.message : "Failed to create order";
+      setError(errorMsg);
+      setOrderError(errorMsg);
     } finally {
       setIsOrdering(false);
     }
@@ -532,9 +734,54 @@ export default function BuyNumbersPage() {
         </div>
       </div>
 
+      {reservation && (
+        <div className="mb-4 rounded-lg border border-green-200 bg-green-50 p-4 dark:border-green-800 dark:bg-green-950/30">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex-1">
+              <p className="text-sm font-medium text-green-900 dark:text-green-100">
+                Active Reservation: {reservation.phone_numbers?.length ?? 0} number{(reservation.phone_numbers?.length ?? 0) !== 1 ? 's' : ''} reserved
+              </p>
+              <p className="mt-1 text-xs text-green-700 dark:text-green-300">
+                ID: {reservation.id}
+                {reservationExpiresAt && (
+                  <> • Expires: {new Date(reservationExpiresAt).toLocaleString()}</>
+                )}
+              </p>
+            </div>
+            <Button
+              size="sm"
+              onClick={() => {
+                setCartOrderOpen(true);
+                setRightPanelTab("cart");
+              }}
+            >
+              Complete Checkout
+            </Button>
+          </div>
+        </div>
+      )}
+
       {error && (
         <div className="mb-4">
           <Alert variant="error" title="Error" message={error} />
+          {error.includes("already reserved") && (
+            <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950/30">
+              <p className="text-sm font-medium text-amber-900 dark:text-amber-100">
+                Number Already Reserved?
+              </p>
+              <p className="mt-1 text-sm text-amber-700 dark:text-amber-300">
+                This number is already in a reservation. Click below to find and load your active reservations.
+              </p>
+              <Button
+                onClick={handleFindMyReservations}
+                disabled={loadingReservation}
+                className="mt-3"
+                size="sm"
+              >
+                {loadingReservation ? "Searching..." : "Find My Reservations"}
+              </Button>
+            </div>
+          )}
         </div>
       )}
       {info && (
@@ -818,8 +1065,9 @@ export default function BuyNumbersPage() {
               <Button
                 onClick={handleReserveSelected}
                 disabled={isReserving || selectedFromResults.length === 0}
+                className={selectedFromResults.length > 0 ? "animate-pulse" : ""}
               >
-                {isReserving ? "Reserving…" : "Reserve selected"}
+                {isReserving ? "Reserving…" : `Reserve selected (${selectedFromResults.length})`}
               </Button>
             </div>
 
@@ -930,8 +1178,8 @@ export default function BuyNumbersPage() {
               onClick={() => setCartOrderOpen(false)}
               aria-hidden="true"
             />
-            <aside className="fixed right-0 top-0 z-50 flex h-full w-full max-w-md flex-col border-l border-gray-200 bg-white shadow-xl dark:border-gray-800 dark:bg-gray-900">
-              <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-4 py-3 dark:border-gray-800">
+            <aside className="fixed right-0 top-0 z-50 flex h-screen w-full max-w-md flex-col border-l border-gray-200 bg-white shadow-xl dark:border-gray-800 dark:bg-gray-900">
+              <div className="flex flex-shrink-0 items-center justify-between border-b border-gray-200 px-4 py-3 dark:border-gray-800">
                 <h2 className="text-base font-semibold text-gray-900 dark:text-white/90">
                   {rightPanelTab === "cart" ? "Cart (Reservation)" : "Order settings"}
                 </h2>
@@ -968,32 +1216,134 @@ export default function BuyNumbersPage() {
                   <button
                     type="button"
                     onClick={() => setCartOrderOpen(false)}
-                    className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
+                    className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-300"
+                    aria-label="Close panel"
+                    title="Close"
                   >
-                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
+                    <XMarkIcon className="h-5 w-5" />
                   </button>
                 </div>
               </div>
 
-              <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6 pt-4">
+              <div className="flex-1 overflow-y-auto overscroll-contain px-6 pb-6 pt-4" style={{ minHeight: 0 }}>
               {rightPanelTab === "cart" ? (
                 <>
-                  {!reservation ? (
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
-                      No active reservation yet. Reserve selected numbers to start a 30-minute hold window.
-                    </p>
+                  {showReservationsList ? (
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                          Select a Reservation
+                        </p>
+                        <button
+                          onClick={() => setShowReservationsList(false)}
+                          className="text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+                        >
+                          Back
+                        </button>
+                      </div>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        Found {availableReservations.length} active reservation{availableReservations.length > 1 ? 's' : ''}
+                      </p>
+                      <div className="space-y-2">
+                        {availableReservations.map((res) => (
+                          <button
+                            key={res.id}
+                            onClick={() => handleSelectReservation(res)}
+                            className="w-full rounded-lg border border-gray-200 p-3 text-left transition-colors hover:border-brand-500 hover:bg-brand-50 dark:border-gray-700 dark:hover:border-brand-500 dark:hover:bg-brand-950/20"
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex-1 min-w-0">
+                                <div className="font-medium text-sm text-gray-900 dark:text-gray-100">
+                                  {res.phone_numbers?.map(p => p.phone_number).join(", ") || "No numbers"}
+                                </div>
+                                <div className="mt-1 text-xs text-gray-500 dark:text-gray-400 font-mono truncate">
+                                  ID: {res.id}
+                                </div>
+                                {res.phone_numbers?.[0]?.expired_at && (
+                                  <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                    Expires: {new Date(res.phone_numbers[0].expired_at).toLocaleString()}
+                                  </div>
+                                )}
+                              </div>
+                              <div className="text-xs font-medium text-brand-600 dark:text-brand-400">
+                                {res.phone_numbers?.length || 0} number{(res.phone_numbers?.length || 0) !== 1 ? 's' : ''}
+                              </div>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : !reservation ? (
+                    <div className="space-y-4">
+                      <p className="text-sm text-gray-700 dark:text-gray-300">
+                        No active reservation yet.
+                      </p>
+                      <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-950/30">
+                        <p className="text-sm font-medium text-blue-900 dark:text-blue-100">
+                          How to checkout:
+                        </p>
+                        <ol className="mt-2 space-y-1 text-sm text-blue-800 dark:text-blue-200">
+                          <li>1. Select numbers from the search results</li>
+                          <li>2. Click "Reserve selected" button</li>
+                          <li>3. Review your cart (30-minute hold)</li>
+                          <li>4. Click "Place order" to complete</li>
+                        </ol>
+                      </div>
+                      {selectedFromResults.length > 0 && (
+                        <Button onClick={handleReserveSelected} disabled={isReserving} className="w-full">
+                          {isReserving ? "Reserving…" : `Reserve ${selectedFromResults.length} selected number${selectedFromResults.length > 1 ? 's' : ''}`}
+                        </Button>
+                      )}
+                      <div className="border-t border-gray-200 pt-4 dark:border-gray-700">
+                        <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                          Have an existing reservation?
+                        </p>
+                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                          Find your recent reservations or enter a reservation ID
+                        </p>
+                        <div className="mt-3 space-y-2">
+                          <Button
+                            onClick={handleFindMyReservations}
+                            disabled={loadingReservation}
+                            className="w-full"
+                          >
+                            {loadingReservation ? "Searching..." : "Find My Reservations"}
+                          </Button>
+                          <div className="flex gap-2">
+                            <Input
+                              placeholder="Or enter Reservation ID"
+                              value={reservationIdInput}
+                              onChange={(e) => setReservationIdInput(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") handleLoadReservation();
+                              }}
+                            />
+                            <Button
+                              onClick={handleLoadReservation}
+                              disabled={loadingReservation || !reservationIdInput.trim()}
+                              variant="outline"
+                            >
+                              {loadingReservation ? "Loading…" : "Load"}
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
                   ) : (
                     <div className="mt-3 space-y-3">
-                      <div className="text-sm text-gray-700 dark:text-gray-200">
-                        Reservation ID: <span className="font-mono text-xs">{reservation.id}</span>
-                      </div>
-                      {reservationExpiresAt && (
-                        <div className="text-xs text-gray-500 dark:text-gray-400">
-                          Expires: {new Date(reservationExpiresAt).toLocaleString()}
+                      <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-800/50">
+                        <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
+                          Reservation ID
                         </div>
-                      )}
+                        <div className="font-mono text-xs text-gray-900 dark:text-gray-100 break-all">
+                          {reservation.id}
+                        </div>
+                        {reservationExpiresAt && (
+                          <div className="mt-2 text-xs text-gray-600 dark:text-gray-400">
+                            Expires: {new Date(reservationExpiresAt).toLocaleString()}
+                          </div>
+                        )}
+                      </div>
                       <div className="max-h-[240px] overflow-auto rounded-lg border border-gray-100 p-3 text-sm dark:border-gray-800">
                         {reservation.phone_numbers?.length ? (
                           <ul className="space-y-1">
@@ -1009,12 +1359,42 @@ export default function BuyNumbersPage() {
                         )}
                       </div>
 
+                      {orderError && orderError.includes("10027") && (
+                        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/30">
+                          <p className="text-sm font-medium text-amber-900 dark:text-amber-100">
+                            Reservation Issue Detected
+                          </p>
+                          <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+                            Telnyx doesn't recognize this number in the reservation. This usually means the reservation expired or the number is no longer available.
+                          </p>
+                          <p className="mt-2 text-xs font-medium text-amber-800 dark:text-amber-200">
+                            Options:
+                          </p>
+                          <ul className="mt-1 text-xs text-amber-700 dark:text-amber-300 list-disc list-inside space-y-1">
+                            <li>Search for the number again to verify availability</li>
+                            <li>Create a new reservation with fresh numbers</li>
+                            <li>Contact Telnyx support if you believe this is an error</li>
+                          </ul>
+                        </div>
+                      )}
+
                       <div className="flex flex-col gap-2">
                         <Button onClick={handleCreateOrder} disabled={isOrdering}>
                           {isOrdering ? "Placing order…" : "Place order"}
                         </Button>
                         <Button variant="outline" onClick={handleExtendReservation} disabled={isReserving}>
                           {isReserving ? "Extending…" : "Extend reservation"}
+                        </Button>
+                        <Button 
+                          variant="outline" 
+                          onClick={handleCancelReservation} 
+                          disabled={isReserving}
+                          className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:text-red-300 dark:hover:bg-red-950/30"
+                        >
+                          {isReserving ? "Cancelling…" : "Cancel Reservation"}
+                        </Button>
+                        <Button variant="outline" onClick={() => setCartOrderOpen(false)}>
+                          Close
                         </Button>
                         <p className="text-xs text-gray-500 dark:text-gray-400">
                           Need to assign connection, messaging profile, or billing group? Use the Settings tab.
@@ -1100,9 +1480,33 @@ export default function BuyNumbersPage() {
                       </p>
                     </div>
 
-                    <Button onClick={handleCreateOrder} disabled={isOrdering}>
-                      {isOrdering ? "Creating order…" : "Create number order"}
-                    </Button>
+                    {orderError && orderError.includes("10027") && (
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/30">
+                        <p className="text-sm font-medium text-amber-900 dark:text-amber-100">
+                          Reservation Issue Detected
+                        </p>
+                        <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+                          Telnyx doesn't recognize this number in the reservation. This usually means the reservation expired or the number is no longer available.
+                        </p>
+                        <p className="mt-2 text-xs font-medium text-amber-800 dark:text-amber-200">
+                          Recommended Actions:
+                        </p>
+                        <ul className="mt-1 text-xs text-amber-700 dark:text-amber-300 list-disc list-inside space-y-1">
+                          <li>Search for the number again to verify it's still available</li>
+                          <li>Create a new reservation with the current available numbers</li>
+                          <li>Check if the reservation expired (30-minute limit)</li>
+                        </ul>
+                      </div>
+                    )}
+
+                    <div className="flex flex-col gap-2">
+                      <Button onClick={handleCreateOrder} disabled={isOrdering}>
+                        {isOrdering ? "Creating order…" : "Create number order"}
+                      </Button>
+                      <Button variant="outline" onClick={() => setCartOrderOpen(false)}>
+                        Cancel
+                      </Button>
+                    </div>
                   </div>
 
                   {order && (
