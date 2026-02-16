@@ -21,20 +21,15 @@ export function useAssistantsList(api: TelnyxAssistantsApi) {
     setError(null);
     try {
       const response = await api.listAssistants();
-      setData(response.data ?? []);
-    } catch (err) {
-      let errorMessage = "Failed to load assistants";
-      // Next.js strips error.message in production; digest is left intact, so prefer it for display
-      const digest = err && typeof err === "object" && "digest" in err ? (err as { digest?: string }).digest : undefined;
-      if (digest && typeof digest === "string") {
-        errorMessage = digest;
-      } else if (err instanceof Error) {
-        errorMessage = err.message;
-      } else if (typeof err === "string") {
-        errorMessage = err;
-      } else if (err && typeof err === "object" && "message" in err) {
-        errorMessage = String((err as { message: unknown }).message);
+      if (response && "error" in response) {
+        setError(response.error);
+        setData([]);
+      } else {
+        setData(response.data ?? []);
       }
+    } catch (err) {
+      const errorMessage =
+        err instanceof Error ? err.message : typeof err === "string" ? err : "Failed to load assistants";
       console.error("[useAssistantsList] Error loading assistants:", err);
       setError(errorMessage);
     } finally {

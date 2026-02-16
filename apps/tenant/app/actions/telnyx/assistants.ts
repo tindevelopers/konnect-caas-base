@@ -138,7 +138,6 @@ export async function listAssistantsAction() {
     );
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
-    // Server-side log for Vercel/production debugging (Next.js masks error message in prod)
     console.error("[listAssistantsAction] caught:", errMsg);
     // #region agent log
     fetch("http://127.0.0.1:7251/ingest/383b5b76-17df-49d2-b319-3ebc9439ed93", {
@@ -154,58 +153,26 @@ export async function listAssistantsAction() {
       }),
     }).catch(() => {});
     // #endregion
-    // Next.js strips error.message in production; set digest so the client can show it (digest is left intact)
-    const setDigest = (e: Error, msg: string) => {
-      (e as Error & { digest?: string }).digest = msg;
-      return e;
-    };
-    // Improve error messages for common issues
+    // Return error as data so the client can show it (Next.js strips thrown error messages in prod)
+    let userMessage = "Unable to load assistants. Please check your Telnyx integration (API key and tenant) and try again.";
     if (error instanceof Error) {
       if (error.message.includes("401") || error.message.includes("Unauthorized")) {
-        throw setDigest(
-          new Error(
-            "Telnyx API authentication failed (401). Please verify your API key is valid and has the correct permissions. " +
-              "Check your Telnyx API key in System Admin → Integrations → Telnyx"
-          ),
-          "Telnyx API authentication failed (401). Please verify your API key in System Admin → Integrations → Telnyx."
-        );
-      }
-      if (error.message.includes("Tenant context missing")) {
-        throw setDigest(
-          new Error(
-            "Tenant context missing. Please select a tenant or configure the platform default Telnyx integration."
-          ),
-          "Tenant context missing. Please select a tenant or configure the platform default Telnyx integration."
-        );
-      }
-      if (error.message.includes("not configured") || error.message.includes("API key")) {
-        throw setDigest(
-          new Error(
-            "Telnyx API key not configured. " +
-              "Please configure Telnyx integration: System Admin → Integrations → Telephony → Telnyx, " +
-              "or set TELNYX_API_KEY environment variable."
-          ),
-          "Telnyx API key not configured. Configure in System Admin → Integrations or set TELNYX_API_KEY."
-        );
-      }
-      if (
+        userMessage =
+          "Telnyx API authentication failed (401). Please verify your API key in System Admin → Integrations → Telnyx.";
+      } else if (error.message.includes("Tenant context missing")) {
+        userMessage =
+          "Tenant context missing. Please select a tenant or configure the platform default Telnyx integration.";
+      } else if (error.message.includes("not configured") || error.message.includes("API key")) {
+        userMessage =
+          "Telnyx API key not configured. Configure in System Admin → Integrations or set TELNYX_API_KEY.";
+      } else if (
         /INTEGRATION_CREDENTIALS_KEY|SUPABASE_SERVICE_ROLE|NEXT_PUBLIC_SUPABASE/i.test(error.message)
       ) {
-        throw setDigest(
-          new Error(
-            "Telnyx API key not configured. Set TELNYX_API_KEY in Vercel (or in System Admin → Integrations), or configure integration credentials on the server."
-          ),
-          "Telnyx API key not configured. Set TELNYX_API_KEY or configure integration credentials on the server."
-        );
+        userMessage =
+          "Telnyx API key not configured. Set TELNYX_API_KEY or configure integration credentials on the server.";
       }
     }
-    // Never rethrow raw error in production; digest ensures client sees this in prod (message is stripped)
-    throw setDigest(
-      new Error(
-        "Unable to load assistants. Please check your Telnyx integration (API key and tenant) and try again."
-      ),
-      "Unable to load assistants. Please check your Telnyx integration (API key and tenant) and try again."
-    );
+    return { error: userMessage };
   }
 }
 
