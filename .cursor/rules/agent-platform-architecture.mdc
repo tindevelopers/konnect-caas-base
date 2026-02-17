@@ -1,0 +1,17 @@
+---
+description: Agent platform architecture and tier conventions
+globs: apps/tenant/{src/core/agents,app/actions/agents,app/api/agents,app/api/public/agents}/**/*.{ts,tsx}
+alwaysApply: false
+---
+
+# Agent Platform Conventions
+
+- Model every tenant-facing assistant as a canonical `agent_instances` record before wiring provider runtime details.
+- Keep tier semantics explicit:
+  - `simple` -> fast default experiences (typically Telnyx-backed)
+  - `advanced` -> in-house orchestration with tools/MCP/RAG
+  - `third_party` -> external provider orchestration (e.g. Abacus)
+- Route all message processing through a single router (`routeAgentChat`) so telemetry and usage accounting stay consistent.
+- Use provider drivers to isolate vendor specifics; avoid embedding provider logic directly in route handlers.
+- Use promotion records (`agent_promotions`) whenever tier/provider changes so evolution history is preserved.
+- For listing directory use cases, bind entries through `agent_listing_bindings` rather than encoding listing IDs inside arbitrary metadata.

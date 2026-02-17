@@ -13,6 +13,7 @@
 import { WebSocketServer, WebSocket } from "ws";
 import { createServer } from "http";
 import { parse } from "url";
+import { RealtimeTranscriptionPipeline } from "./websocket-transcription";
 
 function parsePort(value: string | undefined): number | null {
   if (!value) return null;
@@ -34,6 +35,11 @@ interface ClientConnection {
 
 const clients = new Map<string, ClientConnection>();
 const telnyxConnections = new Map<string, string>(); // streamId -> clientId mapping
+const transcriptionPipeline = new RealtimeTranscriptionPipeline({
+  onTranscript: (event) => {
+    routeToCall(event.callControlId, event);
+  },
+});
 
 const server = createServer();
 const wss = new WebSocketServer({ 
@@ -138,6 +144,9 @@ wss.on("connection", (ws: WebSocket, req) => {
     if (isTelnyx && connection.streamId) {
       telnyxConnections.delete(connection.streamId);
     }
+    if (isTelnyx && connection.callControlId) {
+      transcriptionPipeline.closeCall(connection.callControlId);
+    }
     
     clients.delete(connectionId);
   });
@@ -191,6 +200,17 @@ function handleTelnyxMessage(connectionId: string, message: any) {
     const routedCount = routeToCall(connection.callControlId, message);
     console.log(`[TELEMETRY] Routed start event to ${routedCount} client(s)`);
   } else if (message.event === "media") {
+    if (
+      connection.callControlId &&
+      typeof message.media?.payload === "string" &&
+      message.media.payload.length > 0
+    ) {
+      transcriptionPipeline.handleMediaChunk(
+        connection.callControlId,
+        message.media.payload
+      );
+    }
+
     // Route media to the browser client(s) that started this call (fallback to broadcast)
     const routedCount = routeToCall(connection.callControlId, message);
     if (routedCount === 0) {
@@ -211,6 +231,9 @@ function handleTelnyxMessage(connectionId: string, message: any) {
     // Clean up mapping
     if (connection.streamId) {
       telnyxConnections.delete(connection.streamId);
+    }
+    if (connection.callControlId) {
+      transcriptionPipeline.closeCall(connection.callControlId);
     }
   } else if (message.event === "error") {
     console.error(`[TELEMETRY] Telnyx error`, {

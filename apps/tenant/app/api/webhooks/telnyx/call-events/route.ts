@@ -429,6 +429,9 @@ async function recordAiCallCostFromEvent(
     (inner.conversation_id as string | undefined) ??
     (data?.conversation_id as string | undefined) ??
     externalId;
+  const aiAssistantId =
+    (inner.ai_assistant_id as string | undefined) ??
+    (data?.ai_assistant_id as string | undefined);
 
   // Estimated cost: Telnyx Conversational AI = ~$0.08/min + $0.002/min call control
   // This is a conservative estimate; real cost comes from Telnyx billing API
@@ -470,6 +473,50 @@ async function recordAiCallCostFromEvent(
       estimated: actualCost === estimatedCost,
       conversation_id: conversationId,
       call_control_id: externalId,
+      ai_assistant_id: aiAssistantId ?? null,
     },
   });
+
+  // Also normalize voice usage into agent_usage_events for agent-level reporting.
+  if (aiAssistantId) {
+    try {
+      const adminClient = createAdminClient();
+      const { data: agent } = await (adminClient.from("agent_instances") as any)
+        .select("id")
+        .eq("tenant_id", tenantId)
+        .eq("provider", "telnyx")
+        .eq("external_ref", aiAssistantId)
+        .maybeSingle();
+
+      if (agent?.id) {
+        await (adminClient.from("agent_usage_events") as any).insert({
+          tenant_id: tenantId,
+          agent_id: agent.id,
+          channel: "voice",
+          provider: "telnyx",
+          event_type: "voice.call.completed",
+          input_tokens: 0,
+          output_tokens: 0,
+          audio_seconds: durationSec,
+          transcription_seconds: 0,
+          tool_calls: 0,
+          estimated_cost: actualCost,
+          currency: "USD",
+          trace_id: conversationId ?? externalId ?? null,
+          metadata: {
+            conversation_id: conversationId ?? null,
+            call_control_id: externalId ?? null,
+            ai_assistant_id: aiAssistantId,
+            source: "telnyx.call-events.webhook",
+          },
+        });
+      }
+    } catch (usageError) {
+      console.error("[TelnyxWebhook] Error recording agent voice usage:", {
+        tenantId,
+        aiAssistantId,
+        error: usageError instanceof Error ? usageError.message : String(usageError),
+      });
+    }
+  }
 }

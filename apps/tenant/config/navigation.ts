@@ -83,12 +83,20 @@ export const mainNavItems: NavItem[] = [
     new: true,
     subItems: [
       {
+        name: "Agent Manager",
+        path: "/ai/agent-manager",
+      },
+      {
         name: "AI Assistants",
         path: "/ai/assistants",
       },
       {
         name: "AI Tests",
         path: "/ai/tests",
+      },
+      {
+        name: "Voice Settings",
+        path: "/ai/voice-settings",
       },
       {
         name: "MCP Servers",
@@ -244,6 +252,7 @@ export const mainNavItems: NavItem[] = [
       { name: "API Configuration", path: "/saas/admin/system-admin/api-configuration" },
       { name: "Default Integrations", path: "/saas/admin/system-admin/default-integrations" },
       { name: "Integrations", path: "/saas/admin/system-admin/integrations" },
+      { name: "Agent Providers", path: "/saas/admin/system-admin/agent-providers", new: true },
       { name: "Pricing & Markup", path: "/saas/admin/system-admin/pricing", new: true },
       { name: "Tenant Costs", path: "/saas/admin/system-admin/tenant-costs", new: true },
       { name: "Multi-Tenant", path: "/multi-tenant", new: true },

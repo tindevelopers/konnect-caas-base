@@ -1,0 +1,19 @@
+---
+description: Agent telemetry, usage tracking, and cost metering requirements
+globs: apps/tenant/{src/core/agents,app/api/agents,app/api/webhooks}/**/*.{ts,tsx}
+alwaysApply: false
+---
+
+# Agent Telemetry and Cost Rules
+
+- Every provider interaction should emit an `ai_agent_events` record for start/completion/failure flows.
+- Track per-agent usage in `agent_usage_events` with normalized units:
+  - tokens
+  - audio seconds
+  - transcription seconds
+  - tool call counts
+  - estimated cost
+- When cost data is available, also persist billable usage in `tenant_usage_costs` (via existing billing helpers) so tenant-level billing dashboards stay aligned.
+- Include `trace_id` where possible to correlate events across router, provider, and billing logs.
+- Never log raw secrets/API keys in telemetry payloads.
+- Keep cross-tenant data out of analytics results unless user is explicitly in platform-admin context.

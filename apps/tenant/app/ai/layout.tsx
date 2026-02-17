@@ -6,8 +6,10 @@ import React from "react";
 import AdminLayout from "@/layout/AdminLayout";
 
 const aiNavItems = [
+  { label: "Agent Manager", href: "/ai/agent-manager" },
   { label: "AI Assistants", href: "/ai/assistants" },
   { label: "AI Tests", href: "/ai/tests" },
+  { label: "Voice Settings", href: "/ai/voice-settings" },
   { label: "MCP Servers", href: "/ai/mcp-servers" },
   { label: "Integration Secrets", href: "/ai/integration-secrets" },
 ];
