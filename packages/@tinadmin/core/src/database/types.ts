@@ -995,6 +995,29 @@ export interface Database {
           created_at?: string;
         };
       };
+      tenant_ai_assistants: {
+        Row: {
+          id: string;
+          tenant_id: string;
+          telnyx_assistant_id: string;
+          created_at: string;
+          created_by: string | null;
+        };
+        Insert: {
+          id?: string;
+          tenant_id: string;
+          telnyx_assistant_id: string;
+          created_at?: string;
+          created_by?: string | null;
+        };
+        Update: {
+          id?: string;
+          tenant_id?: string;
+          telnyx_assistant_id?: string;
+          created_at?: string;
+          created_by?: string | null;
+        };
+      };
     };
   };
 }

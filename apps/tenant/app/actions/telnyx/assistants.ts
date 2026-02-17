@@ -17,12 +17,79 @@ import {
   triggerAssistantTestRun,
 } from "@tinadmin/telnyx-ai-platform/server";
 import { headers } from "next/headers";
-import { getTelnyxTransport } from "./client";
+import { getTelnyxTransport, getTelnyxTransportWithSource } from "./client";
 import { trackApiCall } from "@/src/core/telemetry";
 import { ensureTenantId } from "@/core/multi-tenancy/validation";
 import { createClient } from "@/core/database/server";
+import { createAdminClient } from "@/core/database/admin-client";
 
 const TELNYX_PROVIDER = "telnyx";
+
+/**
+ * Register a Telnyx assistant ID in the tenant_ai_assistants mapping table.
+ * Only used when the tenant is on a shared Telnyx account (non-enterprise).
+ */
+async function registerAssistantMapping(
+  tenantId: string,
+  telnyxAssistantId: string,
+  userId?: string | null
+): Promise<void> {
+  try {
+    const adminClient = createAdminClient();
+    await adminClient
+      .from("tenant_ai_assistants" as any)
+      .upsert(
+        {
+          tenant_id: tenantId,
+          telnyx_assistant_id: telnyxAssistantId,
+          created_by: userId || null,
+        } as any,
+        { onConflict: "tenant_id,telnyx_assistant_id" }
+      );
+  } catch (err) {
+    console.error("[registerAssistantMapping] Failed to register mapping:", err);
+  }
+}
+
+/**
+ * Remove a Telnyx assistant ID from the tenant_ai_assistants mapping table.
+ */
+async function removeAssistantMapping(
+  tenantId: string,
+  telnyxAssistantId: string
+): Promise<void> {
+  try {
+    const adminClient = createAdminClient();
+    await adminClient
+      .from("tenant_ai_assistants" as any)
+      .delete()
+      .eq("tenant_id", tenantId)
+      .eq("telnyx_assistant_id", telnyxAssistantId);
+  } catch (err) {
+    console.error("[removeAssistantMapping] Failed to remove mapping:", err);
+  }
+}
+
+/**
+ * Get the set of Telnyx assistant IDs mapped to a tenant.
+ * Returns null if tenant is not on a shared account (enterprise tenants skip filtering).
+ */
+async function getTenantAssistantIds(tenantId: string): Promise<Set<string>> {
+  const adminClient = createAdminClient();
+  const { data, error } = await adminClient
+    .from("tenant_ai_assistants" as any)
+    .select("telnyx_assistant_id")
+    .eq("tenant_id", tenantId);
+
+  if (error) {
+    console.error("[getTenantAssistantIds] Error:", error);
+    return new Set();
+  }
+
+  return new Set(
+    (data as { telnyx_assistant_id: string }[]).map((r) => r.telnyx_assistant_id)
+  );
+}
 
 interface CallAssistantPayload {
   assistantId: string;
@@ -83,77 +150,40 @@ function extractConversationId(response: unknown): string | null {
 }
 
 export async function listAssistantsAction() {
-  // #region agent log
-  fetch("http://127.0.0.1:7251/ingest/383b5b76-17df-49d2-b319-3ebc9439ed93", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      location: "assistants.ts:listAssistantsAction",
-      message: "entry",
-      data: {},
-      timestamp: Date.now(),
-      hypothesisId: "A",
-      runId: "listAssistants",
-    }),
-  }).catch(() => {});
-  // #endregion
   const { tenantId, userId } = await getTelemetryContext();
-  // #region agent log
-  fetch("http://127.0.0.1:7251/ingest/383b5b76-17df-49d2-b319-3ebc9439ed93", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      location: "assistants.ts:listAssistantsAction",
-      message: "after getTelemetryContext",
-      data: { hasTenantId: !!tenantId },
-      timestamp: Date.now(),
-      hypothesisId: "A",
-      runId: "listAssistants",
-    }),
-  }).catch(() => {});
-  // #endregion
 
   try {
-    const transport = await getTelnyxTransport("integrations.read");
-    // #region agent log
-    fetch("http://127.0.0.1:7251/ingest/383b5b76-17df-49d2-b319-3ebc9439ed93", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        location: "assistants.ts:listAssistantsAction",
-        message: "after getTelnyxTransport",
-        data: {},
-        timestamp: Date.now(),
-        hypothesisId: "C",
-        runId: "listAssistants",
-      }),
-    }).catch(() => {});
-    // #endregion
+    const { transport, credentialSource } = await getTelnyxTransportWithSource("integrations.read");
 
     return trackApiCall(
       "listAssistants",
       TELNYX_PROVIDER,
-      () => listAssistants(transport),
+      async () => {
+        const response = await listAssistants(transport);
+
+        // Enterprise tenants (own Telnyx account) see all their assistants — no filter
+        if (credentialSource === "tenant") {
+          return response;
+        }
+
+        // Shared account: filter by tenant_ai_assistants mapping
+        if (tenantId && credentialSource === "shared") {
+          const allowedIds = await getTenantAssistantIds(tenantId);
+          const allAssistants = response.data ?? [];
+          return {
+            ...response,
+            data: allAssistants.filter((a: { id: string }) => allowedIds.has(a.id)),
+          };
+        }
+
+        // Platform Admin with no tenant selected on shared account — show all
+        return response;
+      },
       { tenantId, userId }
     );
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     console.error("[listAssistantsAction] caught:", errMsg);
-    // #region agent log
-    fetch("http://127.0.0.1:7251/ingest/383b5b76-17df-49d2-b319-3ebc9439ed93", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        location: "assistants.ts:listAssistantsAction",
-        message: "catch",
-        data: { errMsg: errMsg.slice(0, 120) },
-        timestamp: Date.now(),
-        hypothesisId: "E",
-        runId: "listAssistants",
-      }),
-    }).catch(() => {});
-    // #endregion
-    // Return error as data so the client can show it (Next.js strips thrown error messages in prod)
     let userMessage = "Unable to load assistants. Please check your Telnyx integration (API key and tenant) and try again.";
     if (error instanceof Error) {
       if (error.message.includes("Permission denied") || error.message.includes("Insufficient tenant permissions")) {
@@ -197,12 +227,22 @@ export async function getAssistantAction(assistantId: string) {
 
 export async function createAssistantAction(payload: TelnyxCreateAssistantRequest) {
   const { tenantId, userId } = await getTelemetryContext();
-  const transport = await getTelnyxTransport("integrations.write");
+  const { transport, credentialSource } = await getTelnyxTransportWithSource("integrations.write");
   
   return trackApiCall(
     "createAssistant",
     TELNYX_PROVIDER,
-    () => createAssistant(transport, payload),
+    async () => {
+      const result = await createAssistant(transport, payload);
+      const assistantId = result?.id ?? (result as any)?.data?.id;
+
+      // Register mapping for non-enterprise tenants (shared Telnyx account)
+      if (credentialSource === "shared" && tenantId && assistantId) {
+        await registerAssistantMapping(tenantId, assistantId, userId);
+      }
+
+      return result;
+    },
     {
       tenantId,
       userId,
@@ -246,7 +286,7 @@ export async function cloneAssistantAction(
   }
 
   const { tenantId, userId } = await getTelemetryContext();
-  const transport = await getTelnyxTransport("integrations.write");
+  const { transport, credentialSource } = await getTelnyxTransportWithSource("integrations.write");
 
   return trackApiCall(
     "cloneAssistant",
@@ -257,6 +297,12 @@ export async function cloneAssistantAction(
       if (!clonedId) {
         throw new Error("Clone succeeded but no assistant ID was returned.");
       }
+
+      // Register mapping for non-enterprise tenants (shared Telnyx account)
+      if (credentialSource === "shared" && tenantId) {
+        await registerAssistantMapping(tenantId, clonedId, userId);
+      }
+
       return { id: clonedId };
     },
     {
@@ -269,12 +315,19 @@ export async function cloneAssistantAction(
 
 export async function deleteAssistantAction(assistantId: string) {
   const { tenantId, userId } = await getTelemetryContext();
-  const transport = await getTelnyxTransport("integrations.write");
+  const { transport, credentialSource } = await getTelnyxTransportWithSource("integrations.write");
   
   return trackApiCall(
     "deleteAssistant",
     TELNYX_PROVIDER,
-    () => deleteAssistant(transport, assistantId),
+    async () => {
+      await deleteAssistant(transport, assistantId);
+
+      // Clean up mapping for non-enterprise tenants (shared Telnyx account)
+      if (credentialSource === "shared" && tenantId) {
+        await removeAssistantMapping(tenantId, assistantId);
+      }
+    },
     {
       tenantId,
       userId,
@@ -285,12 +338,27 @@ export async function deleteAssistantAction(assistantId: string) {
 
 export async function importAssistantsAction(payload: TelnyxImportAssistantsRequest) {
   const { tenantId, userId } = await getTelemetryContext();
-  const transport = await getTelnyxTransport("integrations.write");
+  const { transport, credentialSource } = await getTelnyxTransportWithSource("integrations.write");
   
   return trackApiCall(
     "importAssistants",
     TELNYX_PROVIDER,
-    () => importAssistants(transport, payload),
+    async () => {
+      const result = await importAssistants(transport, payload);
+
+      // Register mappings for non-enterprise tenants (shared Telnyx account)
+      if (credentialSource === "shared" && tenantId) {
+        const imported = result?.data ?? [];
+        for (const item of imported) {
+          const assistantId = (item as { id?: string }).id;
+          if (assistantId) {
+            await registerAssistantMapping(tenantId, assistantId, userId);
+          }
+        }
+      }
+
+      return result;
+    },
     {
       tenantId,
       userId,
