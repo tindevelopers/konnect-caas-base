@@ -156,7 +156,10 @@ export async function listAssistantsAction() {
     // Return error as data so the client can show it (Next.js strips thrown error messages in prod)
     let userMessage = "Unable to load assistants. Please check your Telnyx integration (API key and tenant) and try again.";
     if (error instanceof Error) {
-      if (error.message.includes("401") || error.message.includes("Unauthorized")) {
+      if (error.message.includes("Permission denied") || error.message.includes("Insufficient tenant permissions")) {
+        userMessage =
+          "You don't have permission to view integrations. Contact your Organization Admin to get access to AI Assistants.";
+      } else if (error.message.includes("401") || error.message.includes("Unauthorized")) {
         userMessage =
           "Telnyx API authentication failed (401). Please verify your API key in System Admin → Integrations → Telnyx.";
       } else if (error.message.includes("Tenant context missing")) {
