@@ -14,6 +14,13 @@ These skills teach the AI how to use Telnyx APIs with the JavaScript SDK:
 - **telnyx-verify-javascript** - Phone verification, number lookup, 2FA
 - **telnyx-ai-assistants-javascript** - AI voice assistants with knowledge bases
 
+### Abacus.AI Skills (JavaScript / REST)
+
+Skills for working with Abacus.AI ChatLLM and Super Assistants (similar in spirit to Telnyx AI assistants):
+
+- **abacus-chatllm-javascript** - Chat completions, LLM invocation (evaluate_prompt), multi-turn chat, JSON responses via REST API
+- **abacus-super-assistants-javascript** - Deep Agent, custom chatbots, deployments, and embedding super assistants in applications
+
 ### Project-Specific Skills
 
 - **gohighlevel-typescript** - GoHighLevel CRM integration following this project's provider pattern
@@ -25,6 +32,8 @@ These skills are automatically available to Cursor when working in this project.
 - "How do I send an SMS using Telnyx?"
 - "Show me how to create a contact in GoHighLevel"
 - "How do I make a voice call with Telnyx?"
+- "How do I call Abacus.AI ChatLLM for a chat completion?"
+- "How do I deploy an Abacus super assistant or Deep Agent app?"
 
 ## Adding More Skills
 
@@ -37,4 +46,5 @@ To add more Telnyx skills or other agent skills:
 ## Skill Sources
 
 - Telnyx skills: https://github.com/team-telnyx/telnyx-ext-agent-skills
+- Abacus.AI skills: Created for this project (REST API; no official JS SDK). Docs: https://abacus.ai/help
 - GoHighLevel skill: Created specifically for this project

@@ -4,7 +4,9 @@ import { usePathname } from "next/navigation";
 
 type SidebarContextType = {
   isExpanded: boolean;
+  isMobile: boolean;
   isMobileOpen: boolean;
+  isInitialized: boolean;
   isHovered: boolean;
   activeItem: string | null;
   openSubmenu: string | null;
@@ -77,7 +79,9 @@ export const SidebarProvider: React.FC<{ children: React.ReactNode }> = ({
     <SidebarContext.Provider
       value={{
         isExpanded: !isInitialized || !isMobile ? isExpanded : false,
+        isMobile,
         isMobileOpen,
+        isInitialized,
         isHovered,
         activeItem,
         openSubmenu,
