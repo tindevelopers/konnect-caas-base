@@ -39,7 +39,7 @@ export function IntegrationSecretsList({ api }: IntegrationSecretsListProps) {
             Integration Secrets
           </h1>
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            Manage Telnyx integration secrets for external providers.
+            Manage integration secrets for external providers.
           </p>
         </div>
         <div className="flex items-center gap-2">

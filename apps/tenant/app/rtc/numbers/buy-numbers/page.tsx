@@ -696,7 +696,7 @@ export default function BuyNumbersPage() {
         <div>
           <h1 className="text-2xl font-semibold text-gray-900 dark:text-white/90">Buy Numbers</h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Search Telnyx inventory, reserve numbers in a cart, then place an order.
+            Search provider inventory, reserve numbers in a cart, then place an order.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -1386,7 +1386,7 @@ export default function BuyNumbersPage() {
                             Reservation Issue Detected
                           </p>
                           <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
-                            Telnyx doesn't recognize this number in the reservation. This usually means the reservation expired or the number is no longer available.
+                            The provider doesn't recognize this number in the reservation. This usually means the reservation expired or the number is no longer available.
                           </p>
                           <p className="mt-2 text-xs font-medium text-amber-800 dark:text-amber-200">
                             Options:
@@ -1394,7 +1394,7 @@ export default function BuyNumbersPage() {
                           <ul className="mt-1 text-xs text-amber-700 dark:text-amber-300 list-disc list-inside space-y-1">
                             <li>Search for the number again to verify availability</li>
                             <li>Create a new reservation with fresh numbers</li>
-                            <li>Contact Telnyx support if you believe this is an error</li>
+                            <li>Contact support if you believe this is an error</li>
                           </ul>
                         </div>
                       )}
@@ -1430,9 +1430,9 @@ export default function BuyNumbersPage() {
                     Optional: attach your numbers to a connection, messaging profile, and billing group.
                   </p>
                   <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm dark:border-amber-800 dark:bg-amber-950/30">
-                    <p className="font-medium text-amber-800 dark:text-amber-200">Client pricing vs Telnyx cost</p>
+                    <p className="font-medium text-amber-800 dark:text-amber-200">Client pricing vs provider cost</p>
                     <p className="mt-1 text-amber-700 dark:text-amber-300">
-                      To charge clients one price while buying at Telnyx&apos;s cost: define a product/price catalog (client price), integrate with Stripe or your billing system to charge before placing the order, then place the order with Telnyx at their price. The margin is the difference.
+                      To charge clients one price while buying at provider cost: define a product/price catalog (client price), integrate with Stripe or your billing system to charge before placing the order, then place the order at the provider price. The margin is the difference.
                     </p>
                   </div>
 
@@ -1507,7 +1507,7 @@ export default function BuyNumbersPage() {
                           Reservation Issue Detected
                         </p>
                         <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
-                          Telnyx doesn't recognize this number in the reservation. This usually means the reservation expired or the number is no longer available.
+                          The provider doesn't recognize this number in the reservation. This usually means the reservation expired or the number is no longer available.
                         </p>
                         <p className="mt-2 text-xs font-medium text-amber-800 dark:text-amber-200">
                           Recommended Actions:

@@ -80,7 +80,7 @@ export default function McpServersPage() {
           MCP Servers
         </h1>
         <p className="text-sm text-gray-500 dark:text-gray-400">
-          Register MCP endpoints and attach them to assistants using Telnyx tools.
+          Register MCP endpoints and attach them to assistants using agent tools.
         </p>
       </div>
 

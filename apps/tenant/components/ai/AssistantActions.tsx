@@ -382,7 +382,7 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
                 }
               />
               <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                Find this in Telnyx Mission Control → Voice → Call Control Apps.
+                Find this in your provider console → Voice → Call Control Apps.
               </p>
             </div>
             <div>
@@ -403,12 +403,12 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
                 WebSocket URL for real-time audio streaming. Auto-populated based on your environment.
                 {callForm.streamUrl && callForm.streamUrl.includes("localhost") && (
                   <span className="block mt-1 text-amber-600 dark:text-amber-400">
-                    ⚠️ Localhost won't work for Telnyx. Set WEBSOCKET_URL in .env.local to use remote server (Railway) for testing.
+                    ⚠️ Localhost won't work for the telephony provider. Set WEBSOCKET_URL in .env.local to use a remote server (Railway) for testing.
                   </span>
                 )}
                 {callForm.streamUrl && callForm.streamUrl.includes("ngrok") && (
                   <span className="block mt-1 text-green-600 dark:text-green-400">
-                    ✅ Using ngrok tunnel - Telnyx will be able to connect!
+                    ✅ Using ngrok tunnel - the provider will be able to connect.
                   </span>
                 )}
                 {callForm.streamUrl && (callForm.streamUrl.includes("vercel.app") || callForm.streamUrl.includes("railway.app") || callForm.streamUrl.includes("render.com") || callForm.streamUrl.includes("fly.dev")) && !callForm.streamUrl.includes("ngrok") && (
@@ -460,7 +460,7 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
             Receive inbound calls
           </h4>
           <p className="mb-5 text-sm text-gray-500 dark:text-gray-400">
-            Configure your Telnyx Call Control app to route inbound calls to this assistant.
+            Configure your Call Control app to route inbound calls to this assistant.
           </p>
 
           {isLoadingInstructions && (

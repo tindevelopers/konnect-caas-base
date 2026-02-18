@@ -1018,7 +1018,7 @@ export default function NewCampaignPage() {
                     type="text"
                     value={connectionId}
                     onChange={(e) => setConnectionId(e.target.value)}
-                    placeholder="Telnyx Call Control connection ID"
+                    placeholder="Call Control connection ID"
                     className="w-full px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700"
                   />
                 </div>

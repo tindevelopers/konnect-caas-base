@@ -25,7 +25,7 @@ export function AssistantsList({
             AI Assistants
           </h1>
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            Create and manage Telnyx AI assistants.
+            Create and manage AI assistants.
           </p>
         </div>
         <div className="flex items-center gap-2">

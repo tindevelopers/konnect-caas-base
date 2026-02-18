@@ -145,8 +145,9 @@ export const mainNavItems: NavItem[] = [
     name: "Integrations",
     icon: createIcon(PlugInIcon),
     subItems: [
-      { name: "Telephony (Telnyx)", path: "/saas/integrations/telephony" },
+      { name: "Telephony", path: "/saas/integrations/telephony" },
       { name: "All Integrations", path: "/saas/integrations/list" },
+      { name: "Scheduling", path: "/saas/integrations/list?category=Scheduling" },
       { name: "CRM", path: "/saas/integrations/crm" },
     ],
   },
@@ -346,6 +347,7 @@ export const mainNavItems: NavItem[] = [
         subItems: [
           { name: "All Integrations", path: "/saas/integrations/list" },
           { name: "CRM", path: "/saas/integrations/crm" },
+          { name: "Scheduling", path: "/saas/integrations/list?category=Scheduling" },
           { name: "Email Marketing", path: "/saas/integrations/email-marketing" },
           { name: "Telephony", path: "/saas/integrations/telephony" },
           { name: "Payments", path: "/saas/integrations/payments" },
@@ -392,6 +394,7 @@ export const mainNavItems: NavItem[] = [
       { name: "Edit Profile", path: "/profile?tab=profile" },
       { name: "Account Settings", path: "/profile?tab=account" },
       { name: "Change Password", path: "/profile?tab=password" },
+      { name: "Support", path: "/profile?tab=support" },
     ],
   },
   {

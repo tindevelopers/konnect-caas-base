@@ -20,9 +20,9 @@ export default function AiSectionError({
         Something went wrong in the AI section
       </h2>
       <p className="mt-2 text-sm text-red-700 dark:text-red-300">
-        This can happen if Telnyx is not configured (missing API key or tenant integration), or if
-        you don’t have permission to access integrations. Configure a Telnyx integration for your
-        tenant or set TELNYX_API_KEY, then try again.
+        This can happen if the telephony/agent provider is not configured (missing API key or tenant
+        integration), or if you don’t have permission to access integrations. Configure the provider
+        integration for your tenant, then try again.
       </p>
       {error.digest && (
         <p className="mt-2 text-xs text-red-600 dark:text-red-400">Error ID: {error.digest}</p>

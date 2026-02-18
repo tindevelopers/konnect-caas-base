@@ -124,6 +124,8 @@ export async function trackApiCall<T>(
     const duration = Date.now() - startTime;
     status = "error";
     errorMessage = error instanceof Error ? error.message : String(error);
+    // Avoid leaking vendor names in UI/telemetry.
+    errorMessage = errorMessage.replace(/telnyx/gi, "provider");
     errorStack = error instanceof Error ? error.stack : undefined;
 
     await trackTelemetryEvent({

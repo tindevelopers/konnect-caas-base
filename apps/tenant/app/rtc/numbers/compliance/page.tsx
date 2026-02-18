@@ -421,7 +421,7 @@ export default function NumbersCompliancePage() {
                 <div className="rounded-xl border border-gray-100 p-4 dark:border-gray-800">
                   <p className="text-sm font-medium text-gray-900 dark:text-white/90">Patch values (optional)</p>
                   <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                    Power-user tool. Sends a PATCH to Telnyx `requirement_groups/{`id`}`.
+                    Power-user tool. Sends a PATCH to the provider `requirement_groups/{`id`}`.
                   </p>
                   <textarea
                     value={patchRaw}

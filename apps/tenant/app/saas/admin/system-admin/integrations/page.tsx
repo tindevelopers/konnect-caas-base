@@ -5,15 +5,18 @@ import PageBreadcrumb from "@/components/common/PageBreadCrumb";
 import Button from "@/components/ui/button/Button";
 import Input from "@/components/form/input/InputField";
 import Label from "@/components/form/Label";
+import ProviderLogo from "@/components/integration/ProviderLogo";
 import {
   EyeIcon,
   EyeSlashIcon,
   XMarkIcon,
+  SignalIcon,
 } from "@heroicons/react/24/outline";
 import {
   fetchPlatformIntegrationConfig,
   savePlatformIntegrationConfig,
 } from "@/app/actions/integrations/platform-config";
+import { testPlatformIntegrationConnection } from "@/app/actions/integrations/health";
 import {
   integrationCategories,
   integrationsCatalog,
@@ -23,7 +26,45 @@ import {
 type PlatformConfig = {
   status?: string | null;
   credentials?: Record<string, unknown> | null;
+  settings?: Record<string, unknown> | null;
 };
+
+function hasCredentialValue(credentials: Record<string, unknown> | null | undefined) {
+  if (!credentials) return false;
+  return Object.values(credentials).some(
+    (value) => String(value ?? "").trim().length > 0
+  );
+}
+
+function getHealthState(config?: PlatformConfig) {
+  const health = config?.settings?.health as
+    | { status?: string; checkedAt?: string; message?: string }
+    | undefined;
+  const status = (health?.status ?? "unknown").toLowerCase();
+
+  if (status === "active" || status === "ok" || status === "connected") {
+    return {
+      active: true,
+      label: "Active",
+      checkedAt: health?.checkedAt,
+      message: health?.message,
+    };
+  }
+  if (status === "error" || status === "failed" || status === "inactive") {
+    return {
+      active: false,
+      label: "Needs test",
+      checkedAt: health?.checkedAt,
+      message: health?.message,
+    };
+  }
+  return {
+    active: false,
+    label: "Not tested",
+    checkedAt: health?.checkedAt,
+    message: health?.message,
+  };
+}
 
 export default function SystemAdminIntegrationsPage() {
   const [query, setQuery] = useState("");
@@ -36,13 +77,12 @@ export default function SystemAdminIntegrationsPage() {
   const [formValues, setFormValues] = useState<Record<string, string>>({});
   const [showSecrets, setShowSecrets] = useState<Record<string, boolean>>({});
   const [isSaving, setIsSaving] = useState(false);
+  const [isTesting, setIsTesting] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<string | null>(null);
 
   const categories = useMemo(() => {
-    const cats = ["All", ...integrationCategories];
-    console.log("[IntegrationsPage] Categories:", cats);
-    console.log("[IntegrationsPage] integrationCategories:", integrationCategories);
-    return cats;
+    return ["All", ...integrationCategories];
   }, []);
 
   const filteredIntegrations = useMemo(() => {
@@ -118,9 +158,13 @@ export default function SystemAdminIntegrationsPage() {
     const config = configs[provider];
     if (!config) return false;
     if (config.status === "connected") return true;
-    const values = Object.values(config.credentials || {});
-    return values.some((value) => String(value || "").trim().length > 0);
+    return hasCredentialValue(config.credentials);
   };
+
+  const addableIntegrations = useMemo(
+    () => integrationsCatalog.filter((item) => !configuredFor(item.provider)),
+    [configs]
+  );
 
   const openModal = (item: IntegrationCatalogItem) => {
     const config = configs[item.provider];
@@ -132,6 +176,7 @@ export default function SystemAdminIntegrationsPage() {
     setFormValues(initialValues);
     setShowSecrets({});
     setSaveError(null);
+    setTestResult(null);
     setSelected(item);
   };
 
@@ -140,6 +185,7 @@ export default function SystemAdminIntegrationsPage() {
     setFormValues({});
     setShowSecrets({});
     setSaveError(null);
+    setTestResult(null);
   };
 
   const handleSave = async () => {
@@ -168,6 +214,7 @@ export default function SystemAdminIntegrationsPage() {
         [selected.provider]: {
           status,
           credentials,
+          settings: prev[selected.provider]?.settings ?? null,
         },
       }));
       closeModal();
@@ -179,6 +226,41 @@ export default function SystemAdminIntegrationsPage() {
       setIsSaving(false);
     }
   };
+
+  const handleTest = async () => {
+    if (!selected) return;
+    setIsTesting(true);
+    setSaveError(null);
+    setTestResult(null);
+    try {
+      const result = await testPlatformIntegrationConnection(selected.provider);
+      setTestResult(
+        `${result.ok ? "Success" : "Failed"}: ${result.message}`
+      );
+      setConfigs((prev) => ({
+        ...prev,
+        [selected.provider]: {
+          ...(prev[selected.provider] ?? {}),
+          settings: {
+            ...((prev[selected.provider]?.settings as Record<string, unknown> | undefined) ?? {}),
+            health: {
+              status: result.status,
+              checkedAt: result.checkedAt,
+              message: result.message,
+            },
+          },
+        },
+      }));
+    } catch (error) {
+      setSaveError(
+        error instanceof Error ? error.message : "Failed to test integration."
+      );
+    } finally {
+      setIsTesting(false);
+    }
+  };
+
+  const selectedHealth = selected ? getHealthState(configs[selected.provider]) : null;
 
   if (isLoading) {
     return (
@@ -248,6 +330,50 @@ export default function SystemAdminIntegrationsPage() {
         )}
       </div>
 
+      <div className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-gray-900">
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+          Add Integration (Platform Only)
+        </h2>
+        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+          Platform admins can add integrations here and make them available as
+          system defaults.
+        </p>
+        {addableIntegrations.length === 0 ? (
+          <p className="mt-4 text-sm text-gray-500 dark:text-gray-400">
+            All catalog integrations are already added.
+          </p>
+        ) : (
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {addableIntegrations.slice(0, 6).map((integration) => (
+              <button
+                key={`add-${integration.provider}`}
+                type="button"
+                onClick={() => openModal(integration)}
+                className="flex items-center justify-between rounded-xl border border-dashed border-gray-300 px-4 py-3 text-left hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800/40"
+              >
+                <span className="flex items-center gap-3">
+                  <ProviderLogo
+                    provider={integration.provider}
+                    displayName={integration.displayName}
+                  />
+                  <span>
+                    <span className="block text-sm font-medium text-gray-900 dark:text-white">
+                      {integration.displayName}
+                    </span>
+                    <span className="block text-xs text-gray-500 dark:text-gray-400">
+                      {integration.category}
+                    </span>
+                  </span>
+                </span>
+                <span className="text-xs font-medium text-brand-600 dark:text-brand-400">
+                  Add
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
       {loadError && (
         <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-900/20 dark:text-red-200">
           {loadError}
@@ -257,6 +383,7 @@ export default function SystemAdminIntegrationsPage() {
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {filteredIntegrations.map((integration) => {
           const configured = configuredFor(integration.provider);
+          const health = getHealthState(configs[integration.provider]);
           return (
             <div
               key={integration.provider}
@@ -264,11 +391,11 @@ export default function SystemAdminIntegrationsPage() {
             >
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-3">
-                  <div
-                    className={`flex h-12 w-12 items-center justify-center rounded-xl text-sm font-semibold ${integration.badgeClass}`}
-                  >
-                    {integration.logoText}
-                  </div>
+                  <ProviderLogo
+                    provider={integration.provider}
+                    displayName={integration.displayName}
+                    className="flex h-12 w-12 items-center justify-center rounded-xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900"
+                  />
                   <div>
                     <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
                       {integration.displayName}
@@ -292,6 +419,19 @@ export default function SystemAdminIntegrationsPage() {
               <p className="mt-4 text-sm text-gray-500 dark:text-gray-400">
                 {integration.description}
               </p>
+
+              <div className="mt-3">
+                <span
+                  className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                    health.active
+                      ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"
+                      : "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300"
+                  }`}
+                >
+                  <SignalIcon className="h-3 w-3" />
+                  {health.label}
+                </span>
+              </div>
 
               <div className="mt-5 flex items-center justify-between">
                 <span className="text-xs text-gray-400">
@@ -323,6 +463,29 @@ export default function SystemAdminIntegrationsPage() {
                 <p className="text-sm text-gray-500 dark:text-gray-400">
                   {selected.description}
                 </p>
+                {selectedHealth && (
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <span
+                      className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                        configuredFor(selected.provider)
+                          ? "bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-300"
+                          : "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300"
+                      }`}
+                    >
+                      {configuredFor(selected.provider) ? "Configured" : "Not set"}
+                    </span>
+                    <span
+                      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                        selectedHealth.active
+                          ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"
+                          : "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300"
+                      }`}
+                    >
+                      <SignalIcon className="h-3 w-3" />
+                      {selectedHealth.label}
+                    </span>
+                  </div>
+                )}
               </div>
               <button
                 type="button"
@@ -393,6 +556,16 @@ export default function SystemAdminIntegrationsPage() {
                 {saveError}
               </p>
             )}
+            {testResult && (
+              <p className="mt-4 text-sm text-gray-600 dark:text-gray-300">
+                {testResult}
+              </p>
+            )}
+            {selectedHealth?.checkedAt && (
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Last tested: {new Date(selectedHealth.checkedAt).toLocaleString()}
+              </p>
+            )}
 
             <div className="mt-6 flex items-center gap-3">
               <Button
@@ -400,6 +573,17 @@ export default function SystemAdminIntegrationsPage() {
                 disabled={isSaving || selected.connectType === "oauth"}
               >
                 {isSaving ? "Saving…" : "Save default"}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={handleTest}
+                disabled={
+                  isTesting ||
+                  selected.connectType === "oauth" ||
+                  !configuredFor(selected.provider)
+                }
+              >
+                {isTesting ? "Testing..." : "Test connection"}
               </Button>
               <Button variant="outline" onClick={closeModal}>
                 Cancel

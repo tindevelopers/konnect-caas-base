@@ -22,7 +22,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${outfit.variable} ${outfit.className} dark:bg-gray-900`} suppressHydrationWarning>
+      <body className={`${outfit.variable} ${outfit.className} bg-white dark:bg-gray-900`} suppressHydrationWarning>
         <BuilderDevTools />
         <ThemeProvider>
           <TenantProvider>

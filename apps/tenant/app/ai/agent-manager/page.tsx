@@ -57,10 +57,27 @@ const defaultUsage: UsageSummary = {
 };
 
 const relationLabel: Record<string, string> = {
-  mapped_shared: "Mapped shared assistant",
-  tenant_owned_or_unmapped: "Tenant-owned or unmapped",
-  internal: "Internal provider",
+  mapped_shared: "Premium integration (shared)",
+  tenant_owned_or_unmapped: "Enterprise integration (tenant-owned)",
+  internal: "Base (internal)",
 };
+
+function agentIntegrationLabel(agent: Agent): string {
+  if (agent.provider === "telnyx") {
+    if (agent.tenant_relation === "tenant_owned_or_unmapped") return "Enterprise Agent";
+    return "Premium Agent";
+  }
+  if (agent.provider === "advanced") return "Base Agent";
+  if (agent.provider === "abacus") return "Enterprise Agent";
+  return agent.provider;
+}
+
+function providerUiLabel(provider: string): string {
+  if (provider === "telnyx") return "Premium / Enterprise Agent";
+  if (provider === "advanced") return "Base Agent";
+  if (provider === "abacus") return "Enterprise Agent";
+  return provider;
+}
 
 export default function AgentManagerPage() {
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -320,9 +337,9 @@ export default function AgentManagerPage() {
           }
           className="rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-800"
         >
-          <option value="telnyx">telnyx</option>
-          <option value="advanced">advanced</option>
-          <option value="abacus">abacus</option>
+          <option value="advanced">Base Agent</option>
+          <option value="telnyx">Premium / Enterprise Agent</option>
+          <option value="abacus">Enterprise Agent</option>
         </select>
         <input
           value={createPayload.external_ref}
@@ -368,7 +385,7 @@ export default function AgentManagerPage() {
         >
           {providers.map((provider) => (
             <option key={provider} value={provider}>
-              {provider === "all" ? "All providers" : provider}
+              {provider === "all" ? "All integrations" : providerUiLabel(provider)}
             </option>
           ))}
         </select>
@@ -401,7 +418,7 @@ export default function AgentManagerPage() {
             <tr>
               <th className="px-4 py-3">Name</th>
               <th className="px-4 py-3">Tier</th>
-              <th className="px-4 py-3">Provider</th>
+              <th className="px-4 py-3">Integration Level</th>
               <th className="px-4 py-3">Tenant Relation</th>
               <th className="px-4 py-3">Usage Cost</th>
               <th className="px-4 py-3">Actions</th>
@@ -438,7 +455,7 @@ export default function AgentManagerPage() {
                     </div>
                   </td>
                   <td className="px-4 py-3">{agent.tier}</td>
-                  <td className="px-4 py-3">{agent.provider}</td>
+                  <td className="px-4 py-3">{agentIntegrationLabel(agent)}</td>
                   <td className="px-4 py-3">
                     {relationLabel[agent.tenant_relation ?? "internal"] ??
                       agent.tenant_relation ??

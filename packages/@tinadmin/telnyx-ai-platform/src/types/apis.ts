@@ -19,6 +19,7 @@ import type {
   TelnyxIntegrationSecret,
   TelnyxIntegrationSecretListResponse,
 } from "./integrationSecrets";
+import type { TelnyxIntegrationsListResponse } from "./integrations";
 
 /** Result of listAssistants: either data or an error message (avoids Next.js masking thrown errors in prod). */
 export type ListAssistantsResult = TelnyxAssistantListResponse | { error: string };
@@ -59,4 +60,9 @@ export interface TelnyxIntegrationSecretsApi {
   createIntegrationSecret: (
     payload: TelnyxCreateIntegrationSecretRequest
   ) => Promise<TelnyxIntegrationSecret>;
+}
+
+/** Server-safe API interface for Telnyx AI integrations catalog. */
+export interface TelnyxIntegrationsApi {
+  listIntegrations: () => Promise<TelnyxIntegrationsListResponse>;
 }

@@ -1,6 +1,6 @@
 "use server";
 
-import { createTenantAwareServerClient } from "@/core/database/tenant-client";
+import { createClient } from "@/core/database/server";
 import { getCurrentUserTenantId } from "@/core/multi-tenancy/validation";
 import { requirePermission } from "@/core/permissions/middleware";
 
@@ -30,17 +30,18 @@ export async function listMcpServersAction(): Promise<McpServerRecord[]> {
 
   await requirePermission("integrations.read", { tenantId });
 
-  const client = await createTenantAwareServerClient(tenantId);
-  const { data, error } = await client
+  const supabase = await createClient();
+  const { data, error } = await supabase
     .from("telnyx_mcp_servers")
     .select("*")
+    .eq("tenant_id", tenantId)
     .order("created_at", { ascending: false });
 
   if (error) {
     throw error;
   }
 
-  return data as McpServerRecord[];
+  return (data ?? []) as McpServerRecord[];
 }
 
 export async function createMcpServerAction(
@@ -53,16 +54,20 @@ export async function createMcpServerAction(
 
   await requirePermission("integrations.write", { tenantId });
 
-  const client = await createTenantAwareServerClient(tenantId);
-  const { data, error } = await client
+  const supabase = await createClient();
+  const { data, error } = await supabase
     .from("telnyx_mcp_servers")
-    .insert({
-      tenant_id: tenantId,
-      name: payload.name,
-      server_url: payload.server_url,
-      secret_ref: payload.secret_ref ?? null,
-      description: payload.description ?? null,
-    })
+    // Supabase client types may infer `never` for inserts when generated types are missing.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .insert(
+      {
+        tenant_id: tenantId,
+        name: payload.name,
+        server_url: payload.server_url,
+        secret_ref: payload.secret_ref ?? null,
+        description: payload.description ?? null,
+      } as any
+    )
     .select()
     .single();
 
@@ -81,8 +86,12 @@ export async function deleteMcpServerAction(id: string) {
 
   await requirePermission("integrations.write", { tenantId });
 
-  const client = await createTenantAwareServerClient(tenantId);
-  const { error } = await client.from("telnyx_mcp_servers").delete().eq("id", id);
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("telnyx_mcp_servers")
+    .delete()
+    .eq("tenant_id", tenantId)
+    .eq("id", id);
 
   if (error) {
     throw error;

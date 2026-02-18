@@ -75,14 +75,14 @@ function enhanceTelnyxError(error: unknown): Error {
   // Keep patterns consistent with assistants.ts
   if (error.message.includes("401") || error.message.toLowerCase().includes("unauthorized")) {
     return new Error(
-      "Telnyx API authentication failed (401). Please verify your API key is valid and has the correct permissions. " +
-        "Check your Telnyx API key in System Admin → Integrations → Telnyx"
+      "Provider API authentication failed (401). Please verify your API key is valid and has the correct permissions. " +
+        "Check your API key in System Admin → Integrations → Telephony"
     );
   }
 
   if (error.message.includes("Tenant context missing")) {
     return new Error(
-      "Tenant context missing. Please select a tenant or configure the platform default Telnyx integration."
+      "Tenant context missing. Please select a tenant or configure the platform default telephony integration."
     );
   }
 

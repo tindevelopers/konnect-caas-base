@@ -119,8 +119,8 @@ export async function getTelnyxTransportWithSource(
       if (platformKey) {
         if (platformKey.length < 10) {
           throw new Error(
-            `Invalid Telnyx API key format. The key appears to be too short (${platformKey.length} chars). ` +
-            `Please verify your API key in System Admin → Integrations → Telnyx`
+            `Invalid telephony API key format. The key appears to be too short (${platformKey.length} chars). ` +
+            `Please verify your API key in System Admin → Integrations → Telephony`
           );
         }
         return {
@@ -130,7 +130,7 @@ export async function getTelnyxTransportWithSource(
       }
 
       throw new Error(
-        "Telnyx API key not configured. Set TELNYX_API_KEY in .env.local, set the system default (System Admin → Integrations), or connect Telnyx for this organization (Integrations → Telephony → Telnyx)."
+        "Telephony API key not configured. Set the key in your environment, set the system default (System Admin → Integrations), or connect a telephony provider for this organization (Integrations → Telephony)."
       );
     },
     {

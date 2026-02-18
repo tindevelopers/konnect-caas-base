@@ -238,18 +238,28 @@ export default function WebcallModal({
           <div className="mb-4 rounded-lg bg-amber-50 p-4 text-sm text-amber-700 dark:bg-amber-900/20 dark:text-amber-400 text-left">
             <div className="font-semibold mb-2 text-base text-center">Widget Setup Required</div>
             <p className="text-xs mb-3">
-              To use webcall, you need to enable the Widget for this assistant in Telnyx Mission Control.
+              To use webcall, you need to enable the Widget for this assistant in your provider console.
               This is a one-time setup that generates the credentials for browser-based calls.
             </p>
             <ol className="text-xs space-y-1 list-decimal list-inside mb-3">
-              <li>Go to <a href="https://portal.telnyx.com/#/ai/assistants" target="_blank" rel="noopener noreferrer" className="underline font-medium">Telnyx Mission Control &gt; AI &gt; Assistants</a></li>
+              <li>
+                Go to{" "}
+                <a
+                  href="https://portal.telnyx.com/#/ai/assistants"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline font-medium"
+                >
+                  Provider Console &gt; AI &gt; Assistants
+                </a>
+              </li>
               <li>Click <strong>Edit</strong> on your assistant</li>
               <li>Go to the <strong>&quot;Widget&quot;</strong> tab</li>
               <li>Enable and save the widget configuration</li>
               <li>Come back here and try again</li>
             </ol>
             <p className="text-xs text-amber-600 dark:text-amber-500">
-              The widget enables browser-based WebRTC calls using the same technology as the Telnyx Portal webcall.
+              The widget enables browser-based WebRTC calls using the same technology as the provider portal webcall.
             </p>
           </div>
         )}

@@ -138,9 +138,9 @@ export async function getWebRTCCredentialsAction(manualCredentials?: {
       return {
         error:
             "SIP connection not found. Please configure SIP credentials via:\n" +
-            "1. Environment variables: TELNYX_SIP_USERNAME and TELNYX_SIP_PASSWORD\n" +
+            "1. Environment variables (SIP username/password)\n" +
             "2. Or pass credentials manually when starting webcall\n" +
-            "3. Or configure a SIP connection in Telnyx Mission Control",
+            "3. Or configure a SIP connection in your provider console",
       };
     },
     {

@@ -29,6 +29,18 @@ type CapabilityResponse = {
 
 const defaultCaps: CapabilityResponse = { stt: [], tts: [] };
 
+function providerCodeLabel(code: string) {
+  if (code === "telnyx") return "premium_telephony";
+  if (code === "telnyx_deepgram") return "premium_stt_deepgram";
+  return code;
+}
+
+function providerDisplayLabel(nameOrCode: string) {
+  if (nameOrCode === "telnyx") return "Premium Telephony";
+  if (nameOrCode === "telnyx_deepgram") return "Premium STT (Deepgram)";
+  return nameOrCode;
+}
+
 export default function AgentProvidersPage() {
   const [capabilities, setCapabilities] = useState<CapabilityResponse>(defaultCaps);
   const [isLoading, setIsLoading] = useState(true);
@@ -146,7 +158,9 @@ export default function AgentProvidersPage() {
                       <p className="font-medium text-gray-900 dark:text-white">
                         {item.displayName}
                       </p>
-                      <span className="text-xs text-gray-500">{item.provider}</span>
+                      <span className="text-xs text-gray-500">
+                        {providerCodeLabel(item.provider)}
+                      </span>
                     </div>
                     <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
                       {item.description}
@@ -174,7 +188,7 @@ export default function AgentProvidersPage() {
                   className="rounded-lg border border-gray-200 p-3 text-sm dark:border-gray-700"
                 >
                   <div className="font-medium text-gray-900 dark:text-white">
-                    {item.provider}
+                    {providerDisplayLabel(item.provider)}
                   </div>
                   <div className="mt-1 text-gray-500 dark:text-gray-400">
                     Realtime: {item.realtime ? "Yes" : "No"} · File:{" "}
@@ -205,7 +219,7 @@ export default function AgentProvidersPage() {
                   className="rounded-lg border border-gray-200 p-3 text-sm dark:border-gray-700"
                 >
                   <div className="font-medium text-gray-900 dark:text-white">
-                    {item.provider}
+                    {providerDisplayLabel(item.provider)}
                   </div>
                   <div className="mt-1 text-gray-500 dark:text-gray-400">
                     Expressive: {item.expressive ? "Yes" : "No"} · Multilingual:{" "}

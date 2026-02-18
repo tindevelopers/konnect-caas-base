@@ -184,25 +184,26 @@ export async function listAssistantsAction() {
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     console.error("[listAssistantsAction] caught:", errMsg);
-    let userMessage = "Unable to load assistants. Please check your Telnyx integration (API key and tenant) and try again.";
+    let userMessage =
+      "Unable to load assistants. Please check your agent integration (API key and tenant) and try again.";
     if (error instanceof Error) {
       if (error.message.includes("Permission denied") || error.message.includes("Insufficient tenant permissions")) {
         userMessage =
           "You don't have permission to view integrations. Contact your Organization Admin to get access to AI Assistants.";
       } else if (error.message.includes("401") || error.message.includes("Unauthorized")) {
         userMessage =
-          "Telnyx API authentication failed (401). Please verify your API key in System Admin → Integrations → Telnyx.";
+          "Provider API authentication failed (401). Please verify your API key in System Admin → Integrations → Telephony.";
       } else if (error.message.includes("Tenant context missing")) {
         userMessage =
-          "Tenant context missing. Please select a tenant or configure the platform default Telnyx integration.";
+          "Tenant context missing. Please select a tenant or configure the platform default telephony integration.";
       } else if (error.message.includes("not configured") || error.message.includes("API key")) {
         userMessage =
-          "Telnyx API key not configured. Configure in System Admin → Integrations or set TELNYX_API_KEY.";
+          "Telephony API key not configured. Configure in System Admin → Integrations or set your environment key.";
       } else if (
         /INTEGRATION_CREDENTIALS_KEY|SUPABASE_SERVICE_ROLE|NEXT_PUBLIC_SUPABASE/i.test(error.message)
       ) {
         userMessage =
-          "Telnyx API key not configured. Set TELNYX_API_KEY or configure integration credentials on the server.";
+          "Telephony API key not configured. Set the key in your environment or configure integration credentials on the server.";
       }
     }
     return { error: userMessage };
@@ -403,13 +404,13 @@ export async function callAssistantAction(payload: CallAssistantPayload): Promis
       if (error instanceof Error) {
         if (error.message.includes("Tenant context missing")) {
           throw new Error(
-            "Tenant context missing. Please select a tenant or configure the platform default Telnyx integration."
+            "Tenant context missing. Please select a tenant or configure the platform default telephony integration."
           );
         }
         if (error.message.includes("401") || error.message.includes("Unauthorized")) {
           throw new Error(
-            "Telnyx API authentication failed (401). Please verify your API key is valid. " +
-            "Check your Telnyx API key in System Admin → Integrations → Telnyx"
+            "Provider API authentication failed (401). Please verify your API key is valid. " +
+            "Check your API key in System Admin → Integrations → Telephony"
           );
         }
       }
@@ -469,7 +470,7 @@ export async function callAssistantAction(payload: CallAssistantPayload): Promis
           if (!callControlId) {
             const responseStr = JSON.stringify(dialResponse, null, 2);
             throw new Error(
-              `Telnyx dial did not return a call_control_id. Response: ${responseStr.substring(0, 500)}`
+              `Provider dial did not return a call_control_id. Response: ${responseStr.substring(0, 500)}`
             );
           }
 
@@ -488,11 +489,11 @@ export async function callAssistantAction(payload: CallAssistantPayload): Promis
           const conversationId = extractConversationId(startResponse);
           return { callControlId, conversationId };
         } catch (error) {
-          // Improve error messages for Telnyx API errors
+          // Improve error messages for provider API errors
           if (error instanceof Error) {
             if (error.message.includes("404")) {
               throw new Error(
-                "Call Control App ID not found. Please verify the Connection ID is correct in Telnyx Mission Control."
+                "Call Control App ID not found. Please verify the Connection ID is correct in your provider console."
               );
             }
             if (error.message.includes("400")) {
@@ -552,7 +553,7 @@ export async function hangUpCallAction(callControlId: string): Promise<void> {
     if (error instanceof Error) {
       if (error.message.includes("Tenant context missing")) {
         throw new Error(
-          "Tenant context missing. Please select a tenant or configure the platform default Telnyx integration."
+          "Tenant context missing. Please select a tenant or configure the platform default telephony integration."
         );
       }
     }
@@ -609,23 +610,19 @@ export async function getCallInstructionsAction(assistantId: string) {
       tenantHeader: "x-tenant-id",
       tenantQueryParam: "tenantId",
       requiredEnv: [
-        // For webhook verification (Voice API v2).
-        "TELNYX_PUBLIC_KEY",
-        // For Call Control commands if not using per-tenant integration config.
-        "TELNYX_API_KEY",
-        // For decrypting integration credentials if encryption is enabled.
-        "INTEGRATION_CREDENTIALS_KEY",
-        // For storing webhook events.
-        "SUPABASE_SERVICE_ROLE_KEY",
-        "NEXT_PUBLIC_SUPABASE_URL",
+        "Provider webhook public key (for signature verification)",
+        "Provider API key (for Call Control commands if not using per-tenant integration config)",
+        "Integration credentials encryption key (if encryption is enabled)",
+        "Database service role key (for storing webhook events)",
+        "Database URL (for storing webhook events)",
       ],
       localTunnelNotes: [
-        "Telnyx must reach your webhook over the public internet (localhost won't work).",
-        "If testing locally, use a tunnel (ngrok) and paste the HTTPS URL above into the Telnyx Voice API Application.",
+        "Your provider must reach your webhook over the public internet (localhost won't work).",
+        "If testing locally, use a tunnel (ngrok) and paste the HTTPS URL above into your provider Voice API Application.",
         "ngrok setup: `ngrok config add-authtoken <token>` then `ngrok http 3010`.",
       ],
       steps: [
-        "Create or open your Call Control App in Telnyx Mission Control.",
+        "Create or open your Call Control App in your provider console.",
         "Set the Webhook URL to the value shown below.",
         "Include the tenant context using x-tenant-id header or ?tenantId= query param.",
         "Use this assistant ID when starting the AI assistant for inbound calls.",
@@ -736,8 +733,8 @@ export async function testCallAssistantAction(assistantId: string): Promise<Test
     if (error instanceof Error) {
       if (error.message.includes("401") || error.message.includes("Unauthorized")) {
         throw new Error(
-          "Telnyx API authentication failed (401). Please verify your API key is valid. " +
-          "Check your Telnyx API key in System Admin → Integrations → Telnyx"
+          "Provider API authentication failed (401). Please verify your API key is valid. " +
+          "Check your API key in System Admin → Integrations → Telephony"
         );
       }
       if (error.message.includes("404")) {

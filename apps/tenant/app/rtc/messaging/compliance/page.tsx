@@ -880,7 +880,7 @@ function OptOutsPanel() {
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white/90">Opt-Out Blocks</h3>
           <p className="text-sm text-gray-500 dark:text-gray-400">
             View numbers that have opted out of receiving messages. These blocks are managed automatically
-            by Telnyx when recipients reply STOP.
+            by the provider when recipients reply STOP.
           </p>
         </div>
 

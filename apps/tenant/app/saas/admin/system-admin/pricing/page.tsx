@@ -219,7 +219,7 @@ export default function PricingSettingsPage() {
         </div>
         <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
           This markup percentage is applied to all tenant billing unless a tenant has a specific override.
-          The markup is added on top of your provider cost (e.g. Telnyx) for AI consumption and number purchases.
+          The markup is added on top of your provider cost for AI consumption and number purchases.
         </p>
 
         {platformLoading ? (

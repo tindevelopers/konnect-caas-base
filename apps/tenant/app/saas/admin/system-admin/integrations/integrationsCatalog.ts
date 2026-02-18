@@ -23,14 +23,14 @@ export const integrationsCatalog: IntegrationCatalogItem[] = [
   {
     provider: "telnyx",
     category: "Telephony",
-    displayName: "Telnyx",
-    description: "Voice, SMS, and AI assistant telephony APIs.",
+    displayName: "Premium Telephony",
+    description: "Voice, SMS, and agent telephony APIs.",
     connectType: "apiKey",
     credentialSchema: [
       { name: "apiKey", label: "API Key", type: "password", required: true },
       { name: "messagingProfileId", label: "Messaging Profile ID", type: "text" },
     ],
-    logoText: "T",
+    logoText: "PT",
     badgeClass: "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300",
   },
   {

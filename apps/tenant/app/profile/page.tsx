@@ -76,132 +76,14 @@ function UserProfileContent() {
         </div>
       </section>
 
-      {/* Tab Navigation */}
+      {/* Account settings content — main nav (Edit Profile / Account Settings / Change Password) is in the app sidebar */}
       <section className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
-        <div className="flex flex-wrap gap-2 border-b border-gray-200 dark:border-gray-800">
-          <button
-            onClick={() => {
-              setActiveTab("profile");
-              router.push("/profile?tab=profile");
-            }}
-            className={`px-4 py-2 text-sm font-medium transition-colors ${
-              activeTab === "profile"
-                ? "border-b-2 border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-400"
-                : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <svg
-                className="h-4 w-4"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
-                />
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-                />
-              </svg>
-              Edit Profile
-            </div>
-          </button>
-          <button
-            onClick={() => {
-              setActiveTab("account");
-              router.push("/profile?tab=account");
-            }}
-            className={`px-4 py-2 text-sm font-medium transition-colors ${
-              activeTab === "account"
-                ? "border-b-2 border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-400"
-                : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <svg
-                className="h-4 w-4"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.065 2.573c-.94 1.543.826 3.31 2.37 2.37.94a1.724 1.724 0 002.572 1.065c.426 1.756 2.924 1.756 3.35 0a1.724 1.724 0 002.573-1.065c1.543.94 3.31-.826 2.37-2.37a1.724 1.724 0 001.065-2.572c1.756-.426 1.756-2.924 0-3.35a1.724 1.724 0 00-1.065-2.573c.94-1.543-.826-3.31-2.37-2.37-.94a1.724 1.724 0 00-2.572-1.065z"
-                />
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                />
-              </svg>
-              Account Settings
-            </div>
-          </button>
-          <button
-            onClick={() => {
-              setActiveTab("password");
-              router.push("/profile?tab=password");
-            }}
-            className={`px-4 py-2 text-sm font-medium transition-colors ${
-              activeTab === "password"
-                ? "border-b-2 border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-400"
-                : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <KeyIcon className="h-4 w-4" />
-              Change Password
-            </div>
-          </button>
-          <button
-            onClick={() => {
-              setActiveTab("support");
-              router.push("/profile?tab=support");
-            }}
-            className={`px-4 py-2 text-sm font-medium transition-colors ${
-              activeTab === "support"
-                ? "border-b-2 border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-400"
-                : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <svg
-                className="h-4 w-4"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                />
-              </svg>
-              Support
-            </div>
-          </button>
-        </div>
-
-        {/* Tab Content */}
-        <div className="mt-6">
-          {activeTab === "profile" && (
-            <EditProfileSection user={user} loading={userLoading} />
-          )}
-          {activeTab === "account" && <AccountSettingsSection onSwitchTab={setActiveTab} />}
-          {activeTab === "password" && <ChangePasswordSection />}
-          {activeTab === "support" && <SupportSection />}
-        </div>
+        {activeTab === "profile" && (
+          <EditProfileSection user={user} loading={userLoading} />
+        )}
+        {activeTab === "account" && <AccountSettingsSection onSwitchTab={setActiveTab} />}
+        {activeTab === "password" && <ChangePasswordSection />}
+        {activeTab === "support" && <SupportSection />}
       </section>
     </div>
   );

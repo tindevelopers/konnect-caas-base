@@ -22,6 +22,12 @@ type Capabilities = {
   }>;
 };
 
+function providerLabel(provider: string) {
+  if (provider === "telnyx_deepgram") return "Premium STT (Deepgram)";
+  if (provider === "telnyx") return "Premium Agent Provider";
+  return provider;
+}
+
 export default function VoiceSettingsPage() {
   const [caps, setCaps] = useState<Capabilities>({ stt: [], tts: [] });
   const [isLoading, setIsLoading] = useState(true);
@@ -85,7 +91,7 @@ export default function VoiceSettingsPage() {
         </h1>
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
           Configure premium voice providers (Resemble, ElevenLabs) and STT
-          providers (Deepgram, AssemblyAI, Telnyx+Deepgram).
+          providers (Deepgram, AssemblyAI, Premium STT via Deepgram).
         </p>
       </div>
 
@@ -110,7 +116,7 @@ export default function VoiceSettingsPage() {
                   className="rounded-lg border border-gray-200 p-3 text-sm dark:border-gray-700"
                 >
                   <p className="font-medium text-gray-900 dark:text-white">
-                    {item.provider}
+                    {providerLabel(item.provider)}
                   </p>
                   <p className="text-gray-500 dark:text-gray-400">
                     Realtime: {item.realtime ? "Yes" : "No"} · File:{" "}
@@ -140,7 +146,7 @@ export default function VoiceSettingsPage() {
                   className="rounded-lg border border-gray-200 p-3 text-sm dark:border-gray-700"
                 >
                   <p className="font-medium text-gray-900 dark:text-white">
-                    {item.provider}
+                    {providerLabel(item.provider)}
                   </p>
                   <p className="text-gray-500 dark:text-gray-400">
                     Expressive: {item.expressive ? "Yes" : "No"} · Multilingual:{" "}
@@ -172,7 +178,7 @@ export default function VoiceSettingsPage() {
           >
             <option value="deepgram">deepgram</option>
             <option value="assemblyai">assemblyai</option>
-            <option value="telnyx_deepgram">telnyx_deepgram</option>
+            <option value="telnyx_deepgram">Premium STT (Deepgram)</option>
           </select>
           <input
             value={audioUrl}

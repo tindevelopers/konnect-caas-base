@@ -34,7 +34,7 @@ export default async function RtcNumbersSectionPage(props: {
     <main className="p-6">
       <h1 className="text-xl font-semibold">Numbers · {meta.title}</h1>
       <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
-        Stub page. We’ll wire this to Telnyx APIs later.
+        Stub page. We’ll wire this to provider APIs later.
       </p>
       <ul className="mt-4 list-disc pl-5 text-sm text-gray-700 dark:text-gray-200">
         {meta.notes.map((n) => (
