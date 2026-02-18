@@ -1207,6 +1207,103 @@ export async function updateOwnedPhoneNumberAction(phoneNumberId: string, patch:
 }
 
 // -----------------------------
+// Per-number voice agent (tenant-scoped)
+// -----------------------------
+
+/** Normalize E.164 for lookup (e.g. +33392090999). */
+function normalizeE164(value: string): string {
+  const t = value.trim();
+  return t.startsWith("+") ? t : `+${t}`;
+}
+
+export async function getPhoneNumberVoiceAgentAction(
+  phoneNumberE164: string
+): Promise<{ telnyx_assistant_id: string } | null> {
+  await ensureTenantId();
+  const supabase = await createClient();
+  const key = normalizeE164(phoneNumberE164);
+  const { data, error } = await (supabase as any)
+    .from("tenant_phone_number_voice_agents")
+    .select("telnyx_assistant_id")
+    .eq("phone_number_e164", key)
+    .maybeSingle();
+  if (error) {
+    console.error("[getPhoneNumberVoiceAgentAction]", error);
+    return null;
+  }
+  return data?.telnyx_assistant_id ? { telnyx_assistant_id: data.telnyx_assistant_id } : null;
+}
+
+export async function setPhoneNumberVoiceAgentAction(
+  phoneNumberE164: string,
+  telnyxAssistantId: string | null
+): Promise<{ ok: true } | { error: string }> {
+  const tenantId = await ensureTenantId();
+  const supabase = await createClient();
+  const key = normalizeE164(phoneNumberE164);
+  if (!key) return { error: "Phone number is required." };
+
+  if (telnyxAssistantId !== null && telnyxAssistantId !== undefined) {
+    const aid = String(telnyxAssistantId).trim();
+    if (!aid) return { error: "Assistant ID is required to assign." };
+    // Ensure this assistant belongs to the tenant (tenant_ai_assistants)
+    const { data: allowed } = await (supabase as any)
+      .from("tenant_ai_assistants")
+      .select("telnyx_assistant_id")
+      .eq("tenant_id", tenantId)
+      .eq("telnyx_assistant_id", aid)
+      .maybeSingle();
+    if (!allowed) {
+      return { error: "This AI assistant is not available to your tenant. Choose an assistant from the list." };
+    }
+    const { error: upsertErr } = await (supabase as any)
+      .from("tenant_phone_number_voice_agents")
+      .upsert(
+        { tenant_id: tenantId, phone_number_e164: key, telnyx_assistant_id: aid },
+        { onConflict: "tenant_id,phone_number_e164" }
+      );
+    if (upsertErr) {
+      console.error("[setPhoneNumberVoiceAgentAction] upsert", upsertErr);
+      return { error: upsertErr.message || "Failed to save voice agent." };
+    }
+    return { ok: true };
+  }
+
+  const { error: delErr } = await (supabase as any)
+    .from("tenant_phone_number_voice_agents")
+    .delete()
+    .eq("tenant_id", tenantId)
+    .eq("phone_number_e164", key);
+  if (delErr) {
+    console.error("[setPhoneNumberVoiceAgentAction] delete", delErr);
+    return { error: delErr.message || "Failed to clear voice agent." };
+  }
+  return { ok: true };
+}
+
+/** List phone numbers assigned to this assistant (for Calling tab). */
+export async function listPhoneNumbersAssignedToAssistantAction(
+  assistantId: string
+): Promise<{ data: Array<{ phone_number: string; status?: string }> }> {
+  const tenantId = await ensureTenantId();
+  if (!assistantId?.trim()) return { data: [] };
+  const supabase = await createClient();
+  const { data: rows, error } = await (supabase as any)
+    .from("tenant_phone_number_voice_agents")
+    .select("phone_number_e164")
+    .eq("tenant_id", tenantId)
+    .eq("telnyx_assistant_id", assistantId.trim());
+  if (error) {
+    console.error("[listPhoneNumbersAssignedToAssistantAction]", error);
+    return { data: [] };
+  }
+  const data = (rows ?? []).map((r: { phone_number_e164: string }) => ({
+    phone_number: r.phone_number_e164,
+  }));
+  return { data };
+}
+
+// -----------------------------
 // Porting Orders
 // -----------------------------
 

@@ -115,6 +115,11 @@ export interface McpServerDescriptor {
   description?: string | null;
 }
 
+export interface AssignedNumberRow {
+  phone_number: string;
+  status?: string;
+}
+
 export interface AssistantEditorProps {
   api: TelnyxAssistantsApi;
   assistantId: string;
@@ -126,6 +131,10 @@ export interface AssistantEditorProps {
     payload: TelnyxCreateIntegrationSecretRequest
   ) => Promise<unknown>;
   testAssistantTool?: (params: { assistantId: string; toolId: string }) => Promise<unknown>;
+  /** Numbers assigned to this assistant for voice (Calling tab). When provided, shows Assigned numbers section. */
+  assignedNumbers?: AssignedNumberRow[];
+  /** Called when user clicks "Assign numbers" in Calling tab. e.g. navigate to Manage Numbers. */
+  onAssignNumbers?: () => void;
 }
 
 export function AssistantEditor({
@@ -137,6 +146,8 @@ export function AssistantEditor({
   integrations,
   createIntegrationSecret,
   testAssistantTool,
+  assignedNumbers,
+  onAssignNumbers,
 }: AssistantEditorProps) {
   const { assistant, setAssistant, isLoading, isSaving, error, save } =
     useAssistantEditor(api, assistantId);
@@ -1081,16 +1092,169 @@ export function AssistantEditor({
       )}
 
       {activeTab === "Calling" && (
-        <div>
-          <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-            Telephony Settings (JSON)
-          </label>
-          <textarea
-            value={jsonFields.telephony_settings ?? ""}
-            onChange={(e) => handleJsonChange("telephony_settings", e.target.value)}
-            className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-xs font-mono dark:border-gray-700 dark:bg-gray-900"
-            rows={10}
-          />
+        <div className="space-y-8">
+          {/* Assigned numbers (Telnyx-style) */}
+          {typeof assignedNumbers !== "undefined" && (
+            <div>
+              <div className="flex items-center justify-between gap-3">
+                <label className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+                  Assigned numbers
+                </label>
+                {onAssignNumbers && (
+                  <button
+                    type="button"
+                    onClick={onAssignNumbers}
+                    className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-gray-200"
+                  >
+                    Assign numbers
+                  </button>
+                )}
+              </div>
+              {!assignedNumbers?.length ? (
+                <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                  You have no assigned phone numbers.{" "}
+                  {onAssignNumbers ? (
+                    <button
+                      type="button"
+                      onClick={onAssignNumbers}
+                      className="font-medium text-indigo-600 hover:underline dark:text-indigo-400"
+                    >
+                      Assign numbers
+                    </button>
+                  ) : (
+                    "Assign numbers from Manage Numbers."
+                  )}
+                </p>
+              ) : (
+                <div className="mt-2 overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
+                  <table className="min-w-full text-left text-sm">
+                    <thead className="bg-gray-50 text-xs uppercase text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+                      <tr>
+                        <th className="px-4 py-3">Number</th>
+                        <th className="px-4 py-3">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                      {assignedNumbers.map((row) => (
+                        <tr key={row.phone_number}>
+                          <td className="px-4 py-3 font-medium">{row.phone_number}</td>
+                          <td className="px-4 py-3">{row.status ?? "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Settings (Telnyx-style) */}
+          <div>
+            <label className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+              Settings
+            </label>
+            <div className="mt-4 space-y-4">
+              <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                <input
+                  type="checkbox"
+                  checked={
+                    (parseJsonField(jsonFields.telephony_settings ?? "", "telephony").value as Record<string, unknown>)?.supports_unauthenticated_web_calls === true
+                  }
+                  onChange={(e) => {
+                    const telephonyResult = parseJsonField(
+                      jsonFields.telephony_settings ?? "",
+                      "Telephony settings"
+                    );
+                    const current = (telephonyResult.value as Record<string, unknown>) ?? {};
+                    handleJsonChange(
+                      "telephony_settings",
+                      stringify({ ...current, supports_unauthenticated_web_calls: e.target.checked })
+                    );
+                  }}
+                  className="rounded border-gray-300 dark:border-gray-600"
+                />
+                Support unauthenticated web calls
+              </label>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">
+                    Assistant max call duration (seconds)
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={
+                      (parseJsonField(jsonFields.telephony_settings ?? "", "telephony").value as Record<string, unknown>)?.time_limit_secs ?? ""
+                    }
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      const num = v === "" ? undefined : Number(v);
+                      const telephonyResult = parseJsonField(
+                        jsonFields.telephony_settings ?? "",
+                        "Telephony settings"
+                      );
+                      const current = (telephonyResult.value as Record<string, unknown>) ?? {};
+                      handleJsonChange(
+                        "telephony_settings",
+                        stringify({
+                          ...current,
+                          time_limit_secs: num === undefined || Number.isNaN(num) ? undefined : num,
+                        })
+                      );
+                    }}
+                    placeholder="e.g. 1800"
+                    className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">
+                    User idle timeout (seconds)
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={
+                      (parseJsonField(jsonFields.telephony_settings ?? "", "telephony").value as Record<string, unknown>)?.user_idle_timeout_secs ?? ""
+                    }
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      const num = v === "" ? undefined : Number(v);
+                      const telephonyResult = parseJsonField(
+                        jsonFields.telephony_settings ?? "",
+                        "Telephony settings"
+                      );
+                      const current = (telephonyResult.value as Record<string, unknown>) ?? {};
+                      handleJsonChange(
+                        "telephony_settings",
+                        stringify({
+                          ...current,
+                          user_idle_timeout_secs: num === undefined || Number.isNaN(num) ? undefined : num,
+                        })
+                      );
+                    }}
+                    placeholder="Optional"
+                    className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-900"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Advanced: raw JSON */}
+          <div>
+            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+              Advanced telephony (JSON)
+            </label>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              default_texml_app_id, noise_suppression, recording_settings, etc.
+            </p>
+            <textarea
+              value={jsonFields.telephony_settings ?? ""}
+              onChange={(e) => handleJsonChange("telephony_settings", e.target.value)}
+              className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-xs font-mono dark:border-gray-700 dark:bg-gray-900"
+              rows={8}
+            />
+          </div>
         </div>
       )}
 

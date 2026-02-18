@@ -210,6 +210,20 @@ export async function listAssistantsAction() {
   }
 }
 
+/** List tenant-scoped assistants for voice routing dropdown (id + name only). */
+export async function listTenantAssistantsForVoiceAction(): Promise<
+  { data: Array<{ id: string; name: string }> } | { error: string }
+> {
+  const result = await listAssistantsAction();
+  if ("error" in result && result.error) {
+    return { data: [], error: result.error };
+  }
+  const list = (result as { data?: Array<{ id: string; name?: string }> }).data ?? [];
+  return {
+    data: list.map((a) => ({ id: a.id, name: (a.name ?? a.id).trim() || a.id })),
+  };
+}
+
 export async function getAssistantAction(assistantId: string) {
   const { tenantId, userId } = await getTelemetryContext();
   const transport = await getTelnyxTransport("integrations.read");

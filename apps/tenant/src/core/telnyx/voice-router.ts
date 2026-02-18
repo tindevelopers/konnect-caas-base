@@ -2,6 +2,7 @@ import "server-only";
 
 import { createHash } from "crypto";
 import { getTelnyxTransportForWebhook } from "@/src/core/telnyx/webhook-transport";
+import { getInboundAssistantIdForNumber } from "@/src/core/telnyx/voice-agent-lookup";
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -84,6 +85,13 @@ function resolveGatherDigits(payload: UnknownRecord): string | null {
   return digits ? String(digits) : null;
 }
 
+/** Resolve the called number (our number for inbound) from the call payload. */
+function resolveToNumber(payload: UnknownRecord): string | null {
+  const callPayload = resolveCallPayload(payload);
+  const to = callPayload.to;
+  return typeof to === "string" && to.trim() ? to.trim() : null;
+}
+
 function commandId(parts: string[]) {
   // Telnyx ignores duplicate command_id values for 60s; keep deterministic per webhook event.
   const digest = createHash("sha256").update(parts.join("|")).digest("hex");
@@ -109,9 +117,15 @@ export async function handleTelnyxInboundVoiceEvent(args: {
 
   const { transport, settings } = await getTelnyxTransportForWebhook(tenantId);
   const routing = settings?.voiceRouting ?? {};
-  const inboundAssistantId = routing.inboundAssistantId?.trim();
   const operatorSipUri = routing.operatorSipUri?.trim();
   const escapeDigit = (routing.escapeDigit?.trim() || "0").slice(0, 1);
+
+  // Resolve assistant: per-number assignment first, then tenant default
+  const toNumber = resolveToNumber(payload);
+  const perNumberAssistantId =
+    toNumber ? await getInboundAssistantIdForNumber(tenantId, toNumber) : null;
+  const inboundAssistantId =
+    (perNumberAssistantId ?? routing.inboundAssistantId ?? "").trim();
 
   if (!inboundAssistantId || !operatorSipUri) {
     console.warn("[TelnyxVoiceRouter] Missing voice routing settings", {

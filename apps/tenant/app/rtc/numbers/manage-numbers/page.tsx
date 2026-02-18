@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import PageBreadcrumb from "@/components/common/PageBreadCrumb";
 import Button from "@/components/ui/button/Button";
 import Alert from "@/components/ui/alert/Alert";
@@ -10,9 +11,12 @@ import Switch from "@/components/form/switch/Switch";
 import {
   listOwnedPhoneNumbersAction,
   updateOwnedPhoneNumberAction,
+  getPhoneNumberVoiceAgentAction,
+  setPhoneNumberVoiceAgentAction,
   type TelnyxPhoneNumber,
 } from "@/app/actions/telnyx/numbers";
 import { assignPhoneNumberToMessagingProfileAction } from "@/app/actions/telnyx/messagingProfiles";
+import { listTenantAssistantsForVoiceAction } from "@/app/actions/telnyx/assistants";
 
 function parseTags(raw: string) {
   return raw
@@ -47,6 +51,14 @@ export default function ManageNumbersPage() {
 
   const [messagingProfileId, setMessagingProfileId] = useState("");
   const [messagingProduct, setMessagingProduct] = useState("A2P");
+
+  // Voice / AI Assistant (tenant-scoped)
+  const [voiceAssistants, setVoiceAssistants] = useState<Array<{ id: string; name: string }>>([]);
+  const [voiceAssistantSearch, setVoiceAssistantSearch] = useState("");
+  const [selectedVoiceAssistantId, setSelectedVoiceAssistantId] = useState<string>("");
+  const [currentNumberVoiceAgentId, setCurrentNumberVoiceAgentId] = useState<string | null>(null);
+  const [isLoadingVoiceAgent, setIsLoadingVoiceAgent] = useState(false);
+  const [isSavingVoiceAgent, setIsSavingVoiceAgent] = useState(false);
 
   const [isSaving, setIsSaving] = useState(false);
 
@@ -88,6 +100,41 @@ export default function ManageNumbersPage() {
     setMessagingProfileId(selected.messaging_profile_id ?? "");
   }, [selected]);
 
+  // Load tenant assistants for voice dropdown (once)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const res = await listTenantAssistantsForVoiceAction();
+      if (cancelled) return;
+      if ("data" in res) setVoiceAssistants(res.data);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // When selected number changes, load its current voice agent
+  useEffect(() => {
+    if (!selected?.phone_number) {
+      setCurrentNumberVoiceAgentId(null);
+      setSelectedVoiceAssistantId("");
+      setIsLoadingVoiceAgent(false);
+      return;
+    }
+    let cancelled = false;
+    setIsLoadingVoiceAgent(true);
+    (async () => {
+      const current = await getPhoneNumberVoiceAgentAction(selected.phone_number);
+      if (cancelled) return;
+      setCurrentNumberVoiceAgentId(current?.telnyx_assistant_id ?? null);
+      setSelectedVoiceAssistantId(current?.telnyx_assistant_id ?? "");
+      setIsLoadingVoiceAgent(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selected?.phone_number]);
+
   async function handleApplyFilters() {
     setPageNumber(1);
     await load();
@@ -113,6 +160,37 @@ export default function ManageNumbersPage() {
       setError(e instanceof Error ? e.message : "Failed to save updates");
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  const filteredVoiceAssistants = useMemo(() => {
+    const q = voiceAssistantSearch.trim().toLowerCase();
+    if (!q) return voiceAssistants;
+    return voiceAssistants.filter(
+      (a) =>
+        a.name.toLowerCase().includes(q) ||
+        a.id.toLowerCase().includes(q)
+    );
+  }, [voiceAssistants, voiceAssistantSearch]);
+
+  async function handleAssignVoiceAgent() {
+    if (!selected?.phone_number) return;
+    const assistantId = selectedVoiceAssistantId.trim() || null;
+    setIsSavingVoiceAgent(true);
+    setError(null);
+    setInfo(null);
+    try {
+      const result = await setPhoneNumberVoiceAgentAction(selected.phone_number, assistantId);
+      if ("error" in result) {
+        setError(result.error);
+        return;
+      }
+      setInfo(assistantId ? "Voice agent assigned to this number." : "Voice agent cleared; number will use tenant default.");
+      setCurrentNumberVoiceAgentId(assistantId);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to assign voice agent");
+    } finally {
+      setIsSavingVoiceAgent(false);
     }
   }
 
@@ -369,6 +447,63 @@ export default function ManageNumbersPage() {
                 </div>
               </div>
             )}
+          </div>
+
+          <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white/90">Voice / AI Assistant</h2>
+            <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+              Route inbound calls to this number to an AI agent. Only agents available to your tenant are listed.
+            </p>
+            <div className="mt-4 space-y-4">
+              <div>
+                <Label htmlFor="voice-search">Search</Label>
+                <Input
+                  id="voice-search"
+                  placeholder="Search agents…"
+                  value={voiceAssistantSearch}
+                  onChange={(e) => setVoiceAssistantSearch(e.target.value)}
+                />
+              </div>
+              <div>
+                <Label htmlFor="voice-agent">AI Agent</Label>
+                <select
+                  id="voice-agent"
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-gray-600 dark:bg-gray-800 dark:text-white/90"
+                  value={selectedVoiceAssistantId}
+                  onChange={(e) => setSelectedVoiceAssistantId(e.target.value)}
+                  disabled={!selected}
+                >
+                  <option value="">None – use tenant default</option>
+                  {filteredVoiceAssistants.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name} ({a.id.slice(0, 12)}…)
+                    </option>
+                  ))}
+                  {voiceAssistants.length > 0 && filteredVoiceAssistants.length === 0 && (
+                    <option value="" disabled>No agents match search</option>
+                  )}
+                </select>
+              </div>
+              {selected && (
+                <>
+                  {currentNumberVoiceAgentId && (
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      Current: {voiceAssistants.find((a) => a.id === currentNumberVoiceAgentId)?.name ?? currentNumberVoiceAgentId}
+                    </p>
+                  )}
+                  <Button
+                    onClick={handleAssignVoiceAgent}
+                    disabled={isSavingVoiceAgent || !selected || (selectedVoiceAssistantId === (currentNumberVoiceAgentId ?? ""))}
+                  >
+                    {isSavingVoiceAgent ? "Saving…" : "Assign to this number"}
+                  </Button>
+                </>
+              )}
+            </div>
+            <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
+              Set <strong>Connection ID</strong> in Details so calls reach this app; then choose the agent above. No agent = use default from{" "}
+              <Link href="/saas/integrations/telephony/telnyx" className="font-medium text-brand-600 hover:underline dark:text-brand-400">Integrations → Telnyx</Link>.
+            </p>
           </div>
 
           <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
