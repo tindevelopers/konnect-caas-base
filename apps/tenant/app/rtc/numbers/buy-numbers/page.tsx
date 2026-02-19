@@ -524,8 +524,7 @@ export default function BuyNumbersPage() {
       setSelectedNumbers((prev) => prev.filter((n) => available.has(n)));
 
       setInfo(`Found ${data.length} numbers.`);
-      // Reset form to defaults so the next search starts clean (no trail of this query).
-      resetSearchForm(false);
+      // Do not reset the form here — user may want to tweak only the pattern (e.g. ends_with 888 → 999) and search again. Use "New search" to reset all parameters.
     } catch (e) {
       setError(e instanceof Error ? e.message : "Search failed");
     } finally {
