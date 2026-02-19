@@ -315,9 +315,16 @@ function routeToCall(callControlId: string | undefined, message: any): number {
   return Array.from(clients.values()).filter(c => !c.isTelnyx && c.ws.readyState === WebSocket.OPEN).length;
 }
 
-// Health check endpoint with telemetry
+// HTTP request handler: root, health, and 404 for everything else (WebSocket upgrades go to wss)
 server.on("request", (req, res) => {
-  if (req.url === "/health" || req.url === "/api/websocket/health") {
+  const path = (req.url || "/").split("?")[0];
+  // Root: redirect to health so the Railway service URL shows something useful
+  if (path === "/" || path === "") {
+    res.writeHead(302, { Location: "/health" });
+    res.end();
+    return;
+  }
+  if (path === "/health" || path === "/api/websocket/health") {
     const telnyxConnections = Array.from(clients.values()).filter(c => c.isTelnyx);
     const browserClients = Array.from(clients.values()).filter(c => !c.isTelnyx);
     const callControlIds = new Set(
@@ -336,12 +343,9 @@ server.on("request", (req, res) => {
     }));
     return;
   }
-  
-  // For other requests, return 404
-  if (req.url !== "/api/websocket/stream") {
-    res.writeHead(404);
-    res.end("Not Found");
-  }
+  // All other paths (WebSocket upgrades are handled by WebSocketServer)
+  res.writeHead(404);
+  res.end("Not Found");
 });
 
 server.listen(PORT, HOST, () => {

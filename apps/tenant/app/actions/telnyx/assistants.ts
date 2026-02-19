@@ -145,6 +145,7 @@ interface CallAssistantPayload {
   connectionId: string;
   streamUrl?: string; // Optional WebSocket URL for audio streaming
   streamTrack?: "inbound_track" | "outbound_track" | "both_tracks"; // Which audio track to stream
+  streamCodec?: string; // Telnyx: PCMU (default), PCMA, G722, OPUS, AMR-WB, L16
 }
 
 interface CallAssistantResult {
@@ -494,16 +495,19 @@ export async function callAssistantAction(payload: CallAssistantPayload): Promis
             to: toE164,
           };
 
-          // Add streaming if streamUrl is provided
+          // Add streaming if streamUrl is provided (Telnyx Media Streaming docs)
           if (payload.streamUrl?.trim()) {
             const streamUrl = payload.streamUrl.trim();
             dialBody.stream_url = streamUrl;
             dialBody.stream_track = payload.streamTrack || "both_tracks";
-            
+            // Request PCMU so stream matches our player (PCMU, PCMA, L16 supported)
+            dialBody.stream_codec = payload.streamCodec || "PCMU";
+
             console.log("[TELEMETRY] callAssistantAction - Adding stream URL", {
               timestamp: new Date().toISOString(),
               streamUrl: streamUrl.substring(0, 100) + (streamUrl.length > 100 ? '...' : ''),
               streamTrack: dialBody.stream_track,
+              streamCodec: dialBody.stream_codec,
               hasToken: streamUrl.includes('token='),
             });
           } else {
@@ -653,10 +657,25 @@ export async function hangUpCallAction(callControlId: string): Promise<void> {
     "hangUpCall",
     TELNYX_PROVIDER,
     async () => {
-      await transport.request(`/calls/${callControlId}/actions/hangup`, {
-        method: "POST",
-        body: {},
-      });
+      try {
+        await transport.request(`/calls/${callControlId}/actions/hangup`, {
+          method: "POST",
+          body: {},
+        });
+      } catch (error) {
+        // Call may have already ended (e.g. other party hung up). Treat as success.
+        if (error instanceof TelnyxApiError && error.status === 422) {
+          const msg = (error.message || "").toLowerCase();
+          if (
+            msg.includes("already ended") ||
+            msg.includes("90018") ||
+            msg.includes("no longer active")
+          ) {
+            return;
+          }
+        }
+        throw error;
+      }
     },
     {
       tenantId,

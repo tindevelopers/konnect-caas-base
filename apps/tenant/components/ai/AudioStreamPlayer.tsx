@@ -9,12 +9,23 @@ interface AudioStreamPlayerProps {
   onError?: (error: Error) => void;
 }
 
+/** Telnyx media format from WebSocket "start" event (see Telnyx Media Streaming docs). */
+interface MediaFormat {
+  encoding: string;
+  sample_rate: number;
+  channels: number;
+}
+
+const DEFAULT_MEDIA_FORMAT: MediaFormat = {
+  encoding: "PCMU",
+  sample_rate: 8000,
+  channels: 1,
+};
+
 /**
- * AudioStreamPlayer component for playing real-time audio from Telnyx WebSocket stream
- * 
- * This component connects to a WebSocket URL and plays the audio stream in real-time.
- * The WebSocket receives base64-encoded RTP payloads from Telnyx and converts them
- * to playable audio using Web Audio API.
+ * AudioStreamPlayer component for playing real-time audio from Telnyx WebSocket stream.
+ * Uses media_format from Telnyx "start" event (encoding, sample_rate, channels).
+ * Supported codecs: PCMU (μ-law), PCMA (A-law), L16 (raw 16-bit PCM). See Telnyx Media Streaming docs.
  */
 export default function AudioStreamPlayer({
   streamUrl,
@@ -25,10 +36,12 @@ export default function AudioStreamPlayer({
   const [isPlaying, setIsPlaying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const didOpenRef = useRef(false); // true once this socket has fired onopen (avoids showing 1006 when we close before open)
   const audioContextRef = useRef<AudioContext | null>(null);
   const sourceNodeRef = useRef<AudioBufferSourceNode | null>(null);
   const audioBufferQueueRef = useRef<AudioBuffer[]>([]);
   const isProcessingRef = useRef(false);
+  const mediaFormatRef = useRef<MediaFormat>({ ...DEFAULT_MEDIA_FORMAT });
 
   useEffect(() => {
     if (!isActive || !streamUrl) {
@@ -45,7 +58,8 @@ export default function AudioStreamPlayer({
   const connect = async () => {
     try {
       setError(null);
-      
+      didOpenRef.current = false;
+
       // TELEMETRY: Connection attempt
       console.log("[TELEMETRY] AudioStreamPlayer connecting", {
         timestamp: new Date().toISOString(),
@@ -72,6 +86,8 @@ export default function AudioStreamPlayer({
           streamUrl: streamUrl.substring(0, 100),
           readyState: ws.readyState,
         });
+        setError(null); // clear any prior 1006 from a closed-before-open connection
+        didOpenRef.current = true;
         setIsConnected(true);
       };
 
@@ -114,9 +130,9 @@ export default function AudioStreamPlayer({
         });
         setIsConnected(false);
         setIsPlaying(false);
-        // Surface close reason so user sees "Unauthorized", "Connection refused", etc.
-        if (event.code !== 1000 && event.code !== 1005) {
-          const detail = event.reason || `Code ${event.code}`;
+        // Only show error if we had actually opened (avoids 1006 "closed before connection established" from effect cleanup)
+        if (event.code !== 1000 && event.code !== 1005 && didOpenRef.current) {
+          const detail = event.reason || (event.code === 1006 ? "Connection failed or dropped (1006)" : `Code ${event.code}`);
           setError(`WebSocket connection error: ${detail}`);
           onError?.(new Error(detail));
         }
@@ -151,14 +167,26 @@ export default function AudioStreamPlayer({
           clientId: message.clientId,
           callControlId: message.callControlId,
         });
+        setError(null); // clear any prior 1006 so UI shows "Playing audio..." once media arrives
         return;
       }
 
       if (message.event === "start") {
+        const start = message.start ?? {};
+        const mf = start.media_format;
+        if (mf && typeof mf === "object" && typeof mf.encoding === "string") {
+          mediaFormatRef.current = {
+            encoding: String(mf.encoding).toUpperCase(),
+            sample_rate: typeof mf.sample_rate === "number" ? mf.sample_rate : 8000,
+            channels: typeof mf.channels === "number" ? mf.channels : 1,
+          };
+        } else {
+          mediaFormatRef.current = { ...DEFAULT_MEDIA_FORMAT };
+        }
         console.log("[TELEMETRY] AudioStreamPlayer stream started", {
           timestamp: new Date().toISOString(),
-          startDetails: message.start,
-          callControlId: message.start?.call_control_id,
+          mediaFormat: mediaFormatRef.current,
+          callControlId: start.call_control_id,
         });
         setIsPlaying(true);
         return;
@@ -223,46 +251,72 @@ export default function AudioStreamPlayer({
 
     try {
       const startTime = performance.now();
-      
-      // Decode base64 RTP payload
+      const fmt = mediaFormatRef.current;
+      const sampleRate = fmt.sample_rate > 0 ? fmt.sample_rate : 8000;
+
+      // Decode base64 RTP payload (no RTP headers per Telnyx docs)
       const binaryString = atob(media.payload);
       const bytes = new Uint8Array(binaryString.length);
       for (let i = 0; i < binaryString.length; i++) {
         bytes[i] = binaryString.charCodeAt(i);
       }
 
-      // Convert μ-law (PCMU) to linear PCM
-      // Note: This is a simplified conversion. For production, use a proper codec library
-      const pcmData = new Int16Array(bytes.length);
-      for (let i = 0; i < bytes.length; i++) {
-        // Simple μ-law to linear PCM conversion
-        const sign = (bytes[i] & 0x80) ? -1 : 1;
-        const exponent = (bytes[i] & 0x70) >> 4;
-        const mantissa = (bytes[i] & 0x0F) | 0x10;
-        pcmData[i] = sign * ((mantissa << (exponent + 1)) - 33 - 0x84);
+      let pcmData: Int16Array;
+
+      if (fmt.encoding === "L16") {
+        // L16: raw 16-bit signed PCM, little-endian (Telnyx bidirectional streaming)
+        const numSamples = bytes.length >> 1;
+        pcmData = new Int16Array(numSamples);
+        for (let i = 0; i < numSamples; i++) {
+          pcmData[i] = bytes[i * 2] | (bytes[i * 2 + 1] << 8);
+        }
+      } else if (fmt.encoding === "PCMA") {
+        // PCMA (A-law / G.711) – ITU-T standard decoding
+        const ALAW_BIAS = 0x08;
+        pcmData = new Int16Array(bytes.length);
+        for (let i = 0; i < bytes.length; i++) {
+          const alaw = bytes[i] ^ 0x55;
+          const sign = (alaw & 0x80) ? -1 : 1;
+          const exponent = (alaw >> 4) & 0x07;
+          const mantissa = alaw & 0x0f;
+          const linear13 = sign * ((((mantissa << 4) + ALAW_BIAS) << exponent) - ALAW_BIAS);
+          pcmData[i] = Math.max(-32768, Math.min(32767, linear13 * 4));
+        }
+      } else {
+        // PCMU (μ-law / G.711) – default per Telnyx; also used when encoding unknown
+        const MULAW_BIAS = 0x84;
+        pcmData = new Int16Array(bytes.length);
+        for (let i = 0; i < bytes.length; i++) {
+          const mulaw = bytes[i] ^ 0xff;
+          const sign = (mulaw & 0x80) ? -1 : 1;
+          const exponent = (mulaw >> 4) & 0x07;
+          const mantissa = mulaw & 0x0f;
+          const linear14 = sign * ((((mantissa << 3) + MULAW_BIAS) << exponent) - MULAW_BIAS);
+          pcmData[i] = Math.max(-32768, Math.min(32767, linear14 * 4));
+        }
       }
 
-      // Create audio buffer (8kHz, mono)
-      const buffer = audioContextRef.current.createBuffer(1, pcmData.length, 8000);
+      // Create audio buffer using stream sample_rate from Telnyx media_format
+      const buffer = audioContextRef.current.createBuffer(1, pcmData.length, sampleRate);
       const channelData = buffer.getChannelData(0);
       for (let i = 0; i < pcmData.length; i++) {
-        channelData[i] = pcmData[i] / 32768.0; // Normalize to [-1, 1]
+        channelData[i] = pcmData[i] / 32768.0;
       }
 
-      // Queue audio buffer for playback
       audioBufferQueueRef.current.push(buffer);
-      
+
       const processingTime = performance.now() - startTime;
       console.log("[TELEMETRY] AudioStreamPlayer chunk processed", {
         timestamp: new Date().toISOString(),
+        encoding: fmt.encoding,
+        sampleRate,
         payloadSize: media.payload.length,
         bufferLength: buffer.length,
         duration: buffer.duration,
         queueLength: audioBufferQueueRef.current.length,
         processingTimeMs: processingTime.toFixed(2),
       });
-      
-      // Process queue if not already processing
+
       if (!isProcessingRef.current) {
         processAudioQueue();
       }
@@ -362,6 +416,9 @@ export default function AudioStreamPlayer({
             <>
               <p>Remote stream (e.g. Railway):</p>
               <ul className="list-disc list-inside mt-1 space-y-0.5">
+                {error?.includes("1006") && (
+                  <li><strong>Code 1006</strong> = connection failed or dropped (no close frame). Verify Railway is up: run <code className="rounded bg-gray-200 px-1 dark:bg-gray-700">curl https://web-socket-streaming-video-production.up.railway.app/health</code> — it should return {`{"status":"ok"}`}.</li>
+                )}
                 <li>If you see <strong>Unauthorized</strong>: set <code className="rounded bg-gray-200 px-1 dark:bg-gray-700">WEBSOCKET_AUTH_TOKEN</code> in <code className="rounded bg-gray-200 px-1 dark:bg-gray-700">.env.local</code> to the <em>same</em> value as in Railway variables.</li>
                 <li>Check the server is up: <code className="rounded bg-gray-200 px-1 dark:bg-gray-700">curl https://your-railway-url/health</code></li>
                 <li>Browser console (F12) shows the close code and reason.</li>
