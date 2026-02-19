@@ -9,6 +9,7 @@ import {
   getCampaign,
   getCampaignStats,
   updateCampaign,
+  processCampaignBatchNow,
   type Campaign,
   type CampaignStats,
 } from "@/app/actions/campaigns/campaigns";
@@ -30,6 +31,8 @@ export default function CampaignDetailPage() {
   const [campaign, setCampaign] = useState<Campaign | null>(null);
   const [stats, setStats] = useState<CampaignStats | null>(null);
   const [loading, setLoading] = useState(true);
+  const [processing, setProcessing] = useState(false);
+  const [message, setMessage] = useState<{ type: "error" | "success" | "warning"; text: string } | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -51,13 +54,23 @@ export default function CampaignDetailPage() {
 
   const handleStart = async () => {
     if (!campaign) return;
+    setMessage(null);
     const schedRes = await scheduleCampaignRecipients(id);
     if (!schedRes.ok) {
-      console.error("Schedule failed:", schedRes.error);
+      setMessage({ type: "error", text: `Schedule failed: ${schedRes.error}` });
+      return;
+    }
+    if (schedRes.scheduled === 0) {
+      setMessage({
+        type: "warning",
+        text: "No pending recipients were scheduled. Add recipients to this campaign, then use Process now or wait for the next cron run.",
+      });
     }
     const res = await updateCampaign(id, { status: "running" });
     if (res.ok) {
       setCampaign({ ...campaign, status: "running" });
+    } else {
+      setMessage({ type: "error", text: "Failed to start campaign." });
     }
   };
 
@@ -66,6 +79,38 @@ export default function CampaignDetailPage() {
     const res = await updateCampaign(id, { status: "paused" });
     if (res.ok) {
       setCampaign({ ...campaign, status: "paused" });
+    }
+  };
+
+  const handleProcessNow = async () => {
+    setProcessing(true);
+    setMessage(null);
+    try {
+      const res = await processCampaignBatchNow();
+      if (res.ok) {
+        const [c, s] = await Promise.all([getCampaign(id), getCampaignStats(id)]);
+        setCampaign(c ?? campaign);
+        setStats(s ?? stats);
+        if (res.errors.length > 0) {
+          setMessage({
+            type: "error",
+            text: res.processed > 0
+              ? `Processed ${res.processed} call(s). Issues: ${res.errors.join(" ")}`
+              : res.errors.join(" "),
+          });
+        } else if (res.processed > 0) {
+          setMessage({ type: "success", text: `Processed ${res.processed} recipient(s).` });
+        } else {
+          setMessage({
+            type: "warning",
+            text: "No recipients were processed. Check that recipients are scheduled and due, and that the campaign has connection, assistant, and from number configured.",
+          });
+        }
+      } else {
+        setMessage({ type: "error", text: res.error });
+      }
+    } finally {
+      setProcessing(false);
     }
   };
 
@@ -113,9 +158,14 @@ export default function CampaignDetailPage() {
               <Button onClick={handleStart}>Start</Button>
             )}
             {campaign.status === "running" && (
-              <Button onClick={handlePause} variant="outline">
-                Pause
-              </Button>
+              <>
+                <Button onClick={handlePause} variant="outline">
+                  Pause
+                </Button>
+                <Button onClick={handleProcessNow} variant="outline" disabled={processing}>
+                  {processing ? "Processing…" : "Process now"}
+                </Button>
+              </>
             )}
             <Link href={`/campaigns/${id}/recipients`}>
               <Button variant="outline">View Recipients</Button>
@@ -125,6 +175,20 @@ export default function CampaignDetailPage() {
             </Link>
           </div>
         </div>
+
+        {message && (
+          <div
+            className={`rounded-lg p-3 text-sm ${
+              message.type === "error"
+                ? "bg-red-50 text-red-800 dark:bg-red-900/20 dark:text-red-200"
+                : message.type === "warning"
+                  ? "bg-amber-50 text-amber-800 dark:bg-amber-900/20 dark:text-amber-200"
+                  : "bg-green-50 text-green-800 dark:bg-green-900/20 dark:text-green-200"
+            }`}
+          >
+            {message.text}
+          </div>
+        )}
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div className="p-4 rounded-lg bg-gray-50 dark:bg-gray-800">
