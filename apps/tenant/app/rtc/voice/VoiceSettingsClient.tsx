@@ -137,9 +137,7 @@ export default function VoiceSettingsClient() {
       </div>
 
       {profileError && (
-        <Alert variant="warning" title="Profiles" onDismiss={() => setProfileError(null)}>
-          {profileError}
-        </Alert>
+        <Alert variant="warning" title="Profiles" message={profileError} />
       )}
 
       <div>
@@ -182,7 +180,7 @@ export default function VoiceSettingsClient() {
           ) : (
             <>
               <div className="flex flex-wrap items-center gap-4">
-                <Button type="button" variant="secondary" size="sm" onClick={handleSelectAll}>
+                <Button type="button" variant="outline" size="sm" onClick={handleSelectAll}>
                   {selectAll ? "Deselect all" : "Select all destinations"}
                 </Button>
                 <div className="min-w-[200px] flex-1">
@@ -239,7 +237,7 @@ export default function VoiceSettingsClient() {
                 </Button>
                 <Button
                   type="button"
-                  variant="secondary"
+                  variant="outline"
                   size="sm"
                   disabled={!isDirty || saving}
                   onClick={handleReset}
@@ -252,9 +250,7 @@ export default function VoiceSettingsClient() {
               </div>
 
               {saveError && (
-                <Alert variant="error" title="Save failed" onDismiss={() => setSaveError(null)}>
-                  {saveError}
-                </Alert>
+                <Alert variant="error" title="Save failed" message={saveError} />
               )}
             </>
           )}

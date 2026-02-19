@@ -462,7 +462,7 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
                     />
                     <Button
                       type="button"
-                      variant="secondary"
+                      variant="outline"
                       size="sm"
                       disabled={creatingCallControlApp || !newCallControlAppName.trim()}
                       onClick={async () => {

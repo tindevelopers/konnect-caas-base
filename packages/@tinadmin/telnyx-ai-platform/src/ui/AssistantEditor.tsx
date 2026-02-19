@@ -1196,7 +1196,7 @@ export function AssistantEditor({
                     <input
                       type="number"
                       min={0}
-                      value={telephony.time_limit_secs ?? ""}
+                      value={typeof telephony.time_limit_secs === "number" ? telephony.time_limit_secs : ""}
                       onChange={(e) => {
                         const v = e.target.value;
                         updateTelephony({ time_limit_secs: v === "" || Number.isNaN(Number(v)) ? undefined : Number(v) });
@@ -1212,7 +1212,7 @@ export function AssistantEditor({
                     <input
                       type="number"
                       min={0}
-                      value={telephony.user_idle_timeout_secs ?? ""}
+                      value={typeof telephony.user_idle_timeout_secs === "number" ? telephony.user_idle_timeout_secs : ""}
                       onChange={(e) => {
                         const v = e.target.value;
                         updateTelephony({ user_idle_timeout_secs: v === "" || Number.isNaN(Number(v)) ? undefined : Number(v) });
@@ -1234,7 +1234,9 @@ export function AssistantEditor({
               <div className="mt-3">
                 <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">Action on voicemail detected</label>
                 <select
-                  value={(telephony.voicemail_detection as Record<string, unknown>)?.action_on_voicemail ?? "continue_assistant"}
+                  value={typeof (telephony.voicemail_detection as Record<string, unknown>)?.action_on_voicemail === "string"
+                    ? (telephony.voicemail_detection as Record<string, unknown>).action_on_voicemail as string
+                    : "continue_assistant"}
                   onChange={(e) => updateTelephony({
                     voicemail_detection: {
                       ...((telephony.voicemail_detection as Record<string, unknown>) ?? {}),
