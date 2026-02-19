@@ -539,20 +539,24 @@ export async function callAssistantAction(payload: CallAssistantPayload): Promis
             );
           }
 
-          const startResponse = await transport.request(
-            `/calls/${callControlId}/actions/ai_assistant_start`,
-            {
-              method: "POST",
-              body: {
-                assistant: {
-                  id: assistantId,
-                },
-              },
+          // Telnyx requires the call to be answered before ai_assistant_start. Attach
+          // assistant_id and tenant_id to the call via client_state so the webhook can
+          // start the assistant on call.answered.
+          if (tenantId) {
+            const statePayload = { t: "tinadmin_outbound_assistant", a: assistantId, tid: tenantId };
+            const clientState = Buffer.from(JSON.stringify(statePayload), "utf8").toString("base64");
+            try {
+              await transport.request(
+                `/calls/${callControlId}/actions/client_state_update`,
+                { method: "PUT", body: { client_state: clientState } }
+              );
+            } catch (stateErr) {
+              console.warn("[callAssistantAction] client_state_update failed (call will still ring):", stateErr);
             }
-          );
+          }
 
-          const conversationId = extractConversationId(startResponse);
-          return { callControlId, conversationId };
+          // Return immediately; assistant will be started by webhook when call is answered.
+          return { callControlId, conversationId: null };
         } catch (error) {
           // Surface Telnyx API error details for better debugging
           if (error instanceof TelnyxApiError) {
@@ -678,7 +682,7 @@ export async function getCallInstructionsAction(assistantId: string) {
     }
 
     const h = await headers();
-    const host = h.get("x-forwarded-host") || h.get("host") || "localhost:3010";
+    const host = h.get("x-forwarded-host") || h.get("host") || "localhost:3020";
     const proto = h.get("x-forwarded-proto") || (host.includes("localhost") ? "http" : "https");
     const baseUrl = `${proto}://${host}`;
 
@@ -704,7 +708,7 @@ export async function getCallInstructionsAction(assistantId: string) {
       localTunnelNotes: [
         "Your provider must reach your webhook over the public internet (localhost won't work).",
         "If testing locally, use a tunnel (ngrok) and paste the HTTPS URL above into your provider Voice API Application.",
-        "ngrok setup: `ngrok config add-authtoken <token>` then `ngrok http 3010`.",
+        "ngrok setup: `ngrok config add-authtoken <token>` then `ngrok http 3020`.",
       ],
       steps: [
         "Create or open your Call Control App in your provider console.",

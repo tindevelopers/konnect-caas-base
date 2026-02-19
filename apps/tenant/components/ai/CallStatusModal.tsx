@@ -27,8 +27,13 @@ export default function CallStatusModal({
   const [isMuted, setIsMuted] = useState(false);
   const [audioLevels, setAudioLevels] = useState<number[]>([]);
   const [clientId] = useState(() => `client-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`);
-  
-  // Generate WebSocket URL with routing identifiers (preserve any existing query params like token)
+
+  // Local WebSocket port for playback when on localhost (must match pnpm ws:server / WEBSOCKET_PORT)
+  const LOCAL_WS_PORT = 3012;
+
+  // Generate WebSocket URL with routing identifiers (preserve any existing query params like token).
+  // When on localhost and streamUrl is ngrok (unreliable from browser), use local playback URL.
+  // For Railway/other stable remotes, use the same URL so the browser connects to the deployed server.
   const wsUrl = useMemo(() => {
     if (!streamUrl) {
       console.warn("[TELEMETRY] CallStatusModal - No streamUrl provided", {
@@ -39,22 +44,40 @@ export default function CallStatusModal({
       return undefined;
     }
     try {
-      // Sanitize URL: trim whitespace/newlines that might come from env vars
       const sanitizedUrl = streamUrl.trim();
-      const url = new URL(sanitizedUrl);
+      const isLocalhost = typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+      const isNgrokUrl = /ngrok/i.test(sanitizedUrl);
+
+      // Only override to local playback when using ngrok (browser can be flaky through ngrok).
+      // Railway and other remotes: browser uses same URL so no local ws:server needed.
+      let baseUrl = sanitizedUrl;
+      if (isLocalhost && isNgrokUrl) {
+        baseUrl = `ws://localhost:${LOCAL_WS_PORT}/api/websocket/stream`;
+        console.log("[TELEMETRY] CallStatusModal - Using local playback URL (browser on localhost, stream URL is ngrok)", {
+          timestamp: new Date().toISOString(),
+          playbackUrl: baseUrl,
+          callControlId,
+        });
+      }
+
+      const url = new URL(baseUrl);
       url.searchParams.set("clientId", clientId);
       url.searchParams.set("callControlId", callControlId);
+      // Preserve token from original streamUrl for auth
+      const originalUrl = new URL(sanitizedUrl);
+      const token = originalUrl.searchParams.get("token");
+      if (token) url.searchParams.set("token", token);
       const finalUrl = url.toString();
-      
+
       console.log("[TELEMETRY] CallStatusModal - WebSocket URL generated", {
         timestamp: new Date().toISOString(),
         callControlId,
         clientId,
-        originalStreamUrl: sanitizedUrl.substring(0, 100) + (sanitizedUrl.length > 100 ? '...' : ''),
-        finalUrl: finalUrl.substring(0, 100) + (finalUrl.length > 100 ? '...' : ''),
-        hasToken: finalUrl.includes('token='),
+        originalStreamUrl: sanitizedUrl.substring(0, 100) + (sanitizedUrl.length > 100 ? "..." : ""),
+        finalUrl: finalUrl.substring(0, 100) + (finalUrl.length > 100 ? "..." : ""),
+        hasToken: finalUrl.includes("token="),
       });
-      
+
       return finalUrl;
     } catch (error) {
       console.error("[TELEMETRY] CallStatusModal - Error parsing streamUrl", {
@@ -64,19 +87,18 @@ export default function CallStatusModal({
         callControlId,
         clientId,
       });
-      // Fallback: manually construct URL if URL constructor fails
       const sanitizedUrl = streamUrl.trim();
       const joiner = sanitizedUrl.includes("?") ? "&" : "?";
       const fallbackUrl = `${sanitizedUrl}${joiner}clientId=${encodeURIComponent(clientId)}&callControlId=${encodeURIComponent(callControlId)}`;
-      
+
       console.log("[TELEMETRY] CallStatusModal - Using fallback URL construction", {
         timestamp: new Date().toISOString(),
-        fallbackUrl: fallbackUrl.substring(0, 100) + (fallbackUrl.length > 100 ? '...' : ''),
+        fallbackUrl: fallbackUrl.substring(0, 100) + (fallbackUrl.length > 100 ? "..." : ""),
       });
-      
+
       return fallbackUrl;
     }
-  }, [streamUrl, clientId, callControlId]);
+  }, [streamUrl, clientId, callControlId, LOCAL_WS_PORT]);
 
   // Generate random audio waveform visualization
   useEffect(() => {

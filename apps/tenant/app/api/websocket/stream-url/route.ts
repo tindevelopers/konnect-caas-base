@@ -57,7 +57,7 @@ export async function GET() {
     }
 
     const h = await headers();
-    const host = h.get("x-forwarded-host") || h.get("host") || "localhost:3010";
+    const host = h.get("x-forwarded-host") || h.get("host") || "localhost:3020";
     const proto = h.get("x-forwarded-proto") || (host.includes("localhost") ? "http" : "https");
     
     // Determine WebSocket protocol and host

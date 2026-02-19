@@ -3,6 +3,7 @@ import { createHmac, createPublicKey, verify as cryptoVerify } from "crypto";
 import { createAdminClient } from "@/core/database/admin-client";
 import { telnyxWebhookConfig } from "@/src/core/telnyx/config";
 import { handleTelnyxInboundVoiceEvent } from "@/src/core/telnyx/voice-router";
+import { getTelnyxTransportForWebhook } from "@/src/core/telnyx/webhook-transport";
 
 function resolveTenantId(request: NextRequest, payload: Record<string, unknown>) {
   const headerTenant = request.headers.get("x-tenant-id");
@@ -54,6 +55,62 @@ function resolveExternalId(payload: Record<string, unknown>) {
     (payload.id as string | undefined) ||
     null
   );
+}
+
+function resolveCallPayload(payload: Record<string, unknown>): Record<string, unknown> {
+  const data =
+    (payload.data as Record<string, unknown> | undefined) ||
+    ((payload.metadata as Record<string, unknown> | undefined)?.event as
+      | Record<string, unknown>
+      | undefined);
+  const nested = data?.payload;
+  if (nested && typeof nested === "object") return nested as Record<string, unknown>;
+  return (data ?? payload) as Record<string, unknown>;
+}
+
+/** Start AI assistant on outbound call when it is answered (set by callAssistantAction via client_state). */
+async function handleOutboundCallAnsweredAssistant(payload: Record<string, unknown>) {
+  const eventType = resolveEventType(payload);
+  if (eventType !== "call.answered") return;
+
+  const callPayload = resolveCallPayload(payload);
+  const direction = callPayload.direction as string | undefined;
+  if (direction !== "outgoing") return;
+
+  const clientStateRaw = callPayload.client_state as string | undefined;
+  if (!clientStateRaw || typeof clientStateRaw !== "string") return;
+
+  let decoded: { t?: string; a?: string; tid?: string };
+  try {
+    decoded = JSON.parse(
+      Buffer.from(clientStateRaw, "base64").toString("utf8")
+    ) as { t?: string; a?: string; tid?: string };
+  } catch {
+    return;
+  }
+  if (decoded?.t !== "tinadmin_outbound_assistant" || !decoded?.a || !decoded?.tid) return;
+
+  const callControlId =
+    (callPayload.call_control_id as string) || resolveExternalId(payload);
+  if (!callControlId) return;
+
+  try {
+    const { transport } = await getTelnyxTransportForWebhook(decoded.tid);
+    await transport.request(
+      `/calls/${callControlId}/actions/ai_assistant_start`,
+      {
+        method: "POST",
+        body: { assistant: { id: decoded.a } },
+      }
+    );
+  } catch (error) {
+    console.error("[TelnyxWebhook] Outbound call.answered ai_assistant_start failed:", {
+      callControlId,
+      assistantId: decoded.a,
+      tenantId: decoded.tid,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 function shouldStoreAiAgentEvent(eventType: string) {
@@ -304,6 +361,17 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error("[TelnyxWebhook] Error handling inbound voice event:", {
       tenantId,
+      eventType,
+      externalId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  // Start AI assistant on outbound call when answered (callAssistantAction sets client_state).
+  try {
+    await handleOutboundCallAnsweredAssistant(payload);
+  } catch (error) {
+    console.error("[TelnyxWebhook] Error handling outbound call.answered assistant:", {
       eventType,
       externalId,
       error: error instanceof Error ? error.message : String(error),

@@ -71,7 +71,9 @@
     "supabase:reset": "supabase db reset",
     "sync:localities": "tsx scripts/sync-telnyx-localities.ts",
     "docker:ps": "docker ps | grep supabase",
-    "docker:logs": "supabase logs"
+    "docker:logs": "supabase logs",
+    "railway:login": "railway login",
+    "railway:deploy:websocket": "./scripts/railway-websocket-deploy.sh"
   },
   "dependencies": {
     "@fullcalendar/core": "^6.1.15",

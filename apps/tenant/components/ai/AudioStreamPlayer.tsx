@@ -114,6 +114,12 @@ export default function AudioStreamPlayer({
         });
         setIsConnected(false);
         setIsPlaying(false);
+        // Surface close reason so user sees "Unauthorized", "Connection refused", etc.
+        if (event.code !== 1000 && event.code !== 1005) {
+          const detail = event.reason || `Code ${event.code}`;
+          setError(`WebSocket connection error: ${detail}`);
+          onError?.(new Error(detail));
+        }
       };
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : "Failed to connect to audio stream";
@@ -348,9 +354,20 @@ export default function AudioStreamPlayer({
       </div>
       
       {error && (
-        <div className="mt-2 text-xs text-red-600 dark:text-red-400">
-          Note: WebSocket audio streaming requires a WebSocket server endpoint.
-          For local development, use ngrok or a similar tunneling service.
+        <div className="mt-2 space-y-1 text-xs text-red-600 dark:text-red-400">
+          <p>The call is connected; this only affects hearing the stream in the browser.</p>
+          {streamUrl && /localhost|127\.0\.0\.1/.test(streamUrl) ? (
+            <p>Ensure the local WebSocket server is running: <code className="rounded bg-gray-200 px-1 dark:bg-gray-700">pnpm ws:server</code> (port 3012).</p>
+          ) : (
+            <>
+              <p>Remote stream (e.g. Railway):</p>
+              <ul className="list-disc list-inside mt-1 space-y-0.5">
+                <li>If you see <strong>Unauthorized</strong>: set <code className="rounded bg-gray-200 px-1 dark:bg-gray-700">WEBSOCKET_AUTH_TOKEN</code> in <code className="rounded bg-gray-200 px-1 dark:bg-gray-700">.env.local</code> to the <em>same</em> value as in Railway variables.</li>
+                <li>Check the server is up: <code className="rounded bg-gray-200 px-1 dark:bg-gray-700">curl https://your-railway-url/health</code></li>
+                <li>Browser console (F12) shows the close code and reason.</li>
+              </ul>
+            </>
+          )}
         </div>
       )}
     </div>
