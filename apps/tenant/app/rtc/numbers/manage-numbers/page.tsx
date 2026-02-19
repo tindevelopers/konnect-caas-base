@@ -15,8 +15,27 @@ import {
   setPhoneNumberVoiceAgentAction,
   type TelnyxPhoneNumber,
 } from "@/app/actions/telnyx/numbers";
+import { listPlatformNumbersAction } from "@/app/actions/twilio/numbers";
 import { assignPhoneNumberToMessagingProfileAction } from "@/app/actions/telnyx/messagingProfiles";
 import { listTenantAssistantsForVoiceAction } from "@/app/actions/telnyx/assistants";
+
+type UnifiedPhoneNumber = {
+  id: string;
+  phone_number: string;
+  status?: string;
+  phone_number_type?: string;
+  connection_name?: string | null;
+  connection_id?: string | null;
+  messaging_profile_id?: string | null;
+  messaging_profile_name?: string | null;
+  billing_group_id?: string | null;
+  customer_reference?: string | null;
+  tags?: string[];
+  deletion_lock_enabled?: boolean;
+  emergency_enabled?: boolean;
+  supplier: "telnyx" | "twilio" | "bandwidth";
+  record_type?: string;
+};
 
 function parseTags(raw: string) {
   return raw
@@ -33,7 +52,7 @@ export default function ManageNumbersPage() {
   const [pageNumber, setPageNumber] = useState(1);
   const [pageSize, setPageSize] = useState(25);
 
-  const [rows, setRows] = useState<TelnyxPhoneNumber[]>([]);
+  const [rows, setRows] = useState<UnifiedPhoneNumber[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
@@ -68,15 +87,56 @@ export default function ManageNumbersPage() {
     setInfo(null);
 
     try {
-      const res = await listOwnedPhoneNumbersAction({
-        phoneNumberContains: query.trim() || undefined,
-        status: status.trim() || undefined,
-        countryIsoAlpha2: country.trim() || undefined,
-        pageNumber,
-        pageSize,
-        handleMessagingProfileError: true,
-      });
-      setRows(res.data ?? []);
+      const [telnyxRes, platformRes] = await Promise.allSettled([
+        listOwnedPhoneNumbersAction({
+          phoneNumberContains: query.trim() || undefined,
+          status: status.trim() || undefined,
+          countryIsoAlpha2: country.trim() || undefined,
+          pageNumber,
+          pageSize,
+          handleMessagingProfileError: true,
+        }),
+        listPlatformNumbersAction({ supplier: "twilio" }),
+      ]);
+
+      const telnyxNumbers: UnifiedPhoneNumber[] =
+        telnyxRes.status === "fulfilled"
+          ? (telnyxRes.value.data ?? []).map((n: TelnyxPhoneNumber) => ({ ...n, supplier: "telnyx" as const }))
+          : [];
+
+      const twilioNumbers: UnifiedPhoneNumber[] =
+        platformRes.status === "fulfilled" && platformRes.value.ok
+          ? platformRes.value.data.map((n) => ({
+              id: n.id,
+              phone_number: n.phone_number_e164,
+              status: n.status,
+              phone_number_type: n.phone_number_type ?? undefined,
+              connection_name: null,
+              connection_id: null,
+              messaging_profile_id: null,
+              messaging_profile_name: null,
+              billing_group_id: null,
+              customer_reference: n.friendly_name,
+              tags: [],
+              deletion_lock_enabled: false,
+              emergency_enabled: false,
+              supplier: "twilio" as const,
+            }))
+          : [];
+
+      const seen = new Set<string>();
+      const merged: UnifiedPhoneNumber[] = [];
+      for (const n of [...telnyxNumbers, ...twilioNumbers]) {
+        if (!seen.has(n.phone_number)) {
+          seen.add(n.phone_number);
+          merged.push(n);
+        }
+      }
+      setRows(merged);
+
+      if (telnyxRes.status === "rejected") {
+        setError(`Telnyx: ${telnyxRes.reason instanceof Error ? telnyxRes.reason.message : "Failed to load"}`);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load phone numbers");
     } finally {
@@ -142,6 +202,10 @@ export default function ManageNumbersPage() {
 
   async function handleSaveEdits() {
     if (!selected) return;
+    if (selected.supplier === "twilio") {
+      setError("Twilio number properties are managed in the Twilio console.");
+      return;
+    }
     setIsSaving(true);
     setError(null);
     setInfo(null);
@@ -180,7 +244,11 @@ export default function ManageNumbersPage() {
     setError(null);
     setInfo(null);
     try {
-      const result = await setPhoneNumberVoiceAgentAction(selected.phone_number, assistantId);
+      const result = await setPhoneNumberVoiceAgentAction(
+        selected.phone_number,
+        assistantId,
+        selected.supplier ?? "telnyx"
+      );
       if ("error" in result) {
         setError(result.error);
         return;
@@ -224,7 +292,7 @@ export default function ManageNumbersPage() {
       <div className="mb-6">
         <h1 className="text-2xl font-semibold text-gray-900 dark:text-white/90">Manage Numbers</h1>
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-          View and update owned provider phone numbers (inventory).
+          View and manage phone numbers across all providers (Telnyx, Twilio).
         </p>
       </div>
 
@@ -297,7 +365,7 @@ export default function ManageNumbersPage() {
 
           <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
             <div className="flex items-center justify-between gap-3">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white/90">Owned numbers</h2>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white/90">All numbers</h2>
               <div className="flex items-center gap-2">
                 <Button
                   variant="outline"
@@ -329,6 +397,7 @@ export default function ManageNumbersPage() {
                   <thead className="text-xs uppercase text-gray-500 dark:text-gray-400">
                     <tr>
                       <th className="py-3 pr-4">Number</th>
+                      <th className="py-3 pr-4">Source</th>
                       <th className="py-3 pr-4">Status</th>
                       <th className="py-3 pr-4">Type</th>
                       <th className="py-3 pr-4">Connection</th>
@@ -353,6 +422,15 @@ export default function ManageNumbersPage() {
                             >
                               {r.phone_number}
                             </button>
+                          </td>
+                          <td className="py-3 pr-4">
+                            <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
+                              r.supplier === "twilio"
+                                ? "bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
+                                : "bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+                            }`}>
+                              {r.supplier === "twilio" ? "Twilio" : "Telnyx"}
+                            </span>
                           </td>
                           <td className="py-3 pr-4">{r.status ?? "-"}</td>
                           <td className="py-3 pr-4">{r.phone_number_type ?? "-"}</td>

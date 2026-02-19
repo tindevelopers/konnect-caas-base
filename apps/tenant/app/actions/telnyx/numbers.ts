@@ -759,6 +759,10 @@ export async function deleteNumberReservationAction(reservationId: string) {
             { method: "DELETE" }
           );
         } catch (error) {
+          // 404 = already expired or released; 405 = provider may not support DELETE (reservation will expire). Treat as success so UI can remove it.
+          if (error instanceof TelnyxApiError && (error.status === 404 || error.status === 405)) {
+            return { data: null } as TelnyxApiResponse<TelnyxNumberReservation>;
+          }
           throw toPublicProviderError({
             error,
             supportRef,
@@ -1220,25 +1224,28 @@ function normalizeE164(value: string): string {
 
 export async function getPhoneNumberVoiceAgentAction(
   phoneNumberE164: string
-): Promise<{ telnyx_assistant_id: string } | null> {
+): Promise<{ telnyx_assistant_id: string; supplier?: string } | null> {
   await ensureTenantId();
   const supabase = await createClient();
   const key = normalizeE164(phoneNumberE164);
   const { data, error } = await (supabase as any)
     .from("tenant_phone_number_voice_agents")
-    .select("telnyx_assistant_id")
+    .select("telnyx_assistant_id, supplier")
     .eq("phone_number_e164", key)
     .maybeSingle();
   if (error) {
     console.error("[getPhoneNumberVoiceAgentAction]", error);
     return null;
   }
-  return data?.telnyx_assistant_id ? { telnyx_assistant_id: data.telnyx_assistant_id } : null;
+  return data?.telnyx_assistant_id
+    ? { telnyx_assistant_id: data.telnyx_assistant_id, supplier: data.supplier || "telnyx" }
+    : null;
 }
 
 export async function setPhoneNumberVoiceAgentAction(
   phoneNumberE164: string,
-  telnyxAssistantId: string | null
+  telnyxAssistantId: string | null,
+  supplier: string = "telnyx"
 ): Promise<{ ok: true } | { error: string }> {
   const tenantId = await ensureTenantId();
   const supabase = await createClient();
@@ -1248,7 +1255,6 @@ export async function setPhoneNumberVoiceAgentAction(
   if (telnyxAssistantId !== null && telnyxAssistantId !== undefined) {
     const aid = String(telnyxAssistantId).trim();
     if (!aid) return { error: "Assistant ID is required to assign." };
-    // Ensure this assistant belongs to the tenant (tenant_ai_assistants)
     const { data: allowed } = await (supabase as any)
       .from("tenant_ai_assistants")
       .select("telnyx_assistant_id")
@@ -1258,10 +1264,11 @@ export async function setPhoneNumberVoiceAgentAction(
     if (!allowed) {
       return { error: "This AI assistant is not available to your tenant. Choose an assistant from the list." };
     }
+    const validSupplier = ["telnyx", "twilio", "bandwidth"].includes(supplier) ? supplier : "telnyx";
     const { error: upsertErr } = await (supabase as any)
       .from("tenant_phone_number_voice_agents")
       .upsert(
-        { tenant_id: tenantId, phone_number_e164: key, telnyx_assistant_id: aid },
+        { tenant_id: tenantId, phone_number_e164: key, telnyx_assistant_id: aid, supplier: validSupplier },
         { onConflict: "tenant_id,phone_number_e164" }
       );
     if (upsertErr) {

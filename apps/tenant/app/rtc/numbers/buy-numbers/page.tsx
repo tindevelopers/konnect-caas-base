@@ -42,8 +42,13 @@ import {
   type TelnyxNumberOrder,
   type TelnyxNumberReservation,
 } from "@/app/actions/telnyx/numbers";
+import {
+  searchTwilioAvailableNumbersAction,
+  purchaseTwilioNumberAction,
+  type TwilioAvailablePhoneNumber,
+} from "@/app/actions/twilio/numbers";
 import { OMIT_FEATURES_FOR_COUNTRIES } from "@/src/core/telnyx/country-constraints";
-import { ACTIVE_SUPPLIERS, COMING_SOON_SUPPLIERS } from "@/src/core/numbers/suppliers";
+import { ACTIVE_SUPPLIERS, COMING_SOON_SUPPLIERS, type NumberSupplierId } from "@/src/core/numbers/suppliers";
 import { ISO_COUNTRIES } from "@/src/lib/isoCountries";
 import { isPlatformAdmin } from "@/app/actions/organization-admins";
 import NotifyAdministrator from "@/components/support/NotifyAdministrator";
@@ -139,6 +144,26 @@ function LineTypeIcon({ type, className = "h-5 w-5" }: { type: string; className
 }
 
 export default function BuyNumbersPage() {
+  // Supplier selection
+  const [activeSupplier, setActiveSupplier] = useState<NumberSupplierId>("telnyx");
+
+  // Twilio search state
+  const [twilioCountryCode, setTwilioCountryCode] = useState("US");
+  const [twilioPhoneType, setTwilioPhoneType] = useState("local");
+  const [twilioAreaCode, setTwilioAreaCode] = useState("");
+  const [twilioContains, setTwilioContains] = useState("");
+  const [twilioLocality, setTwilioLocality] = useState("");
+  const [twilioRegion, setTwilioRegion] = useState("");
+  const [twilioVoice, setTwilioVoice] = useState(true);
+  const [twilioSms, setTwilioSms] = useState(true);
+  const [twilioLimit, setTwilioLimit] = useState(30);
+  const [twilioResults, setTwilioResults] = useState<TwilioAvailablePhoneNumber[]>([]);
+  const [twilioSearching, setTwilioSearching] = useState(false);
+  const [twilioPurchasing, setTwilioPurchasing] = useState<string | null>(null);
+  const [twilioError, setTwilioError] = useState<string | null>(null);
+  const [twilioInfo, setTwilioInfo] = useState<string | null>(null);
+
+  // Telnyx state (existing)
   const [countries, setCountries] = useState<{ code: string; name: string }[]>([]);
   const [countriesLoading, setCountriesLoading] = useState(true);
   const [countryCode, setCountryCode] = useState(() => {
@@ -254,6 +279,7 @@ export default function BuyNumbersPage() {
   const localityInputRef = useRef<HTMLInputElement>(null);
   const localityDropdownRef = useRef<HTMLDivElement>(null);
   const localitySearchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const panelScrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     isPlatformAdmin().then(setShowSuppliers).catch(() => setShowSuppliers(false));
@@ -340,6 +366,38 @@ export default function BuyNumbersPage() {
   const [selectedNumbers, setSelectedNumbers] = useState<string[]>([]);
   const selectedSet = useMemo(() => new Set(selectedNumbers), [selectedNumbers]);
 
+  /** Reset search form to defaults and clear persisted criteria. Optionally clear results/messages. */
+  const resetSearchForm = useCallback((clearResults = false) => {
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("buy_numbers_country_code");
+      localStorage.removeItem("buy_numbers_phone_type");
+      localStorage.removeItem("buy_numbers_ndc");
+      localStorage.removeItem("buy_numbers_locality");
+      localStorage.removeItem("buy_numbers_admin_area");
+      localStorage.removeItem("buy_numbers_rate_center");
+    }
+    setCountryCode("US");
+    setPhoneNumberType("local");
+    setNationalDestinationCode("");
+    setLocality("");
+    setAdministrativeArea("");
+    setRateCenter("");
+    setSearchPhoneNumber("");
+    setPhoneNumberPattern("contains");
+    setFeatures(["sms", "voice"]);
+    setLimit(50);
+    setBestEffort(false);
+    setQuickship(false);
+    setReservableOnly(true);
+    setExcludeHeldNumbers(false);
+    if (clearResults) {
+      setResults([]);
+      setSelectedNumbers([]);
+      setError(null);
+      setInfo(null);
+    }
+  }, []);
+
   const [reservation, setReservation] = useState<TelnyxNumberReservation | null>(null);
   const [isReserving, setIsReserving] = useState(false);
   const [loadingReservation, setLoadingReservation] = useState(false);
@@ -383,6 +441,13 @@ export default function BuyNumbersPage() {
     document.addEventListener("keydown", handleEscape);
     return () => document.removeEventListener("keydown", handleEscape);
   }, [cartOrderOpen]);
+
+  // When opening the reservations list, scroll panel to top so "Select a Reservation" title is visible
+  useEffect(() => {
+    if (showReservationsList && panelScrollRef.current) {
+      panelScrollRef.current.scrollTop = 0;
+    }
+  }, [showReservationsList]);
 
   const [connectionId, setConnectionId] = useState("");
   const [messagingProfileId, setMessagingProfileId] = useState("");
@@ -459,6 +524,8 @@ export default function BuyNumbersPage() {
       setSelectedNumbers((prev) => prev.filter((n) => available.has(n)));
 
       setInfo(`Found ${data.length} numbers.`);
+      // Reset form to defaults so the next search starts clean (no trail of this query).
+      resetSearchForm(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Search failed");
     } finally {
@@ -722,6 +789,59 @@ export default function BuyNumbersPage() {
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // Twilio search + purchase handlers
+  // ---------------------------------------------------------------------------
+
+  async function handleTwilioSearch() {
+    setTwilioError(null);
+    setTwilioInfo(null);
+    setTwilioSearching(true);
+    setTwilioResults([]);
+
+    try {
+      if (!twilioCountryCode.trim()) throw new Error("Country code is required.");
+      const res = await searchTwilioAvailableNumbersAction({
+        countryCode: twilioCountryCode.trim().toUpperCase(),
+        phoneNumberType: twilioPhoneType || undefined,
+        areaCode: twilioAreaCode.trim() || undefined,
+        contains: twilioContains.trim() || undefined,
+        locality: twilioLocality.trim() || undefined,
+        region: twilioRegion.trim() || undefined,
+        voiceEnabled: twilioVoice || undefined,
+        smsEnabled: twilioSms || undefined,
+        limit: twilioLimit,
+      });
+      if (!res.ok) throw new Error(res.error);
+      setTwilioResults(res.data);
+      setTwilioInfo(`Found ${res.data.length} Twilio numbers.`);
+    } catch (e) {
+      setTwilioError(e instanceof Error ? e.message : "Search failed");
+    } finally {
+      setTwilioSearching(false);
+    }
+  }
+
+  async function handleTwilioPurchase(phoneNumber: string) {
+    setTwilioError(null);
+    setTwilioInfo(null);
+    setTwilioPurchasing(phoneNumber);
+
+    try {
+      const res = await purchaseTwilioNumberAction({
+        phoneNumber,
+        friendlyName: `Platform number ${phoneNumber}`,
+      });
+      if (!res.ok) throw new Error(res.error);
+      setTwilioInfo(`Purchased and wired ${phoneNumber} to your platform.`);
+      setTwilioResults((prev) => prev.filter((r) => r.phone_number !== phoneNumber));
+    } catch (e) {
+      setTwilioError(e instanceof Error ? e.message : "Purchase failed");
+    } finally {
+      setTwilioPurchasing(null);
+    }
+  }
+
   const reservationExpiresAt = reservation?.phone_numbers?.[0]?.expired_at ?? null;
 
   return (
@@ -859,25 +979,37 @@ export default function BuyNumbersPage() {
           <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white/90">Search</h2>
-              {showSuppliers && (
-                <div className="flex items-center gap-2 text-sm">
-                  <span className="text-gray-500 dark:text-gray-400">Inventory from:</span>
-                  {ACTIVE_SUPPLIERS.map((s) => (
-                    <span
-                      key={s.id}
-                      className="rounded-md bg-green-50 px-2 py-0.5 font-medium text-green-700 dark:bg-green-900/30 dark:text-green-400"
-                    >
-                      {s.name}
-                    </span>
-                  ))}
-                  {COMING_SOON_SUPPLIERS.length > 0 && (
-                    <span className="rounded-md border border-dashed border-gray-300 px-2 py-0.5 text-gray-500 dark:border-gray-600 dark:text-gray-400">
-                      {COMING_SOON_SUPPLIERS.map((s) => s.name).join(", ")} — Coming soon
-                    </span>
-                  )}
-                </div>
+              {COMING_SOON_SUPPLIERS.length > 0 && (
+                <span className="rounded-md border border-dashed border-gray-300 px-2 py-0.5 text-xs text-gray-500 dark:border-gray-600 dark:text-gray-400">
+                  {COMING_SOON_SUPPLIERS.map((s) => s.name).join(", ")} — Coming soon
+                </span>
               )}
             </div>
+
+            {/* Supplier tabs */}
+            <div className="mt-4 flex items-center gap-1 border-b border-gray-200 dark:border-gray-700">
+              {ACTIVE_SUPPLIERS.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => setActiveSupplier(s.id)}
+                  className={`relative px-4 py-2.5 text-sm font-medium transition-colors ${
+                    activeSupplier === s.id
+                      ? "text-brand-600 dark:text-brand-400"
+                      : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                  }`}
+                >
+                  {s.name}
+                  {activeSupplier === s.id && (
+                    <span className="absolute bottom-0 left-0 right-0 h-0.5 rounded-full bg-brand-600 dark:bg-brand-400" />
+                  )}
+                </button>
+              ))}
+            </div>
+
+            {/* Telnyx search form */}
+            {activeSupplier === "telnyx" && (<>
+            <div className="sr-only">Telnyx number search</div>
 
             <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
               <div>
@@ -1104,6 +1236,14 @@ export default function BuyNumbersPage() {
               <Button onClick={handleSearch} disabled={isSearching}>
                 {isSearching ? "Searching…" : "Search numbers"}
               </Button>
+              <Button
+                variant="outline"
+                onClick={() => resetSearchForm(true)}
+                disabled={isSearching}
+                title="Clear form and results for a new search"
+              >
+                New search
+              </Button>
               <Button variant="outline" onClick={selectAllOnPage} disabled={results.length === 0}>
                 Select all
               </Button>
@@ -1114,8 +1254,130 @@ export default function BuyNumbersPage() {
                 Selected: {selectedNumbers.length}
               </span>
             </div>
+            </>)}
+
+            {/* Twilio search form */}
+            {activeSupplier === "twilio" && (
+              <div className="mt-4 space-y-4">
+                {twilioError && (
+                  <Alert variant="error" title="Twilio Error" message={twilioError} />
+                )}
+                {twilioInfo && (
+                  <Alert variant="success" title="Info" message={twilioInfo} />
+                )}
+
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                  <div>
+                    <Label htmlFor="twilio-country">Country</Label>
+                    <select
+                      id="twilio-country"
+                      value={twilioCountryCode}
+                      onChange={(e) => setTwilioCountryCode(e.target.value)}
+                      className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-sm text-gray-800 shadow-theme-xs focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:focus:border-brand-800"
+                    >
+                      {ISO_COUNTRIES.map((c) => (
+                        <option key={c.code} value={c.code}>
+                          {c.name} ({c.code})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <Label htmlFor="twilio-type">Type</Label>
+                    <select
+                      id="twilio-type"
+                      value={twilioPhoneType}
+                      onChange={(e) => setTwilioPhoneType(e.target.value)}
+                      className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-sm text-gray-800 shadow-theme-xs focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:focus:border-brand-800"
+                    >
+                      <option value="local">Local</option>
+                      <option value="toll_free">Toll-Free</option>
+                      <option value="mobile">Mobile</option>
+                    </select>
+                  </div>
+                  <div>
+                    <Label htmlFor="twilio-limit">Limit</Label>
+                    <Input
+                      id="twilio-limit"
+                      type="number"
+                      value={twilioLimit}
+                      onChange={(e) => setTwilioLimit(Number(e.target.value))}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                  <div>
+                    <Label htmlFor="twilio-area-code">Area code</Label>
+                    <Input
+                      id="twilio-area-code"
+                      placeholder="e.g. 312"
+                      value={twilioAreaCode}
+                      onChange={(e) => setTwilioAreaCode(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="twilio-contains">Contains (digits)</Label>
+                    <Input
+                      id="twilio-contains"
+                      placeholder="e.g. 555"
+                      value={twilioContains}
+                      onChange={(e) => setTwilioContains(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                  <div>
+                    <Label htmlFor="twilio-locality">Locality (city)</Label>
+                    <Input
+                      id="twilio-locality"
+                      placeholder="e.g. Chicago"
+                      value={twilioLocality}
+                      onChange={(e) => setTwilioLocality(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="twilio-region">Region (state)</Label>
+                    <Input
+                      id="twilio-region"
+                      placeholder="e.g. IL"
+                      value={twilioRegion}
+                      onChange={(e) => setTwilioRegion(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-6">
+                  <Switch label="Voice" checked={twilioVoice} onChange={setTwilioVoice} />
+                  <Switch label="SMS" checked={twilioSms} onChange={setTwilioSms} />
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <Button onClick={handleTwilioSearch} disabled={twilioSearching}>
+                    {twilioSearching ? "Searching Twilio…" : "Search Twilio numbers"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setTwilioResults([]);
+                      setTwilioError(null);
+                      setTwilioInfo(null);
+                      setTwilioAreaCode("");
+                      setTwilioContains("");
+                      setTwilioLocality("");
+                      setTwilioRegion("");
+                    }}
+                  >
+                    Clear
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
 
+          {/* Telnyx results */}
+          {activeSupplier === "telnyx" && (
           <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
             <div className="flex items-start justify-between gap-3">
               <div>
@@ -1231,6 +1493,92 @@ export default function BuyNumbersPage() {
               </div>
             )}
           </div>
+          )}
+
+          {/* Twilio results */}
+          {activeSupplier === "twilio" && twilioResults.length > 0 && (
+          <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-white/90">Twilio Results</h2>
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                  Purchase a number to wire it to your platform and assign to an agent.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-4 overflow-x-auto">
+              <table className="min-w-full text-left text-sm">
+                <thead className="border-b border-gray-200 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                  <tr>
+                    <th className="py-3 pr-4">Number</th>
+                    <th className="py-3 pr-4">Location</th>
+                    <th className="py-3 pr-4">Capabilities</th>
+                    <th className="py-3 pr-4"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 text-gray-800 dark:divide-gray-800 dark:text-white/90">
+                  {twilioResults.map((r) => {
+                    const caps: string[] = [];
+                    if (r.capabilities?.voice) caps.push("Voice");
+                    if (r.capabilities?.SMS) caps.push("SMS");
+                    if (r.capabilities?.MMS) caps.push("MMS");
+                    if (r.capabilities?.fax) caps.push("Fax");
+                    const location = [r.locality, r.region, r.iso_country]
+                      .filter(Boolean)
+                      .join(", ");
+
+                    return (
+                      <tr key={r.phone_number} className="transition-colors hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                        <td className="py-3 pr-4">
+                          <span className="font-medium">{r.friendly_name || r.phone_number}</span>
+                          {r.friendly_name && r.friendly_name !== r.phone_number && (
+                            <span className="ml-2 text-xs text-gray-500">{r.phone_number}</span>
+                          )}
+                        </td>
+                        <td className="py-3 pr-4 min-w-[140px]">{location || "-"}</td>
+                        <td className="py-3 pr-4">
+                          <span className="inline-flex items-center gap-1.5">
+                            {caps.length > 0 ? (
+                              caps.map((c) => (
+                                <span
+                                  key={c}
+                                  className="rounded bg-gray-100 px-1.5 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-300"
+                                >
+                                  {c}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-gray-400">-</span>
+                            )}
+                          </span>
+                        </td>
+                        <td className="py-3 pr-4 text-right">
+                          <Button
+                            size="sm"
+                            onClick={() => handleTwilioPurchase(r.phone_number)}
+                            disabled={twilioPurchasing === r.phone_number}
+                          >
+                            {twilioPurchasing === r.phone_number ? "Purchasing…" : "Purchase & Wire"}
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          )}
+
+          {activeSupplier === "twilio" && twilioResults.length === 0 && !twilioSearching && (
+            <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white/90">Twilio Results</h2>
+              <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                Search Twilio inventory to see available numbers. Purchase to wire them to your platform.
+              </p>
+            </div>
+          )}
         </section>
 
         {cartOrderOpen && (
@@ -1240,7 +1588,7 @@ export default function BuyNumbersPage() {
               onClick={() => setCartOrderOpen(false)}
               aria-hidden="true"
             />
-            <aside className="fixed right-0 top-0 z-50 flex h-screen w-full max-w-md flex-col border-l border-gray-200 bg-white shadow-xl dark:border-gray-800 dark:bg-gray-900">
+            <aside className="fixed right-0 top-0 z-50 flex h-screen w-full max-w-md flex-col border-l border-gray-200 bg-white shadow-xl dark:border-gray-800 dark:bg-gray-900 pt-[env(safe-area-inset-top)]">
               <div className="flex flex-shrink-0 items-center justify-between border-b border-gray-200 px-4 py-3 dark:border-gray-800">
                 <h2 className="text-base font-semibold text-gray-900 dark:text-white/90">
                   {rightPanelTab === "cart" ? "Cart (Reservation)" : "Order settings"}
@@ -1287,25 +1635,31 @@ export default function BuyNumbersPage() {
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto overscroll-contain px-6 pb-6 pt-4" style={{ minHeight: 0 }}>
+              <div
+                ref={panelScrollRef}
+                className="flex-1 overflow-y-auto overscroll-contain px-6 pb-6 pt-4"
+                style={{ minHeight: 0 }}
+              >
               {rightPanelTab === "cart" ? (
                 <>
                   {showReservationsList ? (
                     <div className="space-y-4">
-                      <div className="flex items-center justify-between">
-                        <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                          Select a Reservation
+                      <div className="sticky top-0 z-10 -mx-6 -mt-4 flex flex-col gap-1 bg-white px-6 pt-4 pb-2 dark:bg-gray-900">
+                        <div className="flex items-center justify-between">
+                          <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                            Select a Reservation
+                          </p>
+                          <button
+                            onClick={() => setShowReservationsList(false)}
+                            className="text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+                          >
+                            Back
+                          </button>
+                        </div>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                          Found {availableReservations.length} active reservation{availableReservations.length > 1 ? 's' : ''}
                         </p>
-                        <button
-                          onClick={() => setShowReservationsList(false)}
-                          className="text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
-                        >
-                          Back
-                        </button>
                       </div>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">
-                        Found {availableReservations.length} active reservation{availableReservations.length > 1 ? 's' : ''}
-                      </p>
                       <div className="space-y-2">
                         {availableReservations.map((res) => (
                           <div
