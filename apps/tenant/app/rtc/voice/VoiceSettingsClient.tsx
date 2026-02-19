@@ -12,12 +12,24 @@ import {
   updateOutboundVoiceProfileDestinationsAction,
   type TelnyxOutboundVoiceProfile,
 } from "@/app/actions/telnyx/outbound-voice-profiles";
+import {
+  getTenantVoiceSettings,
+  saveTenantVoiceSettings,
+  STREAM_CODEC_OPTIONS,
+  type StreamCodecValue,
+} from "@/app/actions/voice-settings";
 
 export default function VoiceSettingsClient() {
   const [profiles, setProfiles] = useState<TelnyxOutboundVoiceProfile[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState<string>("");
   const [loadingProfiles, setLoadingProfiles] = useState(true);
   const [profileError, setProfileError] = useState<string | null>(null);
+
+  const [defaultStreamCodec, setDefaultStreamCodec] = useState<StreamCodecValue>("PCMU");
+  const [loadingVoiceSettings, setLoadingVoiceSettings] = useState(true);
+  const [savingVoiceSettings, setSavingVoiceSettings] = useState(false);
+  const [voiceSettingsError, setVoiceSettingsError] = useState<string | null>(null);
+  const [voiceSettingsSuccess, setVoiceSettingsSuccess] = useState(false);
 
   const [whitelisted, setWhitelisted] = useState<string[]>([]);
   const [savedWhitelisted, setSavedWhitelisted] = useState<string[]>([]);
@@ -56,6 +68,38 @@ export default function VoiceSettingsClient() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingVoiceSettings(true);
+    getTenantVoiceSettings()
+      .then((res) => {
+        if (!cancelled && res.defaultStreamCodec) setDefaultStreamCodec(res.defaultStreamCodec);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingVoiceSettings(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleSaveVoiceSettings = useCallback(async () => {
+    setVoiceSettingsError(null);
+    setVoiceSettingsSuccess(false);
+    setSavingVoiceSettings(true);
+    try {
+      const result = await saveTenantVoiceSettings({ defaultStreamCodec });
+      if (result.success) {
+        setVoiceSettingsSuccess(true);
+        setTimeout(() => setVoiceSettingsSuccess(false), 3000);
+      } else {
+        setVoiceSettingsError(result.error ?? "Failed to save");
+      }
+    } finally {
+      setSavingVoiceSettings(false);
+    }
+  }, [defaultStreamCodec]);
 
   useEffect(() => {
     if (!selectedProfileId) {
@@ -128,6 +172,46 @@ export default function VoiceSettingsClient() {
 
   return (
     <div className="space-y-6">
+      <div className="rounded-xl border border-gray-200 bg-gray-50/50 p-4 dark:border-gray-800 dark:bg-gray-900/30">
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white/90">Default stream codec</h2>
+        <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+          Preferred audio codec for &quot;Call Assistant&quot; streaming. Used when starting a call with a WebSocket stream URL.
+          You can still override this per call in the Call Assistant modal.
+        </p>
+        {loadingVoiceSettings ? (
+          <p className="mt-3 text-sm text-gray-500">Loading…</p>
+        ) : (
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <select
+              value={defaultStreamCodec}
+              onChange={(e) => setDefaultStreamCodec(e.target.value as StreamCodecValue)}
+              className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-gray-600 dark:bg-gray-800 dark:text-white/90"
+            >
+              {STREAM_CODEC_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              disabled={savingVoiceSettings}
+              onClick={handleSaveVoiceSettings}
+            >
+              {savingVoiceSettings ? "Saving…" : "Save"}
+            </Button>
+            {voiceSettingsSuccess && (
+              <span className="text-sm font-medium text-green-600 dark:text-green-400">Saved.</span>
+            )}
+            {voiceSettingsError && (
+              <span className="text-sm text-red-600 dark:text-red-400">{voiceSettingsError}</span>
+            )}
+          </div>
+        )}
+      </div>
+
       <div>
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white/90">Outbound voice profiles</h2>
         <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">

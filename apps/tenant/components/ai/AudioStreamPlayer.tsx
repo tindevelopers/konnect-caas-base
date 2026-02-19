@@ -22,10 +22,20 @@ const DEFAULT_MEDIA_FORMAT: MediaFormat = {
   channels: 1,
 };
 
+/** Detect Web Codecs Opus support (AudioDecoder + opus codec). */
+function isOpusDecodeSupported(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return typeof (window as any).AudioDecoder === "function" && typeof (window as any).EncodedAudioChunk === "function";
+  } catch {
+    return false;
+  }
+}
+
 /**
  * AudioStreamPlayer component for playing real-time audio from Telnyx WebSocket stream.
  * Uses media_format from Telnyx "start" event (encoding, sample_rate, channels).
- * Supported codecs: PCMU (μ-law), PCMA (A-law), L16 (raw 16-bit PCM). See Telnyx Media Streaming docs.
+ * Supported codecs: PCMU (μ-law), PCMA (A-law), L16 (raw 16-bit PCM), OPUS (Web Codecs), G.722 (unsupported – chunk skipped).
  */
 export default function AudioStreamPlayer({
   streamUrl,
@@ -36,12 +46,14 @@ export default function AudioStreamPlayer({
   const [isPlaying, setIsPlaying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
-  const didOpenRef = useRef(false); // true once this socket has fired onopen (avoids showing 1006 when we close before open)
+  const didOpenRef = useRef(false);
   const audioContextRef = useRef<AudioContext | null>(null);
   const sourceNodeRef = useRef<AudioBufferSourceNode | null>(null);
   const audioBufferQueueRef = useRef<AudioBuffer[]>([]);
   const isProcessingRef = useRef(false);
   const mediaFormatRef = useRef<MediaFormat>({ ...DEFAULT_MEDIA_FORMAT });
+  const opusDecoderRef = useRef<InstanceType<typeof AudioDecoder> | null>(null);
+  const opusTimestampRef = useRef<number>(0);
 
   useEffect(() => {
     if (!isActive || !streamUrl) {
@@ -183,6 +195,7 @@ export default function AudioStreamPlayer({
         } else {
           mediaFormatRef.current = { ...DEFAULT_MEDIA_FORMAT };
         }
+        opusTimestampRef.current = 0; // reset for new stream (Opus timestamp in µs)
         console.log("[TELEMETRY] AudioStreamPlayer stream started", {
           timestamp: new Date().toISOString(),
           mediaFormat: mediaFormatRef.current,
@@ -259,6 +272,82 @@ export default function AudioStreamPlayer({
       const bytes = new Uint8Array(binaryString.length);
       for (let i = 0; i < binaryString.length; i++) {
         bytes[i] = binaryString.charCodeAt(i);
+      }
+
+      // G.722: not yet supported in browser without WASM; skip chunk to avoid wrong audio
+      if (fmt.encoding === "G722" || fmt.encoding === "G.722") {
+        console.warn("[TELEMETRY] AudioStreamPlayer G.722 not supported, skipping chunk", {
+          timestamp: new Date().toISOString(),
+          payloadSize: bytes.length,
+        });
+        return;
+      }
+
+      // Opus: decode via Web Codecs API (raw Opus packets per W3C spec)
+      if (fmt.encoding === "OPUS") {
+        if (!isOpusDecodeSupported()) {
+          console.warn("[TELEMETRY] AudioStreamPlayer Opus not supported (no Web Codecs)", {
+            timestamp: new Date().toISOString(),
+          });
+          return;
+        }
+        const opusRate = sampleRate > 0 ? sampleRate : 48000;
+        if (!opusDecoderRef.current) {
+          const AudioDecoderClass = (window as any).AudioDecoder;
+          const EncodedAudioChunkClass = (window as any).EncodedAudioChunk;
+          opusDecoderRef.current = new AudioDecoderClass({
+            output: (audioData: any) => {
+              try {
+                if (!audioContextRef.current) {
+                  audioData.close();
+                  return;
+                }
+                const ctx = audioContextRef.current;
+                const numChannels = audioData.numberOfChannels;
+                const numFrames = audioData.numberOfFrames;
+                const sr = audioData.sampleRate;
+                const buffer = ctx.createBuffer(numChannels, numFrames, sr);
+                for (let i = 0; i < numChannels; i++) {
+                  audioData.copyTo(buffer.getChannelData(i) as ArrayBuffer, { planeIndex: i });
+                }
+                audioData.close();
+                audioBufferQueueRef.current.push(buffer);
+                if (!isProcessingRef.current) processAudioQueue();
+              } catch (e) {
+                console.error("[AudioStreamPlayer] Opus output error:", e);
+                try {
+                  audioData.close();
+                } catch {
+                  // ignore
+                }
+              }
+            },
+            error: (e: Error) => {
+              console.error("[TELEMETRY] AudioStreamPlayer Opus decoder error", e);
+            },
+          });
+          opusDecoderRef.current.configure({
+            codec: "opus",
+            sampleRate: opusRate,
+            numberOfChannels: 1,
+          });
+        }
+        const EncodedAudioChunkClass = (window as any).EncodedAudioChunk;
+        const timestamp = opusTimestampRef.current;
+        opusTimestampRef.current += (bytes.length / (64000 / 8)) * 1e6; // rough: 64kbps -> duration in µs
+        const chunk = new EncodedAudioChunkClass({
+          type: "key",
+          timestamp,
+          data: bytes,
+        });
+        await opusDecoderRef.current.decode(chunk);
+        const processingTime = performance.now() - startTime;
+        console.log("[TELEMETRY] AudioStreamPlayer Opus chunk queued", {
+          timestamp: new Date().toISOString(),
+          payloadSize: media.payload.length,
+          processingTimeMs: processingTime.toFixed(2),
+        });
+        return;
       }
 
       let pcmData: Int16Array;
@@ -363,6 +452,16 @@ export default function AudioStreamPlayer({
       wsRef.current.close();
       wsRef.current = null;
     }
+
+    if (opusDecoderRef.current) {
+      try {
+        opusDecoderRef.current.close();
+      } catch (e) {
+        console.warn("[AudioStreamPlayer] Opus decoder close error:", e);
+      }
+      opusDecoderRef.current = null;
+    }
+    opusTimestampRef.current = 0;
 
     if (audioContextRef.current) {
       audioContextRef.current.close().catch(console.error);
