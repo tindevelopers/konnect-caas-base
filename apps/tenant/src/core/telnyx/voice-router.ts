@@ -162,7 +162,7 @@ export async function handleTelnyxInboundVoiceEvent(args: {
     await transport.request(`/calls/${callControlId}/actions/ai_assistant_start`, {
       method: "POST",
       body: {
-        assistant: { assistant_id: inboundAssistantId },
+        assistant: { id: inboundAssistantId },
         // Keep greeting minimal; the assistant's own greeting can also be configured in Telnyx.
         greeting: routing.greeting || `Hi. You can say how I can help, or press ${escapeDigit} for an operator.`,
         command_id: commandId(["ai_assistant_start", callControlId, eventId]),

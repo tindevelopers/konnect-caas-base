@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import VoiceSettingsClient from "../VoiceSettingsClient";
 
 const VOICE_SECTIONS: Record<string, { title: string; notes: string[] }> = {
   "programmable-voice": {
@@ -15,7 +16,7 @@ const VOICE_SECTIONS: Record<string, { title: string; notes: string[] }> = {
   },
   settings: {
     title: "Settings",
-    notes: ["Outbound voice profiles", "Limits, recording, destination controls"],
+    notes: ["Outbound voice profiles", "Limits, recording", "Allowed destinations (whitelist)"],
   },
   "external-voice-integrations": {
     title: "External Voice Integrations",
@@ -37,6 +38,20 @@ export default async function RtcVoiceSectionPage(props: {
   const { section } = await props.params;
   const meta = VOICE_SECTIONS[section];
   if (!meta) notFound();
+
+  if (section === "settings") {
+    return (
+      <main className="p-6">
+        <h1 className="text-xl font-semibold">Voice · {meta.title}</h1>
+        <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
+          Outbound voice profiles and allowed destinations. Manage whitelisted countries so outbound calls don’t fail with D13.
+        </p>
+        <div className="mt-6">
+          <VoiceSettingsClient />
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="p-6">

@@ -152,7 +152,7 @@ export const mainNavItems: NavItem[] = [
     ],
   },
   {
-    name: "Real-Time Communications",
+    name: "Communications",
     icon: createIcon(BoltIcon),
     // Stubs for now; pages will be placeholders until we wire real functionality.
     subItems: [

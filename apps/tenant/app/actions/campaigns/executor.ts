@@ -121,7 +121,7 @@ export async function processCampaignVoiceBatch(
           {
             method: "POST",
             body: {
-              assistant: { assistant_id: campaign.assistant_id },
+              assistant: { id: campaign.assistant_id },
             },
           }
         );

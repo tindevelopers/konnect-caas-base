@@ -96,6 +96,8 @@ export default function NewCampaignPage() {
   } | null>(null);
   const [crmLoading, setCrmLoading] = useState(false);
   const [seeding, setSeeding] = useState(false);
+  /** Selected contact IDs when "All Contacts" is used; empty = use all, non-empty = use only these */
+  const [selectedCrmContactIds, setSelectedCrmContactIds] = useState<Set<string>>(new Set());
 
   // Step 2c: Google Sheets audience
   const [gsSheetId, setGsSheetId] = useState("");
@@ -126,6 +128,8 @@ export default function NewCampaignPage() {
   const [fromNumber, setFromNumber] = useState("");
   const [messageTemplate, setMessageTemplate] = useState("");
   const [connectionId, setConnectionId] = useState("");
+  const [contentOptionsLoading, setContentOptionsLoading] = useState(false);
+  const [contentOptionsError, setContentOptionsError] = useState<string | null>(null);
 
   // Step 4: Schedule
   const [callingWindowStart, setCallingWindowStart] = useState("09:00");
@@ -343,23 +347,47 @@ export default function NewCampaignPage() {
 
   // ── Content options ───────────────────────────────────────────────
 
-  const loadContentOptions = async () => {
+  const loadContentOptions = useCallback(async () => {
+    setContentOptionsError(null);
+    setContentOptionsLoading(true);
     try {
       const [aList, nList] = await Promise.all([
         listAssistantsAction(),
         listOwnedPhoneNumbersAction({ pageNumber: 1, pageSize: 50 }),
       ]);
-      const assistantsData = Array.isArray(aList) ? aList : (aList as any)?.data ?? [];
-      setAssistants(assistantsData.map((a: any) => ({ id: a.id, name: a.name ?? a.id })));
+      // listAssistantsAction returns { data: [...] } (tenant-filtered) or { error: string }
+      const aResult = aList as { data?: unknown[]; error?: string };
+      if (aResult?.error) {
+        setContentOptionsError(aResult.error);
+        setAssistants([]);
+      } else {
+        const assistantsData = Array.isArray(aResult) ? aResult : aResult?.data ?? [];
+        const list = (assistantsData as { id: string; name?: string }[]).map((a) => ({
+          id: a.id,
+          name: a.name ?? a.id,
+        }));
+        setAssistants(list);
+        if (list[0]) setAssistantId((prev) => prev || list[0].id);
+      }
       const numData = (nList as any)?.data ?? [];
       setNumbers(numData.map((n: any) => ({ phone_number: n.phone_number ?? n.id })));
-      if (assistantsData[0]) setAssistantId(assistantsData[0].id);
       const firstNum = numData[0];
-      if (firstNum?.phone_number) setFromNumber(firstNum.phone_number);
+      if (firstNum?.phone_number) setFromNumber((prev) => prev || firstNum.phone_number);
     } catch (e) {
       console.error("Load content options:", e);
+      setContentOptionsError(e instanceof Error ? e.message : "Failed to load assistants and numbers");
+      setAssistants([]);
+    } finally {
+      setContentOptionsLoading(false);
     }
-  };
+  }, []);
+
+  // Load AI assistants and numbers when user reaches the Content step (tenant-scoped)
+  useEffect(() => {
+    if (step === 2) {
+      loadContentOptions();
+    }
+  }, [step, loadContentOptions]);
 
   // ── Step navigation ───────────────────────────────────────────────
 
@@ -412,6 +440,15 @@ export default function NewCampaignPage() {
         if (!crmPreview || crmPreview.validCount === 0) {
           setError("No contacts with valid phone numbers found. Add contacts to your CRM first.");
           return;
+        }
+        if (crmSourceType === "all_contacts" && selectedCrmContactIds.size > 0) {
+          const selectedWithPhone = crmPreview.contacts.filter(
+            (c) => selectedCrmContactIds.has(c.id) && c.phone && c.phone.trim().length >= 7
+          );
+          if (selectedWithPhone.length === 0) {
+            setError("Select at least one contact with a valid phone number, or use “Deselect all” to include everyone.");
+            return;
+          }
         }
       }
       setStep(2);
@@ -495,11 +532,15 @@ export default function NewCampaignPage() {
           const crmSource: CrmAudienceSource =
             crmSourceType === "group" && selectedGroupId
               ? { type: "group", groupId: selectedGroupId }
-              : { type: "all_contacts" };
+              : selectedCrmContactIds.size > 0
+                ? { type: "selected", contactIds: Array.from(selectedCrmContactIds) }
+                : { type: "all_contacts" };
           const groupLabel =
             crmSourceType === "group"
               ? crmGroups.find((g) => g.id === selectedGroupId)?.name ?? "CRM Group"
-              : "All CRM Contacts";
+              : selectedCrmContactIds.size > 0
+                ? "Selected contacts"
+                : "All CRM Contacts";
           const importRes = await importCrmContactsToCampaign(
             res.id,
             groupLabel,
@@ -731,7 +772,7 @@ export default function NewCampaignPage() {
                   </div>
                 ) : crmPreview ? (
                   <div className="p-4 rounded-lg bg-gray-50 dark:bg-gray-800 space-y-3">
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
                       <div>
                         <p className="text-sm">
                           <span className="font-medium">{crmPreview.totalCount}</span> contacts found
@@ -739,27 +780,85 @@ export default function NewCampaignPage() {
                         <p className="text-sm text-green-600 dark:text-green-400">
                           <span className="font-medium">{crmPreview.validCount}</span> with valid phone numbers
                         </p>
+                        {crmSourceType === "all_contacts" && (
+                          <p className="text-sm text-brand-600 dark:text-brand-400 mt-1">
+                            {selectedCrmContactIds.size > 0
+                              ? `${selectedCrmContactIds.size} selected · ${crmPreview.contacts.filter((c) => selectedCrmContactIds.has(c.id) && c.phone && c.phone.trim().length >= 7).length} with valid phone`
+                              : "Select contacts below, or leave unselected to use all."}
+                          </p>
+                        )}
                         {crmPreview.totalCount - crmPreview.validCount > 0 && (
                           <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
                             {crmPreview.totalCount - crmPreview.validCount} contacts missing phone numbers (will be skipped)
                           </p>
                         )}
                       </div>
+                      {crmSourceType === "all_contacts" && crmPreview.contacts.length > 0 && (
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedCrmContactIds(new Set(crmPreview.contacts.map((c) => c.id)))}
+                            className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline"
+                          >
+                            Select all
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedCrmContactIds(new Set())}
+                            className="text-xs font-medium text-gray-500 hover:underline"
+                          >
+                            Deselect all
+                          </button>
+                        </div>
+                      )}
                     </div>
-                    {/* Contact preview table */}
+                    {/* Contact preview table with checkboxes (All Contacts only) */}
                     {crmPreview.contacts.length > 0 && (
-                      <div className="overflow-x-auto">
+                      <div className="overflow-x-auto max-h-64 overflow-y-auto">
                         <table className="w-full text-xs">
-                          <thead>
+                          <thead className="sticky top-0 bg-gray-50 dark:bg-gray-800 z-10">
                             <tr className="border-b border-gray-200 dark:border-gray-700">
+                              {crmSourceType === "all_contacts" && (
+                                <th className="text-left py-1.5 pr-2 w-8">
+                                  <input
+                                    type="checkbox"
+                                    checked={crmPreview.contacts.length > 0 && crmPreview.contacts.every((c) => selectedCrmContactIds.has(c.id))}
+                                    onChange={(e) => {
+                                      if (e.target.checked) {
+                                        setSelectedCrmContactIds(new Set(crmPreview.contacts.map((c) => c.id)));
+                                      } else {
+                                        setSelectedCrmContactIds(new Set());
+                                      }
+                                    }}
+                                    className="rounded border-gray-300 dark:border-gray-600"
+                                    aria-label="Select all"
+                                  />
+                                </th>
+                              )}
                               <th className="text-left py-1.5 pr-3 font-medium text-gray-500">Name</th>
                               <th className="text-left py-1.5 pr-3 font-medium text-gray-500">Phone</th>
                               <th className="text-left py-1.5 font-medium text-gray-500">Email</th>
                             </tr>
                           </thead>
                           <tbody>
-                            {crmPreview.contacts.slice(0, 5).map((c) => (
-                              <tr key={c.id} className="border-b border-gray-100 dark:border-gray-700/50">
+                            {crmPreview.contacts.map((c) => (
+                              <tr key={c.id} className="border-b border-gray-100 dark:border-gray-700/50 hover:bg-gray-100/50 dark:hover:bg-gray-700/30">
+                                {crmSourceType === "all_contacts" && (
+                                  <td className="py-1.5 pr-2">
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedCrmContactIds.has(c.id)}
+                                      onChange={(e) => {
+                                        const next = new Set(selectedCrmContactIds);
+                                        if (e.target.checked) next.add(c.id);
+                                        else next.delete(c.id);
+                                        setSelectedCrmContactIds(next);
+                                      }}
+                                      className="rounded border-gray-300 dark:border-gray-600"
+                                      aria-label={`Select ${c.first_name} ${c.last_name}`}
+                                    />
+                                  </td>
+                                )}
                                 <td className="py-1.5 pr-3">{c.first_name} {c.last_name}</td>
                                 <td className="py-1.5 pr-3 font-mono">{c.phone || "—"}</td>
                                 <td className="py-1.5 text-gray-500">{c.email || "—"}</td>
@@ -767,11 +866,6 @@ export default function NewCampaignPage() {
                             ))}
                           </tbody>
                         </table>
-                        {crmPreview.contacts.length > 5 && (
-                          <p className="text-xs text-gray-400 mt-1">
-                            + {crmPreview.contacts.length - 5} more contacts
-                          </p>
-                        )}
                       </div>
                     )}
                   </div>
@@ -1005,12 +1099,28 @@ export default function NewCampaignPage() {
                   <select
                     value={assistantId}
                     onChange={(e) => setAssistantId(e.target.value)}
-                    className="w-full px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700"
+                    disabled={contentOptionsLoading}
+                    className="w-full px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700 disabled:opacity-60"
+                    aria-label="Select an AI assistant for this tenant"
                   >
+                    <option value="">
+                      {contentOptionsLoading
+                        ? "Loading assistants..."
+                        : assistants.length === 0
+                          ? "No assistants in this tenant"
+                          : "Select an assistant"}
+                    </option>
                     {assistants.map((a) => (
-                      <option key={a.id} value={a.id}>{a.name ?? a.id}</option>
+                      <option key={a.id} value={a.id}>
+                        {a.name ?? a.id}
+                      </option>
                     ))}
                   </select>
+                  {contentOptionsError && (
+                    <p className="mt-1 text-sm text-amber-600 dark:text-amber-400">
+                      {contentOptionsError}
+                    </p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-medium mb-1">Connection ID (optional)</label>

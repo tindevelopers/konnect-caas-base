@@ -135,6 +135,10 @@ export interface AssistantEditorProps {
   assignedNumbers?: AssignedNumberRow[];
   /** Called when user clicks "Assign numbers" in Calling tab. e.g. navigate to Manage Numbers. */
   onAssignNumbers?: () => void;
+  /** Optional slot rendered in Calling tab under "Test this assistant" (e.g. Call Assistant, Webcall, Test Call, Receive Call buttons). */
+  testAssistantSlot?: React.ReactNode;
+  /** URL for Manage Numbers (used in Messaging profile callout). Default /rtc/numbers/manage-numbers. */
+  manageNumbersHref?: string;
 }
 
 export function AssistantEditor({
@@ -148,6 +152,8 @@ export function AssistantEditor({
   testAssistantTool,
   assignedNumbers,
   onAssignNumbers,
+  testAssistantSlot,
+  manageNumbersHref = "/rtc/numbers/manage-numbers",
 }: AssistantEditorProps) {
   const { assistant, setAssistant, isLoading, isSaving, error, save } =
     useAssistantEditor(api, assistantId);
@@ -1091,146 +1097,247 @@ export function AssistantEditor({
         </div>
       )}
 
-      {activeTab === "Calling" && (
-        <div className="space-y-8">
-          {/* Assigned numbers (Telnyx-style) */}
-          {typeof assignedNumbers !== "undefined" && (
-            <div>
-              <div className="flex items-center justify-between gap-3">
-                <label className="text-sm font-semibold text-gray-700 dark:text-gray-300">
-                  Assigned numbers
-                </label>
-                {onAssignNumbers && (
-                  <button
-                    type="button"
-                    onClick={onAssignNumbers}
-                    className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-gray-200"
-                  >
-                    Assign numbers
-                  </button>
-                )}
-              </div>
-              {!assignedNumbers?.length ? (
-                <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
-                  You have no assigned phone numbers.{" "}
-                  {onAssignNumbers ? (
+      {activeTab === "Calling" && (() => {
+        const telephony = (parseJsonField(jsonFields.telephony_settings ?? "", "telephony").value ?? {}) as Record<string, unknown>;
+        const recording = (telephony.recording_settings as Record<string, unknown>) ?? {};
+        const updateTelephony = (patch: Record<string, unknown>) =>
+          handleJsonChange("telephony_settings", stringify({ ...telephony, ...patch }));
+        const updateRecording = (patch: Record<string, unknown>) =>
+          updateTelephony({ recording_settings: { ...recording, ...patch } });
+        return (
+          <div className="space-y-8">
+            {/* Test this assistant — prominent so user sees how to make a call */}
+            <div className="rounded-xl border-2 border-indigo-200 bg-indigo-50/50 p-5 dark:border-indigo-800 dark:bg-indigo-950/30">
+              <h3 className="text-base font-semibold text-gray-900 dark:text-white/90">
+                Test this assistant
+              </h3>
+              <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+                Call, receive calls, or run a test. Use <strong>Call Assistant</strong> for a real phone call (need numbers + Connection ID),{" "}
+                <strong>Webcall</strong> for in-browser, <strong>Test Call</strong> for simulated, <strong>Receive Call</strong> for inbound setup.
+              </p>
+              {testAssistantSlot ? (
+                <div className="mt-4">{testAssistantSlot}</div>
+              ) : (
+                <p className="mt-3 text-sm text-gray-500 dark:text-gray-400">
+                  Use the buttons below this form to make a call.
+                </p>
+              )}
+            </div>
+
+            {/* Assigned numbers (Telnyx-style) */}
+            {typeof assignedNumbers !== "undefined" && (
+              <div>
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+                    Assigned numbers
+                  </h3>
+                  {onAssignNumbers && (
                     <button
                       type="button"
                       onClick={onAssignNumbers}
-                      className="font-medium text-indigo-600 hover:underline dark:text-indigo-400"
+                      className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-gray-200"
                     >
                       Assign numbers
                     </button>
-                  ) : (
-                    "Assign numbers from Manage Numbers."
                   )}
-                </p>
-              ) : (
-                <div className="mt-2 overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
-                  <table className="min-w-full text-left text-sm">
-                    <thead className="bg-gray-50 text-xs uppercase text-gray-500 dark:bg-gray-800 dark:text-gray-400">
-                      <tr>
-                        <th className="px-4 py-3">Number</th>
-                        <th className="px-4 py-3">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                      {assignedNumbers.map((row) => (
-                        <tr key={row.phone_number}>
-                          <td className="px-4 py-3 font-medium">{row.phone_number}</td>
-                          <td className="px-4 py-3">{row.status ?? "—"}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
                 </div>
-              )}
-            </div>
-          )}
+                {!assignedNumbers?.length ? (
+                  <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                    You have no assigned phone numbers.{" "}
+                    {onAssignNumbers ? (
+                      <button type="button" onClick={onAssignNumbers} className="font-medium text-indigo-600 hover:underline dark:text-indigo-400">
+                        Assign numbers
+                      </button>
+                    ) : (
+                      "Assign numbers from Manage Numbers."
+                    )}
+                  </p>
+                ) : (
+                  <div className="mt-2 overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
+                    <table className="min-w-full text-left text-sm">
+                      <thead className="bg-gray-50 text-xs uppercase text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+                        <tr>
+                          <th className="px-4 py-3">Number</th>
+                          <th className="px-4 py-3">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                        {assignedNumbers.map((row) => (
+                          <tr key={row.phone_number}>
+                            <td className="px-4 py-3 font-medium">{row.phone_number}</td>
+                            <td className="px-4 py-3">{row.status ?? "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
 
-          {/* Settings (Telnyx-style) */}
-          <div>
-            <label className="text-sm font-semibold text-gray-700 dark:text-gray-300">
-              Settings
-            </label>
-            <div className="mt-4 space-y-4">
-              <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-                <input
-                  type="checkbox"
-                  checked={
-                    (parseJsonField(jsonFields.telephony_settings ?? "", "telephony").value as Record<string, unknown>)?.supports_unauthenticated_web_calls === true
-                  }
-                  onChange={(e) => {
-                    const telephonyResult = parseJsonField(
-                      jsonFields.telephony_settings ?? "",
-                      "Telephony settings"
-                    );
-                    const current = (telephonyResult.value as Record<string, unknown>) ?? {};
-                    handleJsonChange(
-                      "telephony_settings",
-                      stringify({ ...current, supports_unauthenticated_web_calls: e.target.checked })
-                    );
-                  }}
-                  className="rounded border-gray-300 dark:border-gray-600"
-                />
-                Support unauthenticated web calls
-              </label>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div>
-                  <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">
-                    Assistant max call duration (seconds)
-                  </label>
+            {/* Settings (Telnyx-style) */}
+            <div>
+              <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Settings</h3>
+              <div className="mt-4 space-y-4">
+                <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
                   <input
-                    type="number"
-                    min={0}
-                    value={
-                      (parseJsonField(jsonFields.telephony_settings ?? "", "telephony").value as Record<string, unknown>)?.time_limit_secs ?? ""
-                    }
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      const num = v === "" ? undefined : Number(v);
-                      const telephonyResult = parseJsonField(
-                        jsonFields.telephony_settings ?? "",
-                        "Telephony settings"
-                      );
-                      const current = (telephonyResult.value as Record<string, unknown>) ?? {};
-                      handleJsonChange(
-                        "telephony_settings",
-                        stringify({
-                          ...current,
-                          time_limit_secs: num === undefined || Number.isNaN(num) ? undefined : num,
-                        })
-                      );
-                    }}
-                    placeholder="e.g. 1800"
+                    type="checkbox"
+                    checked={telephony.supports_unauthenticated_web_calls === true}
+                    onChange={(e) => updateTelephony({ supports_unauthenticated_web_calls: e.target.checked })}
+                    className="rounded border-gray-300 dark:border-gray-600"
+                  />
+                  Support unauthenticated web calls
+                </label>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">
+                      Assistant max call duration (seconds)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={telephony.time_limit_secs ?? ""}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        updateTelephony({ time_limit_secs: v === "" || Number.isNaN(Number(v)) ? undefined : Number(v) });
+                      }}
+                      placeholder="e.g. 1800"
+                      className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">
+                      User idle timeout (seconds)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={telephony.user_idle_timeout_secs ?? ""}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        updateTelephony({ user_idle_timeout_secs: v === "" || Number.isNaN(Number(v)) ? undefined : Number(v) });
+                      }}
+                      placeholder="Optional"
+                      className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-900"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Voicemail Detection (Telnyx-style) */}
+            <div>
+              <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Voicemail detection</h3>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Configure how the AI assistant handles voicemail detection for outgoing calls. AMD must be enabled on the call for this to work.
+              </p>
+              <div className="mt-3">
+                <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">Action on voicemail detected</label>
+                <select
+                  value={(telephony.voicemail_detection as Record<string, unknown>)?.action_on_voicemail ?? "continue_assistant"}
+                  onChange={(e) => updateTelephony({
+                    voicemail_detection: {
+                      ...((telephony.voicemail_detection as Record<string, unknown>) ?? {}),
+                      action_on_voicemail: e.target.value,
+                    },
+                  })}
+                  className="mt-1 w-full max-w-xs rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-900"
+                >
+                  <option value="continue_assistant">Continue assistant</option>
+                  <option value="hang_up">Hang up</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Recording Settings (Telnyx-style) */}
+            <div>
+              <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Recording settings</h3>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Configure call recording for outbound calls.
+              </p>
+              <div className="mt-4 space-y-4">
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">Record outbound calls</label>
+                  <div className="mt-2 flex flex-wrap gap-3">
+                    {(["do_not_record", "record_all", "record_by_ani"] as const).map((opt) => (
+                      <label key={opt} className="flex items-center gap-2 text-sm">
+                        <input
+                          type="radio"
+                          name="record_outbound"
+                          checked={(recording.record_outbound_calls ?? "do_not_record") === opt}
+                          onChange={() => updateRecording({ record_outbound_calls: opt })}
+                          className="border-gray-300 dark:border-gray-600"
+                        />
+                        {opt === "do_not_record" && "Do not record"}
+                        {opt === "record_all" && "Record all outbound calls"}
+                        {opt === "record_by_ani" && "Record outbound calls by ANI"}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">Audio format</label>
+                    <select
+                      value={(recording.audio_format as string) ?? "wav"}
+                      onChange={(e) => updateRecording({ audio_format: e.target.value })}
+                      className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-900"
+                    >
+                      <option value="wav">WAV</option>
+                      <option value="mp3">MP3</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">Channels</label>
+                    <select
+                      value={(recording.channels as string) ?? "single"}
+                      onChange={(e) => updateRecording({ channels: e.target.value })}
+                      className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-900"
+                    >
+                      <option value="single">Single channel</option>
+                      <option value="dual">Dual (stereo)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* TeXML Application (Telnyx-style) */}
+            <div>
+              <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">TeXML application settings</h3>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Links this assistant to your call control application. Required for inbound/outbound voice.
+              </p>
+              <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">TeXML Application ID</label>
+                  <input
+                    type="text"
+                    value={(telephony.default_texml_app_id as string) ?? ""}
+                    onChange={(e) => updateTelephony({ default_texml_app_id: e.target.value.trim() || undefined })}
+                    placeholder="e.g. 289794722023604389"
                     className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-900"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">
-                    User idle timeout (seconds)
-                  </label>
+                  <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">Call progress events URL</label>
+                  <input
+                    type="url"
+                    value={(telephony.call_progress_events_url as string) ?? ""}
+                    onChange={(e) => updateTelephony({ call_progress_events_url: e.target.value.trim() || undefined })}
+                    placeholder="https://example.com/webhook"
+                    className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">Inbound channel limit</label>
                   <input
                     type="number"
                     min={0}
-                    value={
-                      (parseJsonField(jsonFields.telephony_settings ?? "", "telephony").value as Record<string, unknown>)?.user_idle_timeout_secs ?? ""
-                    }
+                    value={(telephony.inbound_channel_limit as number) ?? ""}
                     onChange={(e) => {
                       const v = e.target.value;
-                      const num = v === "" ? undefined : Number(v);
-                      const telephonyResult = parseJsonField(
-                        jsonFields.telephony_settings ?? "",
-                        "Telephony settings"
-                      );
-                      const current = (telephonyResult.value as Record<string, unknown>) ?? {};
-                      handleJsonChange(
-                        "telephony_settings",
-                        stringify({
-                          ...current,
-                          user_idle_timeout_secs: num === undefined || Number.isNaN(num) ? undefined : num,
-                        })
-                      );
+                      updateTelephony({ inbound_channel_limit: v === "" || Number.isNaN(Number(v)) ? undefined : Number(v) });
                     }}
                     placeholder="Optional"
                     className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-900"
@@ -1238,25 +1345,92 @@ export function AssistantEditor({
                 </div>
               </div>
             </div>
-          </div>
 
-          {/* Advanced: raw JSON */}
-          <div>
-            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-              Advanced telephony (JSON)
-            </label>
-            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              default_texml_app_id, noise_suppression, recording_settings, etc.
-            </p>
-            <textarea
-              value={jsonFields.telephony_settings ?? ""}
-              onChange={(e) => handleJsonChange("telephony_settings", e.target.value)}
-              className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-xs font-mono dark:border-gray-700 dark:bg-gray-900"
-              rows={8}
-            />
+            {/* Outbound Voice Profile (Telnyx-style) */}
+            <div>
+              <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Outbound voice profile</h3>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Profile used for outbound calls (channel limit, spend limits).
+              </p>
+              <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">Outbound Voice Profile ID</label>
+                  <input
+                    type="text"
+                    value={(telephony.outbound_voice_profile_id as string) ?? ""}
+                    onChange={(e) => updateTelephony({ outbound_voice_profile_id: e.target.value.trim() || undefined })}
+                    placeholder="Optional"
+                    className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 dark:text-gray-400">Channel limit</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={(telephony.outbound_channel_limit as number) ?? ""}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      updateTelephony({ outbound_channel_limit: v === "" || Number.isNaN(Number(v)) ? undefined : Number(v) });
+                    }}
+                    placeholder="e.g. 10"
+                    className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-900"
+                  />
+                </div>
+                <div className="sm:col-span-2 flex items-center gap-4">
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(telephony.daily_spend_limit_enabled)}
+                      onChange={(e) => updateTelephony({ daily_spend_limit_enabled: e.target.checked })}
+                      className="rounded border-gray-300 dark:border-gray-600"
+                    />
+                    Enable daily spend limit
+                  </label>
+                  <input
+                    type="text"
+                    value={(telephony.daily_spend_limit as string) ?? ""}
+                    onChange={(e) => updateTelephony({ daily_spend_limit: e.target.value.trim() || undefined })}
+                    placeholder="$ 100"
+                    className="w-28 rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-900"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Messaging profile — clear callout */}
+            <div className="rounded-xl border border-amber-200 bg-amber-50/50 p-5 dark:border-amber-800 dark:bg-amber-950/30">
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-white/90">Messaging profile</h3>
+              <p className="mt-2 text-sm text-gray-700 dark:text-gray-300">
+                To send or receive <strong>SMS/MMS</strong> on numbers assigned to this assistant, assign a <strong>messaging profile</strong> to each number.
+              </p>
+              <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
+                Go to <strong>Manage Numbers</strong> → select the number → <strong>Messaging profile</strong> section → enter Messaging Profile ID and click Assign.
+              </p>
+              <a
+                href={manageNumbersHref}
+                className="mt-3 inline-block rounded-lg bg-amber-200 px-4 py-2 text-sm font-medium text-amber-900 hover:bg-amber-300 dark:bg-amber-800 dark:text-amber-100 dark:hover:bg-amber-700"
+              >
+                Open Manage Numbers →
+              </a>
+            </div>
+
+            {/* Advanced: raw JSON */}
+            <div>
+              <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Advanced telephony (JSON)</h3>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Edit raw JSON for noise_suppression, or other options not exposed above.
+              </p>
+              <textarea
+                value={jsonFields.telephony_settings ?? ""}
+                onChange={(e) => handleJsonChange("telephony_settings", e.target.value)}
+                className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-xs font-mono dark:border-gray-700 dark:bg-gray-900"
+                rows={6}
+              />
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {activeTab === "Messaging" && (
         <div>

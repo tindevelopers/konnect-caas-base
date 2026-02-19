@@ -7,6 +7,7 @@ import {
   getAssistant,
   importAssistants,
   listAssistants,
+  TelnyxApiError,
   TelnyxCloneAssistantResponse,
   updateAssistant,
   TelnyxCreateAssistantRequest,
@@ -89,6 +90,52 @@ async function getTenantAssistantIds(tenantId: string): Promise<Set<string>> {
   return new Set(
     (data as { telnyx_assistant_id: string }[]).map((r) => r.telnyx_assistant_id)
   );
+}
+
+function extractTelnyxErrorDetail(details: unknown): string | null {
+  if (!details || typeof details !== "object") return null;
+  const d = details as Record<string, unknown>;
+  if (typeof d.message === "string" && d.message.trim()) return d.message.trim();
+  const errors = d.errors;
+  if (Array.isArray(errors) && errors.length) {
+    const parts: string[] = [];
+    for (const err of errors.slice(0, 3)) {
+      if (err && typeof err === "object") {
+        const e = err as Record<string, unknown>;
+        const title = typeof e.title === "string" ? e.title.trim() : "";
+        const detail = typeof e.detail === "string" ? e.detail.trim() : "";
+        const code = typeof e.code === "string" ? e.code.trim() : "";
+        const part = [code && `(${code})`, title, detail].filter(Boolean).join(" ");
+        if (part) parts.push(part);
+      }
+    }
+    if (parts.length) return parts.join("; ");
+  }
+  if (typeof d.detail === "string" && d.detail.trim()) return d.detail.trim();
+  return null;
+}
+
+/**
+ * Normalize a phone number to E.164 format (+ followed by digits only).
+ * Strips spaces, dashes, parentheses; adds + if missing.
+ */
+function normalizeToE164(raw: string): string {
+  const digitsOnly = raw.replace(/\D/g, "");
+  if (digitsOnly.length === 0) return raw.trim();
+  return raw.trim().startsWith("+") ? `+${digitsOnly}` : `+${digitsOnly}`;
+}
+
+/** E.164: + followed by 10–15 digits. */
+const E164_REGEX = /^\+\d{10,15}$/;
+
+function validateE164(value: string, param: "to" | "from"): string {
+  const normalized = normalizeToE164(value);
+  if (!E164_REGEX.test(normalized)) {
+    throw new Error(
+      `Phone number must be in E.164 format (e.g. +15551234567). The "${param}" value you entered is not valid.`
+    );
+  }
+  return normalized;
 }
 
 interface CallAssistantPayload {
@@ -436,11 +483,15 @@ export async function callAssistantAction(payload: CallAssistantPayload): Promis
       TELNYX_PROVIDER,
       async () => {
         try {
+          // Normalize and validate E.164 for Telnyx
+          const toE164 = validateE164(toNumber, "to");
+          const fromE164 = validateE164(fromNumber, "from");
+
           // Build dial request body
           const dialBody: Record<string, string> = {
             connection_id: connectionId.trim(),
-            from: fromNumber.trim(),
-            to: toNumber.trim(),
+            from: fromE164,
+            to: toE164,
           };
 
           // Add streaming if streamUrl is provided
@@ -494,7 +545,7 @@ export async function callAssistantAction(payload: CallAssistantPayload): Promis
               method: "POST",
               body: {
                 assistant: {
-                  assistant_id: assistantId,
+                  id: assistantId,
                 },
               },
             }
@@ -503,7 +554,27 @@ export async function callAssistantAction(payload: CallAssistantPayload): Promis
           const conversationId = extractConversationId(startResponse);
           return { callControlId, conversationId };
         } catch (error) {
-          // Improve error messages for provider API errors
+          // Surface Telnyx API error details for better debugging
+          if (error instanceof TelnyxApiError) {
+            if (error.status === 404) {
+              throw new Error(
+                "Call Control App ID not found. Please verify the Connection ID is correct in your provider console."
+              );
+            }
+            if (error.status === 400) {
+              throw new Error(
+                "Invalid request parameters. Please check phone numbers and Call Control App ID format."
+              );
+            }
+            if (error.status === 422) {
+              const telnyxDetail = extractTelnyxErrorDetail(error.details);
+              const hint =
+                "Invalid assistant configuration. Please verify the assistant ID exists and is properly configured.";
+              throw new Error(
+                telnyxDetail ? `${hint} Telnyx: ${telnyxDetail}` : hint
+              );
+            }
+          }
           if (error instanceof Error) {
             if (error.message.includes("404")) {
               throw new Error(
@@ -677,16 +748,15 @@ export async function testCallAssistantAction(assistantId: string): Promise<Test
       "testCallAssistant",
       TELNYX_PROVIDER,
       async () => {
-        // Get the assistant to retrieve its version_id
-        const assistant = await getAssistant(transport, assistantId);
-        const versionId = (assistant as any).version_id || assistantId;
-        
+        // Verify the assistant exists
+        await getAssistant(transport, assistantId);
+
         // First, try to find an existing test
         const testsResponse = await listAssistantTests(transport);
-        
+
         let testId: string;
         const existingTests = testsResponse.data || [];
-        
+
         // Look for a test that matches this assistant or use the first one
         // If no tests exist, create a new one
         if (existingTests.length > 0) {
@@ -716,16 +786,16 @@ export async function testCallAssistantAction(assistantId: string): Promise<Test
             description: `Quick test for assistant ${assistantId}`,
             max_duration_seconds: 60,
           };
-          
+
           const createdTest = await createAssistantTest(transport, testPayload);
           testId = createdTest.test_id;
           console.log("[testCallAssistantAction] Created new test:", testId);
         }
 
-        // Trigger the test run with the assistant version_id
-        const testRun = await triggerAssistantTestRun(transport, testId, {
-          destination_version_id: versionId,
-        });
+        // Trigger the test run. Do not pass destination_version_id: Telnyx will use the
+        // assistant's main version. Passing a stale or invalid version_id causes 400
+        // "Assistant version with id ... does not exist".
+        const testRun = await triggerAssistantTestRun(transport, testId, {});
         
         return {
           testId,

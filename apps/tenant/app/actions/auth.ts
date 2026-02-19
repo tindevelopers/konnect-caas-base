@@ -275,7 +275,13 @@ export async function signIn(data: SignInData) {
 
   if (error || !authData.user) {
     console.error("[signIn] Auth error:", error);
-    throw error || new Error("Failed to sign in");
+    const message =
+      error?.message === "Invalid login credentials"
+        ? "Invalid email or password. Please try again."
+        : error?.message?.includes("Email not confirmed")
+          ? "Please confirm your email address before signing in. Check your inbox for the confirmation link."
+          : error?.message || "Failed to sign in. Please check your credentials.";
+    throw new Error(message);
   }
 
   console.log("[signIn] Auth successful, user ID:", authData.user.id);
@@ -299,6 +305,13 @@ export async function signIn(data: SignInData) {
         "Database error querying schema. This usually means PostgREST could not load the database schema " +
           "(broken/missing migrations, missing foreign keys, or invalid SQL objects). " +
           "Check your Supabase logs and confirm migrations have been applied."
+      );
+    }
+    // User exists in Auth but not in public.users (common when using remote DB / new project)
+    if (!baseUser && !baseUserError?.message?.includes("schema")) {
+      throw new Error(
+        "Your account was not found in the application database. " +
+          "If you just signed up, ask an administrator to add you to the workspace, or ensure migrations and user sync are applied on the remote database."
       );
     }
     throw baseUserError || new Error("Failed to fetch user");

@@ -86,10 +86,11 @@ export default function TenantSwitcher({ className = "" }: TenantSwitcherProps) 
       }
     }
 
-    if (isOpen) {
+    // Only load tenant list for platform admins; org admins must never see other tenants
+    if (isOpen && isPlatformAdminUser) {
       loadTenants();
     }
-  }, [isOpen]);
+  }, [isOpen, isPlatformAdminUser]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -208,6 +209,32 @@ export default function TenantSwitcher({ className = "" }: TenantSwitcherProps) 
   const isImpersonating = isPlatformAdminUser && !!selectedTenantId;
   const tenantName = tenant?.name || "Select tenant";
   const tenantAvatarUrl = tenant?.avatar_url;
+
+  // Organization admins: show only current tenant, no dropdown or list of other tenants
+  if (!isPlatformAdminUser) {
+    return (
+      <div className={`flex items-center gap-3 px-3 py-2 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 min-w-[200px] ${className}`}>
+        <div className="flex items-center gap-2 flex-1 min-w-0">
+          {tenantAvatarUrl ? (
+            <Image
+              src={tenantAvatarUrl}
+              alt={tenantName}
+              width={24}
+              height={24}
+              className="rounded-lg flex-shrink-0"
+            />
+          ) : (
+            <div className="h-6 w-6 rounded-lg bg-indigo-100 dark:bg-indigo-900 flex items-center justify-center flex-shrink-0">
+              <BuildingOffice2Icon className="h-4 w-4 text-indigo-600 dark:text-indigo-300" />
+            </div>
+          )}
+          <span className="text-sm font-medium text-gray-900 dark:text-white truncate">
+            {tenantName}
+          </span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={`relative ${className}`} ref={dropdownRef}>

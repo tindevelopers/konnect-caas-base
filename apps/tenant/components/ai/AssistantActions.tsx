@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Button from "@/components/ui/button/Button";
 import { Modal } from "@/components/ui/modal";
@@ -14,6 +14,11 @@ import {
   hangUpCallAction,
   testCallAssistantAction,
 } from "@/app/actions/telnyx/assistants";
+import {
+  listCallControlApplicationsAction,
+  createCallControlApplicationAction,
+} from "@/app/actions/telnyx/call-control";
+import { listPhoneNumbersAssignedToAssistantAction } from "@/app/actions/telnyx/numbers";
 import CallStatusModal from "./CallStatusModal";
 import WebcallModal from "./WebcallModal";
 import AudioStreamPlayer from "./AudioStreamPlayer";
@@ -80,13 +85,38 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
     status: string;
   } | null>(null);
   const [testError, setTestError] = useState<string | null>(null);
-  
+
+  const [assignedNumbersForCall, setAssignedNumbersForCall] = useState<Array<{ phone_number: string }>>([]);
+  const [callControlApps, setCallControlApps] = useState<Array<{ id: string; application_name: string | null }>>([]);
+  const [callControlAppsError, setCallControlAppsError] = useState<string | null>(null);
+  const [loadingCallControlApps, setLoadingCallControlApps] = useState(false);
+  const [creatingCallControlApp, setCreatingCallControlApp] = useState(false);
+  const [newCallControlAppName, setNewCallControlAppName] = useState("Voice / AI Assistant");
+
   const webcallModal = useModal();
+
+  useEffect(() => {
+    if (!assistantId) return;
+    let cancelled = false;
+    listPhoneNumbersAssignedToAssistantAction(assistantId).then((res) => {
+      if (!cancelled && res.data?.length) setAssignedNumbersForCall(res.data);
+    });
+    return () => { cancelled = true; };
+  }, [assistantId]);
 
   const openCallModal = useCallback(async () => {
     setCallError(null);
     setCallResult(null);
-    
+    setCallControlAppsError(null);
+    setLoadingCallControlApps(true);
+    try {
+      const res = await listCallControlApplicationsAction();
+      setCallControlApps(res.data ?? []);
+      if (res.error) setCallControlAppsError(res.error);
+    } finally {
+      setLoadingCallControlApps(false);
+    }
+
     // Auto-populate WebSocket stream URL
     // Priority: Production URL (Railway) > ngrok > localhost
     // This ensures we test against production infrastructure even locally
@@ -353,14 +383,34 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
                   setCallForm((prev) => ({ ...prev, toNumber: event.target.value }))
                 }
               />
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                E.164 format: + and country code + number (e.g. +33123456789). Spaces/dashes are auto‑stripped.
+              </p>
             </div>
             <div>
               <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-400">
                 Caller ID (From)
               </label>
+              {assignedNumbersForCall.length > 0 && (
+                <select
+                  className="mb-2 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-gray-600 dark:bg-gray-800 dark:text-white/90"
+                  value={assignedNumbersForCall.some((n) => n.phone_number === callForm.fromNumber) ? callForm.fromNumber : ""}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v) setCallForm((prev) => ({ ...prev, fromNumber: v }));
+                  }}
+                >
+                  <option value="">Choose assigned number…</option>
+                  {assignedNumbersForCall.map((n) => (
+                    <option key={n.phone_number} value={n.phone_number}>
+                      {n.phone_number}
+                    </option>
+                  ))}
+                </select>
+              )}
               <input
                 type="text"
-                placeholder="+15550001111"
+                placeholder="+15550001111 or pick above"
                 className={inputClasses}
                 value={callForm.fromNumber}
                 onChange={(event) =>
@@ -370,20 +420,93 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
             </div>
             <div>
               <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-400">
-                Call Control Connection ID
+                Call Control connection
               </label>
-              <input
-                type="text"
-                placeholder="Call Control App ID"
-                className={inputClasses}
-                value={callForm.connectionId}
-                onChange={(event) =>
-                  setCallForm((prev) => ({ ...prev, connectionId: event.target.value }))
-                }
-              />
-              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                Find this in your provider console → Voice → Call Control Apps.
-              </p>
+              {loadingCallControlApps ? (
+                <p className="text-sm text-gray-500 dark:text-gray-400">Loading connections…</p>
+              ) : callControlAppsError ? (
+                <p className="text-sm text-amber-600 dark:text-amber-400">{callControlAppsError}</p>
+              ) : callControlApps.length > 0 ? (
+                <>
+                  <select
+                    className="mb-2 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-gray-600 dark:bg-gray-800 dark:text-white/90"
+                    value={callControlApps.some((a) => a.id === callForm.connectionId) ? callForm.connectionId : ""}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (v) setCallForm((prev) => ({ ...prev, connectionId: v }));
+                    }}
+                  >
+                    <option value="">Choose a Call Control connection…</option>
+                    {callControlApps.map((app) => (
+                      <option key={app.id} value={app.id}>
+                        {app.application_name || app.id}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    Connections are managed via the Telephony API. Same connection can be set on a number in Manage Numbers.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="mb-2 text-sm text-gray-600 dark:text-gray-400">
+                    No Call Control connection yet. Create one below (webhook will point to this app).
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      type="text"
+                      placeholder="App name"
+                      className="min-w-[180px] rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-white/90"
+                      value={newCallControlAppName}
+                      onChange={(e) => setNewCallControlAppName(e.target.value)}
+                    />
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      disabled={creatingCallControlApp || !newCallControlAppName.trim()}
+                      onClick={async () => {
+                        setCreatingCallControlApp(true);
+                        try {
+                          const { data, error } = await createCallControlApplicationAction({
+                            application_name: newCallControlAppName.trim() || "Voice / AI Assistant",
+                          });
+                          if (error) {
+                            setCallControlAppsError(error);
+                            return;
+                          }
+                          if (data?.id) {
+                            setCallControlApps((prev) => [
+                              ...prev,
+                              { id: data.id, application_name: data.application_name ?? null },
+                            ]);
+                            setCallForm((prev) => ({ ...prev, connectionId: data.id }));
+                            setCallControlAppsError(null);
+                          }
+                        } finally {
+                          setCreatingCallControlApp(false);
+                        }
+                      }}
+                    >
+                      {creatingCallControlApp ? "Creating…" : "Create connection"}
+                    </Button>
+                  </div>
+                </>
+              )}
+              <div className="mt-2">
+                <label className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">
+                  Or paste Connection ID
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. 289794722023604389"
+                  className={inputClasses}
+                  value={callForm.connectionId}
+                  onChange={(event) =>
+                    setCallForm((prev) => ({ ...prev, connectionId: event.target.value }))
+                  }
+                />
+              </div>
             </div>
             <div>
               <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-400">

@@ -86,6 +86,33 @@ export async function getContacts(): Promise<Contact[]> {
 }
 
 /**
+ * Get contacts by IDs for the current tenant (e.g. campaign audience selection)
+ */
+export async function getContactsByIds(ids: string[]): Promise<Contact[]> {
+  if (ids.length === 0) return [];
+  try {
+    const tenantId = await getTenantForCrm();
+    const supabase = await createClient();
+    const { data, error } = await (supabase.from("contacts") as any)
+      .select(`*, company:companies(*)`)
+      .eq("tenant_id", tenantId)
+      .in("id", ids)
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error("Error fetching contacts by IDs:", error);
+      throw error;
+    }
+    return (data as Contact[]) || [];
+  } catch (error: any) {
+    if (error.message?.includes("No tenants found")) {
+      return [];
+    }
+    throw error;
+  }
+}
+
+/**
  * Get a single contact by ID
  */
 export async function getContact(id: string): Promise<Contact | null> {
