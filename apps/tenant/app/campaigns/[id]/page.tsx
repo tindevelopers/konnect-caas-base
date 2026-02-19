@@ -33,6 +33,15 @@ export default function CampaignDetailPage() {
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
   const [message, setMessage] = useState<{ type: "error" | "success" | "warning"; text: string } | null>(null);
+  const [connectionIdEdit, setConnectionIdEdit] = useState("");
+  const [savingConnectionId, setSavingConnectionId] = useState(false);
+  const [telnyxApplications, setTelnyxApplications] = useState<
+    { value: string; label: string }[]
+  >([]);
+  const [loadingTelnyxApplications, setLoadingTelnyxApplications] = useState(false);
+  const [telnyxApplicationsError, setTelnyxApplicationsError] = useState<string | null>(
+    null
+  );
 
   useEffect(() => {
     async function load() {
@@ -51,6 +60,66 @@ export default function CampaignDetailPage() {
     }
     load();
   }, [id]);
+
+  useEffect(() => {
+    let isMounted = true;
+    async function loadTelnyxApplications() {
+      setLoadingTelnyxApplications(true);
+      setTelnyxApplicationsError(null);
+      try {
+        const res = await fetch("/api/integrations/telnyx/applications", {
+          method: "GET",
+          cache: "no-store",
+        });
+        const body = (await res.json()) as {
+          options?: { value: string; label: string }[];
+          error?: string;
+        };
+        if (!res.ok) {
+          throw new Error(body?.error ?? "Failed to load Telnyx applications");
+        }
+        if (!isMounted) return;
+        setTelnyxApplications(Array.isArray(body.options) ? body.options : []);
+      } catch (e) {
+        if (!isMounted) return;
+        setTelnyxApplications([]);
+        setTelnyxApplicationsError(
+          e instanceof Error ? e.message : "Failed to load Telnyx applications"
+        );
+      } finally {
+        if (isMounted) setLoadingTelnyxApplications(false);
+      }
+    }
+    loadTelnyxApplications();
+    return () => {
+      isMounted = false;
+    };
+  }, [id]);
+
+  useEffect(() => {
+    const cid = (campaign?.settings as Record<string, unknown> | undefined)?.connection_id;
+    setConnectionIdEdit(typeof cid === "string" ? cid : "");
+  }, [campaign?.id, campaign?.settings]);
+
+  const handleSaveConnectionId = async () => {
+    if (!campaign) return;
+    setSavingConnectionId(true);
+    setMessage(null);
+    try {
+      const nextSettings = { ...(campaign.settings || {}), connection_id: connectionIdEdit.trim() || null };
+      const res = await updateCampaign(id, { settings: nextSettings });
+      if (res.ok) {
+        setCampaign({ ...campaign, settings: nextSettings });
+        setMessage({ type: "success", text: "Call Control App ID saved. Use Process now to retry." });
+      } else {
+        setMessage({ type: "error", text: res.error });
+      }
+    } catch (e) {
+      setMessage({ type: "error", text: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setSavingConnectionId(false);
+    }
+  };
 
   const handleStart = async () => {
     if (!campaign) return;
@@ -91,15 +160,25 @@ export default function CampaignDetailPage() {
         const [c, s] = await Promise.all([getCampaign(id), getCampaignStats(id)]);
         setCampaign(c ?? campaign);
         setStats(s ?? stats);
-        if (res.errors.length > 0) {
+        const relevantErrors = res.errors.filter((e) => e.includes(id));
+        if (relevantErrors.length > 0) {
+          const text = relevantErrors.join(" ");
+          const isCallNotAnswered = /90034|Call not answered yet/i.test(text) && relevantErrors.length <= 2;
           setMessage({
-            type: "error",
-            text: res.processed > 0
-              ? `Processed ${res.processed} call(s). Issues: ${res.errors.join(" ")}`
-              : res.errors.join(" "),
+            type: isCallNotAnswered ? "warning" : "error",
+            text: isCallNotAnswered
+              ? "The call was placed but the recipient hadn't answered yet when we tried to start the AI. If they answer later, webhooks will update the status."
+              : res.processed > 0
+                ? `Processed ${res.processed} call(s). Issues: ${text}`
+                : text,
           });
         } else if (res.processed > 0) {
           setMessage({ type: "success", text: `Processed ${res.processed} recipient(s).` });
+        } else if (res.errors.length > 0) {
+          setMessage({
+            type: "warning",
+            text: "Other campaigns had issues (e.g. missing connection_id). This campaign had nothing due to process.",
+          });
         } else {
           setMessage({
             type: "warning",
@@ -130,6 +209,10 @@ export default function CampaignDetailPage() {
       </div>
     );
   }
+
+  const selectedConnectionMissing =
+    !!connectionIdEdit &&
+    !telnyxApplications.some((app) => app.value === connectionIdEdit);
 
   return (
     <div>
@@ -187,10 +270,19 @@ export default function CampaignDetailPage() {
             }`}
           >
             {message.text}
+            {message.type !== "success" && /connection_id/i.test(message.text) && campaign?.campaign_type === "voice" && (
+              <p className="mt-2 font-medium">Set or fix the Call Control App ID in the <strong>Telnyx Call Control</strong> section below.</p>
+            )}
           </div>
         )}
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {campaign.status === "running" && (
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            Calls run every 2 minutes (cron) or when you click <strong>Process now</strong> above. If nothing happens, check the message above for missing connection, assistant, or API key.
+          </p>
+        )}
+
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
           <div className="p-4 rounded-lg bg-gray-50 dark:bg-gray-800">
             <p className="text-sm text-gray-500 dark:text-gray-400">Total</p>
             <p className="text-2xl font-semibold">{stats?.total ?? 0}</p>
@@ -200,12 +292,20 @@ export default function CampaignDetailPage() {
             <p className="text-2xl font-semibold">{stats?.pending ?? 0}</p>
           </div>
           <div className="p-4 rounded-lg bg-gray-50 dark:bg-gray-800">
+            <p className="text-sm text-gray-500 dark:text-gray-400">Scheduled</p>
+            <p className="text-2xl font-semibold">{stats?.scheduled ?? 0}</p>
+          </div>
+          <div className="p-4 rounded-lg bg-gray-50 dark:bg-gray-800">
             <p className="text-sm text-gray-500 dark:text-gray-400">In progress</p>
             <p className="text-2xl font-semibold">{stats?.in_progress ?? 0}</p>
           </div>
           <div className="p-4 rounded-lg bg-gray-50 dark:bg-gray-800">
             <p className="text-sm text-gray-500 dark:text-gray-400">Completed</p>
             <p className="text-2xl font-semibold">{stats?.completed ?? 0}</p>
+          </div>
+          <div className="p-4 rounded-lg bg-gray-50 dark:bg-gray-800">
+            <p className="text-sm text-gray-500 dark:text-gray-400">Failed</p>
+            <p className="text-2xl font-semibold">{stats?.failed ?? 0}</p>
           </div>
         </div>
 
@@ -233,6 +333,55 @@ export default function CampaignDetailPage() {
               </div>
             </dl>
           </div>
+
+          {campaign.campaign_type === "voice" && (
+            <div className="p-4 rounded-lg border dark:border-gray-700">
+              <h3 className="font-medium mb-2">Telnyx Call Control</h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">
+                Voice campaigns need a Call Control App ID (connection_id). The app must have a valid webhook URL in the Telnyx portal, or calls will fail with &quot;Invalid connection_id&quot;.
+              </p>
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="flex-1 min-w-[200px]">
+                  <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Connection ID (Call Control App ID)</label>
+                  <select
+                    className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm"
+                    value={connectionIdEdit}
+                    onChange={(e) => setConnectionIdEdit(e.target.value)}
+                    disabled={loadingTelnyxApplications}
+                  >
+                    <option value="">
+                      {loadingTelnyxApplications
+                        ? "Loading applications..."
+                        : "Use TELNYX_CONNECTION_ID from environment"}
+                    </option>
+                    {selectedConnectionMissing && (
+                      <option value={connectionIdEdit}>
+                        {connectionIdEdit} (current value)
+                      </option>
+                    )}
+                    {telnyxApplications.map((app) => (
+                      <option key={app.value} value={app.value}>
+                        {app.label}
+                      </option>
+                    ))}
+                  </select>
+                  {telnyxApplicationsError && (
+                    <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                      {telnyxApplicationsError}
+                    </p>
+                  )}
+                </div>
+                <Button
+                  onClick={handleSaveConnectionId}
+                  disabled={savingConnectionId || loadingTelnyxApplications}
+                  variant="outline"
+                  className="shrink-0"
+                >
+                  {savingConnectionId ? "Saving…" : "Save"}
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

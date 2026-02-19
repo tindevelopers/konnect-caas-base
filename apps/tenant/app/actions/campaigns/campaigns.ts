@@ -64,6 +64,7 @@ export async function getCampaigns(): Promise<Campaign[]> {
   const { data, error } = await (supabase.from("campaigns") as any)
     .select("*")
     .eq("tenant_id", tenantId)
+    .is("deleted_at", null)
     .order("created_at", { ascending: false });
 
   if (error) throw error;
@@ -77,6 +78,7 @@ export async function getCampaign(id: string): Promise<Campaign | null> {
     .select("*")
     .eq("id", id)
     .eq("tenant_id", tenantId)
+    .is("deleted_at", null)
     .single();
 
   if (error) {
@@ -154,11 +156,13 @@ export async function deleteCampaign(
   try {
     const tenantId = await getTenantForCrm();
     const supabase = await createClient();
+    const now = new Date().toISOString();
 
     const { error } = await (supabase.from("campaigns") as any)
-      .delete()
+      .update({ deleted_at: now, status: "cancelled" })
       .eq("id", id)
-      .eq("tenant_id", tenantId);
+      .eq("tenant_id", tenantId)
+      .is("deleted_at", null);
 
     if (error) return { ok: false, error: error.message };
     return { ok: true };

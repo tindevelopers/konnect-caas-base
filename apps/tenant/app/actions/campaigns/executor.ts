@@ -146,7 +146,7 @@ export async function processCampaignVoiceBatch(
         processed++;
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        errors.push(`Recipient ${r.id}: ${msg}`);
+        errors.push(`Campaign ${campaign.id}: Recipient ${r.id}: ${msg}`);
         await (admin.from("campaign_recipients") as any)
           .update({ status: "failed", result: { error: msg } })
           .eq("id", r.id);

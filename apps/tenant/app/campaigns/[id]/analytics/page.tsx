@@ -10,6 +10,7 @@ import {
   getCampaignStats,
   getCampaignRecipientsForExport,
   getRecipientTimezoneStats,
+  processCampaignBatchNow,
   type Campaign,
   type CampaignStats,
 } from "@/app/actions/campaigns/campaigns";
@@ -43,6 +44,8 @@ export default function CampaignAnalyticsPage() {
   const [stats, setStats] = useState<CampaignStats | null>(null);
   const [tzStats, setTzStats] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
+  const [processing, setProcessing] = useState(false);
+  const [message, setMessage] = useState<{ type: "error" | "warning" | "success"; text: string } | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -82,6 +85,38 @@ export default function CampaignAnalyticsPage() {
     }
   };
 
+  const handleProcessNow = async () => {
+    setMessage(null);
+    setProcessing(true);
+    try {
+      const res = await processCampaignBatchNow();
+      if (res.ok) {
+        const errs = res.errors.filter(Boolean);
+        if (errs.length) {
+          setMessage({ type: "warning", text: `Processed ${res.processed} call(s). Issues: ${errs.join("; ")}` });
+        } else if (res.processed === 0) {
+          setMessage({ type: "warning", text: "No recipients were processed. Check campaign config (connection, assistant, from number) or that recipients are scheduled and due." });
+        } else {
+          setMessage({ type: "success", text: `Processed ${res.processed} call(s).` });
+        }
+      } else {
+        setMessage({ type: "error", text: res.error });
+      }
+      const [c, s, tz] = await Promise.all([
+        getCampaign(id),
+        getCampaignStats(id),
+        getRecipientTimezoneStats(id),
+      ]);
+      setCampaign(c);
+      setStats(s);
+      setTzStats(tz);
+    } catch (e) {
+      setMessage({ type: "error", text: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setProcessing(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[40vh]">
@@ -98,17 +133,46 @@ export default function CampaignAnalyticsPage() {
     <div>
       <PageBreadcrumb pageTitle={campaign ? `${campaign.name} - Analytics` : "Analytics"} />
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-2">
           <Link href={`/campaigns/${id}`} className="text-brand-500 hover:underline">
             Back to campaign
           </Link>
-          <Button onClick={handleExport}>Export CSV</Button>
+          <div className="flex items-center gap-2">
+            {campaign?.status === "running" && (
+              <Button onClick={handleProcessNow} variant="outline" disabled={processing}>
+                {processing ? "Processing…" : "Process now"}
+              </Button>
+            )}
+            <Button onClick={handleExport}>Export CSV</Button>
+          </div>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {message && (
+          <div
+            className={`rounded-lg p-3 text-sm ${
+              message.type === "error"
+                ? "bg-red-50 text-red-800 dark:bg-red-900/20 dark:text-red-200"
+                : message.type === "warning"
+                  ? "bg-amber-50 text-amber-800 dark:bg-amber-900/20 dark:text-amber-200"
+                  : "bg-green-50 text-green-800 dark:bg-green-900/20 dark:text-green-200"
+            }`}
+          >
+            {message.text}
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
           <div className="p-4 rounded-lg bg-gray-50 dark:bg-gray-800">
             <p className="text-sm text-gray-500 dark:text-gray-400">Total</p>
             <p className="text-2xl font-semibold">{total}</p>
+          </div>
+          <div className="p-4 rounded-lg bg-gray-50 dark:bg-gray-800">
+            <p className="text-sm text-gray-500 dark:text-gray-400">Pending</p>
+            <p className="text-2xl font-semibold">{stats?.pending ?? 0}</p>
+          </div>
+          <div className="p-4 rounded-lg bg-gray-50 dark:bg-gray-800">
+            <p className="text-sm text-gray-500 dark:text-gray-400">Scheduled</p>
+            <p className="text-2xl font-semibold">{stats?.scheduled ?? 0}</p>
           </div>
           <div className="p-4 rounded-lg bg-gray-50 dark:bg-gray-800">
             <p className="text-sm text-gray-500 dark:text-gray-400">Completed</p>

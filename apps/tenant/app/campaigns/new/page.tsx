@@ -124,6 +124,9 @@ export default function NewCampaignPage() {
   // Step 3: Content
   const [assistants, setAssistants] = useState<{ id: string; name?: string }[]>([]);
   const [numbers, setNumbers] = useState<{ phone_number: string }[]>([]);
+  const [telnyxApplications, setTelnyxApplications] = useState<
+    { value: string; label: string }[]
+  >([]);
   const [assistantId, setAssistantId] = useState("");
   const [fromNumber, setFromNumber] = useState("");
   const [messageTemplate, setMessageTemplate] = useState("");
@@ -351,9 +354,13 @@ export default function NewCampaignPage() {
     setContentOptionsError(null);
     setContentOptionsLoading(true);
     try {
-      const [aList, nList] = await Promise.all([
+      const [aList, nList, appRes] = await Promise.all([
         listAssistantsAction(),
         listOwnedPhoneNumbersAction({ pageNumber: 1, pageSize: 50 }),
+        fetch("/api/integrations/telnyx/applications", {
+          method: "GET",
+          cache: "no-store",
+        }),
       ]);
       // listAssistantsAction returns { data: [...] } (tenant-filtered) or { error: string }
       const aResult = aList as { data?: unknown[]; error?: string };
@@ -373,10 +380,33 @@ export default function NewCampaignPage() {
       setNumbers(numData.map((n: any) => ({ phone_number: n.phone_number ?? n.id })));
       const firstNum = numData[0];
       if (firstNum?.phone_number) setFromNumber((prev) => prev || firstNum.phone_number);
+
+      let appOptions: { value: string; label: string }[] = [];
+      try {
+        const appBody = (await appRes.json()) as {
+          options?: { value: string; label: string }[];
+          error?: string;
+        };
+        if (!appRes.ok) {
+          throw new Error(appBody?.error ?? "Failed to load Telnyx applications");
+        }
+        appOptions = Array.isArray(appBody.options) ? appBody.options : [];
+      } catch (appErr) {
+        throw new Error(
+          appErr instanceof Error ? appErr.message : "Failed to load Telnyx applications"
+        );
+      }
+      setTelnyxApplications(appOptions);
+      if (appOptions[0]) setConnectionId((prev) => prev || appOptions[0].value);
     } catch (e) {
       console.error("Load content options:", e);
-      setContentOptionsError(e instanceof Error ? e.message : "Failed to load assistants and numbers");
+      setContentOptionsError(
+        e instanceof Error
+          ? e.message
+          : "Failed to load assistants, numbers, and Telnyx applications"
+      );
       setAssistants([]);
+      setTelnyxApplications([]);
     } finally {
       setContentOptionsLoading(false);
     }
@@ -456,6 +486,10 @@ export default function NewCampaignPage() {
     } else if (step === 2) {
       if (campaignType === "voice" && !assistantId) {
         setError("Please select an AI assistant");
+        return;
+      }
+      if (campaignType === "voice" && !connectionId) {
+        setError("Please select a Telnyx Call Control application");
         return;
       }
       if (!fromNumber) {
@@ -1123,14 +1157,29 @@ export default function NewCampaignPage() {
                   )}
                 </div>
                 <div>
-                  <label className="block text-sm font-medium mb-1">Connection ID (optional)</label>
-                  <input
-                    type="text"
+                  <label className="block text-sm font-medium mb-1">
+                    Telnyx Call Control Application
+                  </label>
+                  <select
                     value={connectionId}
                     onChange={(e) => setConnectionId(e.target.value)}
-                    placeholder="Call Control connection ID"
-                    className="w-full px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700"
-                  />
+                    disabled={contentOptionsLoading}
+                    className="w-full px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700 disabled:opacity-60"
+                    aria-label="Select a Telnyx Call Control application"
+                  >
+                    <option value="">
+                      {contentOptionsLoading
+                        ? "Loading applications..."
+                        : telnyxApplications.length === 0
+                          ? "No Call Control applications found"
+                          : "Select an application"}
+                    </option>
+                    {telnyxApplications.map((app) => (
+                      <option key={app.value} value={app.value}>
+                        {app.label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </>
             )}
