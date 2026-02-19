@@ -46,6 +46,7 @@ import { OMIT_FEATURES_FOR_COUNTRIES } from "@/src/core/telnyx/country-constrain
 import { ACTIVE_SUPPLIERS, COMING_SOON_SUPPLIERS } from "@/src/core/numbers/suppliers";
 import { ISO_COUNTRIES } from "@/src/lib/isoCountries";
 import { isPlatformAdmin } from "@/app/actions/organization-admins";
+import NotifyAdministrator from "@/components/support/NotifyAdministrator";
 
 const TELNYX_FEATURES = [
   "sms",
@@ -344,6 +345,7 @@ export default function BuyNumbersPage() {
   const [loadingReservation, setLoadingReservation] = useState(false);
   const [reservationIdInput, setReservationIdInput] = useState("");
   const [availableReservations, setAvailableReservations] = useState<TelnyxNumberReservation[]>([]);
+  const [deletingReservationId, setDeletingReservationId] = useState<string | null>(null);
   const [showReservationsList, setShowReservationsList] = useState(false);
 
   // Load saved reservation ID from localStorage on mount
@@ -607,8 +609,12 @@ export default function BuyNumbersPage() {
 
   async function handleCancelReservation() {
     if (!reservation?.id) return;
-    
-    if (!confirm(`Are you sure you want to cancel this reservation? The number(s) will be released and may be purchased by someone else.`)) {
+
+    if (
+      !confirm(
+        `Are you sure you want to cancel this reservation? The number(s) will be released and may be purchased by someone else.`
+      )
+    ) {
       return;
     }
 
@@ -619,11 +625,39 @@ export default function BuyNumbersPage() {
       await deleteNumberReservationAction(reservation.id);
       localStorage.removeItem("telnyx_active_reservation_id");
       setReservation(null);
+      setAvailableReservations((prev) => prev.filter((r) => r.id !== reservation.id));
       setInfo("Reservation cancelled successfully. The number(s) have been released.");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to cancel reservation");
     } finally {
       setIsReserving(false);
+    }
+  }
+
+  async function handleRemoveReservation(res: TelnyxNumberReservation) {
+    const numbersLabel = res.phone_numbers?.map((p) => p.phone_number).join(", ") || "this reservation";
+    if (
+      !confirm(
+        `Remove reservation for ${numbersLabel}? The number(s) will be released and may be purchased by someone else.`
+      )
+    ) {
+      return;
+    }
+    setError(null);
+    setInfo(null);
+    setDeletingReservationId(res.id);
+    try {
+      await deleteNumberReservationAction(res.id);
+      if (reservation?.id === res.id) {
+        localStorage.removeItem("telnyx_active_reservation_id");
+        setReservation(null);
+      }
+      setAvailableReservations((prev) => prev.filter((r) => r.id !== res.id));
+      setInfo("Reservation removed.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to remove reservation");
+    } finally {
+      setDeletingReservationId(null);
     }
   }
 
@@ -692,6 +726,17 @@ export default function BuyNumbersPage() {
 
   return (
     <div>
+      <div className="mb-4">
+        <Link
+          href="/rtc/numbers/manage-numbers"
+          className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
+        >
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+          </svg>
+          Back to Numbers
+        </Link>
+      </div>
       <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold text-gray-900 dark:text-white/90">Buy Numbers</h1>
@@ -779,6 +824,10 @@ export default function BuyNumbersPage() {
       {error && (
         <div className="mb-4">
           <Alert variant="error" title="Error" message={error} />
+          <NotifyAdministrator
+            errorMessage={error}
+            actionContext="Buy numbers / Place order"
+          />
           {error.includes("already reserved") && (
             <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950/30">
               <p className="text-sm font-medium text-amber-900 dark:text-amber-100">
@@ -1259,30 +1308,52 @@ export default function BuyNumbersPage() {
                       </p>
                       <div className="space-y-2">
                         {availableReservations.map((res) => (
-                          <button
+                          <div
                             key={res.id}
-                            onClick={() => handleSelectReservation(res)}
-                            className="w-full rounded-lg border border-gray-200 p-3 text-left transition-colors hover:border-brand-500 hover:bg-brand-50 dark:border-gray-700 dark:hover:border-brand-500 dark:hover:bg-brand-950/20"
+                            className="flex items-stretch gap-2 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden"
                           >
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="flex-1 min-w-0">
-                                <div className="font-medium text-sm text-gray-900 dark:text-gray-100">
-                                  {res.phone_numbers?.map(p => p.phone_number).join(", ") || "No numbers"}
-                                </div>
-                                <div className="mt-1 text-xs text-gray-500 dark:text-gray-400 font-mono truncate">
-                                  ID: {res.id}
-                                </div>
-                                {res.phone_numbers?.[0]?.expired_at && (
-                                  <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                                    Expires: {new Date(res.phone_numbers[0].expired_at).toLocaleString()}
+                            <button
+                              type="button"
+                              onClick={() => handleSelectReservation(res)}
+                              className="flex-1 min-w-0 p-3 text-left transition-colors hover:border-brand-500 hover:bg-brand-50 dark:hover:border-brand-500 dark:hover:bg-brand-950/20"
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="flex-1 min-w-0">
+                                  <div className="font-medium text-sm text-gray-900 dark:text-gray-100">
+                                    {res.phone_numbers?.map((p) => p.phone_number).join(", ") || "No numbers"}
                                   </div>
-                                )}
+                                  <div className="mt-1 text-xs text-gray-500 dark:text-gray-400 font-mono truncate">
+                                    ID: {res.id}
+                                  </div>
+                                  {res.phone_numbers?.[0]?.expired_at && (
+                                    <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                      Expires: {new Date(res.phone_numbers[0].expired_at).toLocaleString()}
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="text-xs font-medium text-brand-600 dark:text-brand-400">
+                                  {res.phone_numbers?.length || 0} number
+                                  {(res.phone_numbers?.length || 0) !== 1 ? "s" : ""}
+                                </div>
                               </div>
-                              <div className="text-xs font-medium text-brand-600 dark:text-brand-400">
-                                {res.phone_numbers?.length || 0} number{(res.phone_numbers?.length || 0) !== 1 ? 's' : ''}
-                              </div>
-                            </div>
-                          </button>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleRemoveReservation(res);
+                              }}
+                              disabled={deletingReservationId === res.id}
+                              title="Remove reservation (release numbers)"
+                              className="shrink-0 flex items-center justify-center w-10 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:text-red-400 dark:hover:bg-red-950/30 disabled:opacity-50"
+                            >
+                              {deletingReservationId === res.id ? (
+                                <span className="text-xs">…</span>
+                              ) : (
+                                <XMarkIcon className="h-5 w-5" />
+                              )}
+                            </button>
+                          </div>
                         ))}
                       </div>
                     </div>

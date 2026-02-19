@@ -8,6 +8,7 @@ export type PublicSupportCode =
   | "KX-NUM-001"
   | "KX-NUM-002"
   | "KX-NUM-003"
+  | "KX-NUM-004"
   | "KX-UP-001"
   | "KX-UNK-001";
 
@@ -39,13 +40,32 @@ function normalizeString(value: unknown) {
   return typeof value === "string" ? value.toLowerCase() : "";
 }
 
+/** True if provider error suggests approval/eligibility/restriction (e.g. level 2, compliance). */
+function suggestsApprovalRestriction(detail: string, title: string): boolean {
+  const combined = `${detail} ${title}`;
+  return (
+    combined.includes("approval") ||
+    combined.includes("approve") ||
+    combined.includes("level 2") ||
+    combined.includes("eligibility") ||
+    combined.includes("restricted") ||
+    combined.includes("compliance") ||
+    combined.includes("requirement group") ||
+    combined.includes("permission") ||
+    combined.includes("not allowed") ||
+    combined.includes("not permitted")
+  );
+}
+
 export function toPublicProviderError(args: {
   error: unknown;
   supportRef: string;
   isPlatformAdmin: boolean;
   defaultCode?: PublicSupportCode;
+  /** When true, 403 on provider is treated as approval-level restriction (e.g. number order). */
+  numberOrderContext?: boolean;
 }): Error {
-  const { error, supportRef, isPlatformAdmin } = args;
+  const { error, supportRef, isPlatformAdmin, numberOrderContext } = args;
 
   const generic = (code: PublicSupportCode, message: string, diagnostics?: string) => {
     const base = `${message} (Support code: ${code}, Ref: ${supportRef})`;
@@ -77,6 +97,15 @@ export function toPublicProviderError(args: {
     const status = error.status;
     const detailLower = normalizeString(detail);
     const titleLower = normalizeString(title);
+    const isApprovalRestriction = suggestsApprovalRestriction(detailLower, titleLower);
+
+    if (status === 403 && (isApprovalRestriction || numberOrderContext)) {
+      return generic(
+        "KX-NUM-004",
+        "This tenant needs a higher approval level. We have sent a message to the platform administrator.",
+        `http=${status} upstream_code=${upstreamCode ?? "-"} title=${title ?? "-"} detail=${detail ?? "-"}`
+      );
+    }
 
     if (status === 401 || status === 403) {
       return generic(
@@ -103,10 +132,26 @@ export function toPublicProviderError(args: {
       );
     }
 
+    if (status === 400 && isApprovalRestriction) {
+      return generic(
+        "KX-NUM-004",
+        "This tenant needs a higher approval level. We have sent a message to the platform administrator.",
+        `http=${status} upstream_code=${upstreamCode ?? "-"} title=${title ?? "-"} detail=${detail ?? "-"}`
+      );
+    }
+
     if (status === 400) {
       return generic(
         "KX-NUM-002",
         "The provider rejected the request. Please review your filters and try again.",
+        `http=${status} upstream_code=${upstreamCode ?? "-"} title=${title ?? "-"} detail=${detail ?? "-"}`
+      );
+    }
+
+    if (status >= 400 && status < 500 && isApprovalRestriction) {
+      return generic(
+        "KX-NUM-004",
+        "This tenant needs a higher approval level. We have sent a message to the platform administrator.",
         `http=${status} upstream_code=${upstreamCode ?? "-"} title=${title ?? "-"} detail=${detail ?? "-"}`
       );
     }

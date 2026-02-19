@@ -2,6 +2,7 @@
 
 import { sendEmail } from "@tinadmin/core/email";
 import { createClient } from "@/core/database/server";
+import { createAdminClient } from "@/core/database/admin-client";
 import type { SupportTicket, SupportTicketThread } from "@tinadmin/core/support";
 
 /**
@@ -147,6 +148,50 @@ export async function notifyTicketUpdated(
     });
   } catch (error) {
     console.error("Failed to send ticket update notification:", error);
+  }
+}
+
+/**
+ * Notify platform admins when a ticket is escalated to them
+ */
+export async function notifyTicketEscalated(ticket: SupportTicket) {
+  try {
+    const admin = createAdminClient();
+    const { data: role } = await admin
+      .from("roles")
+      .select("id")
+      .eq("name", "Platform Admin")
+      .limit(1)
+      .single();
+    if (!role?.id) return;
+    const { data: platformAdmins } = await admin
+      .from("users")
+      .select("email, full_name")
+      .eq("role_id", (role as { id: string }).id)
+      .is("tenant_id", null);
+    const recipients = (platformAdmins ?? []).filter(
+      (u: { email?: string }) => (u as { email?: string }).email
+    ) as Array<{ email: string; full_name?: string }>;
+    for (const u of recipients) {
+      await sendEmail({
+        to: u.email,
+        from: process.env.EMAIL_FROM || "noreply@example.com",
+        subject: `Ticket escalated to platform admin: ${ticket.ticket_number}`,
+        html: `
+          <h2>Support ticket escalated</h2>
+          <p>A support ticket has been escalated to platform admin.</p>
+          <p><strong>Ticket:</strong> ${ticket.ticket_number}</p>
+          <p><strong>Subject:</strong> ${ticket.subject}</p>
+          <p><strong>Tenant ID:</strong> ${ticket.tenant_id}</p>
+          ${(ticket as { support_code?: string }).support_code ? `<p><strong>Support code:</strong> ${(ticket as { support_code: string }).support_code}</p>` : ""}
+          <p>Please review the ticket in the support dashboard.</p>
+        `,
+        text: `Ticket ${ticket.ticket_number} (${ticket.subject}) has been escalated. Tenant: ${ticket.tenant_id}.`,
+        tenantId: ticket.tenant_id,
+      });
+    }
+  } catch (error) {
+    console.error("Failed to send escalation notification:", error);
   }
 }
 

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import Button from "@/components/ui/button/Button";
-import { ArrowLeftIcon, PaperClipIcon } from "@heroicons/react/24/outline";
+import { ArrowLeftIcon, PaperClipIcon, ArrowUpCircleIcon } from "@heroicons/react/24/outline";
 import type { SupportTicket, SupportTicketThread, SupportTicketAttachment } from "@tinadmin/core/support";
 import ThreadList from "./ThreadList";
 import AttachmentList from "./AttachmentList";
@@ -43,6 +43,25 @@ export default function TicketDetail({ ticket, threads: initialThreads, attachme
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [status, setStatus] = useState(ticket.status);
   const [priority, setPriority] = useState(ticket.priority);
+  const [escalatedAt, setEscalatedAt] = useState<string | null>(
+    (ticket as { escalated_to_platform_admin_at?: string | null }).escalated_to_platform_admin_at ?? null
+  );
+  const [escalating, setEscalating] = useState(false);
+
+  const handleEscalateToPlatformAdmin = async () => {
+    try {
+      setEscalating(true);
+      await updateTicket(ticket.id, {
+        escalated_to_platform_admin_at: new Date().toISOString(),
+      });
+      setEscalatedAt(new Date().toISOString());
+    } catch (err) {
+      console.error("Failed to escalate:", err);
+      alert("Failed to escalate to platform admin. Please try again.");
+    } finally {
+      setEscalating(false);
+    }
+  };
 
   const handleReply = async () => {
     if (!replyMessage.trim()) return;
@@ -179,7 +198,44 @@ export default function TicketDetail({ ticket, threads: initialThreads, attachme
               <div>
                 <span className="font-medium">Created:</span> {formatDate(ticket.created_at)}
               </div>
+              {(ticket as { support_code?: string }).support_code && (
+                <div>
+                  <span className="font-medium">Support code:</span>{" "}
+                  {(ticket as { support_code: string }).support_code}
+                </div>
+              )}
+              {(ticket as { support_ref?: string }).support_ref && (
+                <div>
+                  <span className="font-medium">Ref:</span>{" "}
+                  {(ticket as { support_ref: string }).support_ref}
+                </div>
+              )}
+              {escalatedAt && (
+                <div className="col-span-2">
+                  <span className="font-medium text-amber-600 dark:text-amber-400">
+                    Escalated to platform admin:
+                  </span>{" "}
+                  {formatDate(escalatedAt)}
+                </div>
+              )}
             </div>
+            {!isCustomerView && !escalatedAt && (
+              <div className="mt-4">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleEscalateToPlatformAdmin}
+                  disabled={escalating}
+                >
+                  <ArrowUpCircleIcon className="mr-2 h-4 w-4" />
+                  {escalating ? "Escalating…" : "Escalate to platform admin"}
+                </Button>
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  Notify platform administrators so they can assist with this ticket.
+                </p>
+              </div>
+            )}
           </div>
           {!isCustomerView && (
             <div className="flex flex-col gap-2">

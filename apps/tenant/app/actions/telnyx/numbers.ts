@@ -973,6 +973,7 @@ export async function createNumberOrderAction(args: {
             supportRef,
             isPlatformAdmin: platformAdmin,
             defaultCode: "KX-NUM-003",
+            numberOrderContext: true,
           });
         }
       },
@@ -1012,6 +1013,7 @@ export async function createNumberOrderAction(args: {
       supportRef,
       isPlatformAdmin: platformAdmin,
       defaultCode: "KX-NUM-003",
+      numberOrderContext: true,
     });
   }
 }

@@ -172,6 +172,8 @@ export async function createSupportTicket(
       category_id: input.category_id || null,
       created_by: user.id,
       assigned_to: input.assigned_to || null,
+      support_code: input.support_code || null,
+      support_ref: input.support_ref || null,
     })
     .select(`
       *,
@@ -208,6 +210,7 @@ export async function updateSupportTicket(
   if (input.priority !== undefined) updateData.priority = input.priority;
   if (input.category_id !== undefined) updateData.category_id = input.category_id;
   if (input.assigned_to !== undefined) updateData.assigned_to = input.assigned_to;
+  if (input.escalated_to_platform_admin_at !== undefined) updateData.escalated_to_platform_admin_at = input.escalated_to_platform_admin_at;
   
   const { data, error } = await (supabase
     .from("support_tickets") as any)
