@@ -19,7 +19,8 @@ import {
   createCallControlApplicationAction,
 } from "@/app/actions/telnyx/call-control";
 import { listPhoneNumbersAssignedToAssistantAction } from "@/app/actions/telnyx/numbers";
-import { getTenantVoiceSettings, STREAM_CODEC_OPTIONS } from "@/app/actions/voice-settings";
+import { getTenantVoiceSettings } from "@/app/actions/voice-settings";
+import { STREAM_CODEC_OPTIONS } from "@/src/lib/stream-codec-options";
 import CallStatusModal from "./CallStatusModal";
 import WebcallModal from "./WebcallModal";
 import AudioStreamPlayer from "./AudioStreamPlayer";

@@ -3,16 +3,10 @@
 import { requirePermission } from "@/core/permissions/middleware";
 import { createClient } from "@/core/database/server";
 import { getCurrentUserTenantId } from "@/core/multi-tenancy/validation";
-
-/** Telnyx media streaming codecs (stream_codec). */
-export const STREAM_CODEC_OPTIONS = [
-  { value: "PCMU", label: "PCMU (μ-law, 8 kHz)" },
-  { value: "OPUS", label: "Opus" },
-  { value: "PCMA", label: "PCMA (A-law, 8 kHz)" },
-  { value: "L16", label: "L16 (16-bit PCM, 16 kHz)" },
-] as const;
-
-export type StreamCodecValue = (typeof STREAM_CODEC_OPTIONS)[number]["value"];
+import {
+  STREAM_CODEC_OPTIONS,
+  type StreamCodecValue,
+} from "@/src/lib/stream-codec-options";
 
 export interface TenantVoiceSettings {
   defaultStreamCodec?: StreamCodecValue;

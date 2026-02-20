@@ -12,12 +12,8 @@ import {
   updateOutboundVoiceProfileDestinationsAction,
   type TelnyxOutboundVoiceProfile,
 } from "@/app/actions/telnyx/outbound-voice-profiles";
-import {
-  getTenantVoiceSettings,
-  saveTenantVoiceSettings,
-  STREAM_CODEC_OPTIONS,
-  type StreamCodecValue,
-} from "@/app/actions/voice-settings";
+import { getTenantVoiceSettings, saveTenantVoiceSettings } from "@/app/actions/voice-settings";
+import { STREAM_CODEC_OPTIONS, type StreamCodecValue } from "@/src/lib/stream-codec-options";
 
 export default function VoiceSettingsClient() {
   const [profiles, setProfiles] = useState<TelnyxOutboundVoiceProfile[]>([]);

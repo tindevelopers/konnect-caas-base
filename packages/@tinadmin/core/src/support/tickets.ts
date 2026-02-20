@@ -1,7 +1,7 @@
 "use server";
 
 import { createClient } from "@/core/database/server";
-import { createTenantAwareClient, getSupabaseClient } from "@/core/database/tenant-client";
+import { createTenantAwareClient, createTenantAwareServerClient, getSupabaseClient } from "@/core/database/tenant-client";
 import type { Database } from "@/core/database";
 import type {
   SupportTicket,
@@ -137,11 +137,12 @@ export async function createSupportTicket(
   input: CreateTicketInput,
   tenantId?: string
 ): Promise<SupportTicket> {
-  const client = tenantId 
-    ? await createTenantAwareClient(tenantId)
+  // Use server client so auth.getUser() sees the request session (cookies)
+  const client = tenantId
+    ? await createTenantAwareServerClient(tenantId)
     : await createClient();
   const supabase = getSupabaseClient(client);
-  
+
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
     throw new Error("Not authenticated");

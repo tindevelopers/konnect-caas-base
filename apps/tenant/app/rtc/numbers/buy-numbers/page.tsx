@@ -1823,6 +1823,20 @@ export default function BuyNumbersPage() {
                         </div>
                       )}
 
+                      {orderError && !orderError.includes("10027") && (
+                        <div className="rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-800 dark:bg-red-950/30">
+                          <p className="text-sm font-medium text-red-900 dark:text-red-100">
+                            Order failed
+                          </p>
+                          <p className="mt-1 text-xs text-red-700 dark:text-red-300">
+                            {orderError}
+                          </p>
+                          <p className="mt-2 text-xs font-medium text-red-800 dark:text-red-200">
+                            If the provider requires a connection, messaging profile, or billing group, open the <strong>Settings</strong> tab above, fill them in, then try Place order again.
+                          </p>
+                        </div>
+                      )}
+
                       <div className="flex flex-col gap-2">
                         <Button onClick={handleCreateOrder} disabled={isOrdering}>
                           {isOrdering ? "Placing order…" : "Place order"}
@@ -1941,6 +1955,20 @@ export default function BuyNumbersPage() {
                           <li>Create a new reservation with the current available numbers</li>
                           <li>Check if the reservation expired (30-minute limit)</li>
                         </ul>
+                      </div>
+                    )}
+
+                    {orderError && !orderError.includes("10027") && (
+                      <div className="rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-800 dark:bg-red-950/30">
+                        <p className="text-sm font-medium text-red-900 dark:text-red-100">
+                          Order failed
+                        </p>
+                        <p className="mt-1 text-xs text-red-700 dark:text-red-300">
+                          {orderError}
+                        </p>
+                        <p className="mt-2 text-xs text-red-800 dark:text-red-200">
+                          Fill in Connection ID, Messaging Profile ID, and/or Billing Group ID below if required by your provider, then click Create number order.
+                        </p>
                       </div>
                     )}
 

@@ -50,6 +50,7 @@
     "dev:portal": "turbo run dev --filter=@tinadmin/portal",
     "dev:local": "supabase start && pnpm dev",
     "dev:localhost": "./scripts/start-localhost.sh",
+    "dev:remote": "turbo run dev",
     "build": "echo 'Skipping build for websocket service'",
     "build:packages": "turbo run build --filter='./packages/*'",
     "build:tenant": "turbo run build --filter=@tinadmin/tenant",

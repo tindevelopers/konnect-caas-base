@@ -17,16 +17,7 @@ import { getTenantForSupport } from "./tenant-helper";
 import { notifyTicketCreated, notifyTicketUpdated, notifyTicketEscalated } from "./notifications";
 import { createClient } from "@/core/database/server";
 import { createAdminClient } from "@/core/database/admin-client";
-
-/** Parse support code and ref from error message (e.g. "... (Support code: KX-NUM-004, Ref: ref_xxx)") */
-export function parseSupportCodeAndRef(errorMessage: string): { supportCode: string | null; supportRef: string | null } {
-  const codeMatch = errorMessage.match(/Support code:\s*([A-Z0-9-]+)/i);
-  const refMatch = errorMessage.match(/Ref:\s*(ref_[A-Za-z0-9_-]+)/i);
-  return {
-    supportCode: codeMatch?.[1] ?? null,
-    supportRef: refMatch?.[1] ?? null,
-  };
-}
+import { parseSupportCodeAndRef } from "@/src/core/errors/parse-support-code";
 
 /**
  * Get Workspace Admins (organization admins) for a tenant for ticket assignment.

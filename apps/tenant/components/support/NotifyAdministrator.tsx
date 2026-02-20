@@ -3,7 +3,8 @@
 import { useState } from "react";
 import Link from "next/link";
 import Button from "@/components/ui/button/Button";
-import { createSupportTicketFromError, parseSupportCodeAndRef } from "@/app/actions/support/tickets";
+import { createSupportTicketFromError } from "@/app/actions/support/tickets";
+import { parseSupportCodeAndRef } from "@/src/core/errors/parse-support-code";
 import { BellAlertIcon, CheckCircleIcon } from "@heroicons/react/24/outline";
 
 interface NotifyAdministratorProps {
