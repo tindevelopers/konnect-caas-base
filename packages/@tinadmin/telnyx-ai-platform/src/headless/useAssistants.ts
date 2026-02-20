@@ -82,8 +82,19 @@ export function useAssistantEditor(api: TelnyxAssistantsApi, assistantId: string
       setError(null);
       try {
         const updated = await api.updateAssistant(assistantId, payload ?? assistant);
-        setAssistant(updated);
-        return updated;
+        // Merge sent voice_settings into response so provider/model persist if API omits them
+        const merged =
+          payload?.voice_settings && typeof updated === "object" && updated !== null
+            ? {
+                ...updated,
+                voice_settings: {
+                  ...((updated as TelnyxAssistant).voice_settings as Record<string, unknown> ?? {}),
+                  ...(payload.voice_settings as Record<string, unknown>),
+                },
+              }
+            : updated;
+        setAssistant(merged as TelnyxAssistant);
+        return merged;
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to save assistant");
         return null;

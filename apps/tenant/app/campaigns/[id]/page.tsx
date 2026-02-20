@@ -14,6 +14,7 @@ import {
   type CampaignStats,
 } from "@/app/actions/campaigns/campaigns";
 import { scheduleCampaignRecipients } from "@/app/actions/campaigns/scheduler";
+import { getAssistantAction } from "@/app/actions/telnyx/assistants";
 
 const STATUS_COLORS: Record<string, string> = {
   draft: "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200",
@@ -44,6 +45,12 @@ export default function CampaignDetailPage() {
   const [telnyxApplicationsError, setTelnyxApplicationsError] = useState<string | null>(
     null
   );
+  const [assistantReadiness, setAssistantReadiness] = useState<{
+    name: string;
+    voiceConfigured: boolean;
+    telephonyEnabled: boolean;
+  } | null>(null);
+  const [assistantReadinessLoading, setAssistantReadinessLoading] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -109,6 +116,39 @@ export default function CampaignDetailPage() {
       typeof max === "number" && max >= 1 ? Math.min(100, max) : 1
     );
   }, [campaign?.id, campaign?.settings, campaign?.max_concurrent_calls]);
+
+  // For voice campaigns, fetch assistant config to show outbound readiness (voice + telephony)
+  useEffect(() => {
+    if (campaign?.campaign_type !== "voice" || !campaign?.assistant_id) {
+      setAssistantReadiness(null);
+      return;
+    }
+    let cancelled = false;
+    setAssistantReadinessLoading(true);
+    setAssistantReadiness(null);
+    getAssistantAction(campaign.assistant_id)
+      .then((assistant) => {
+        if (cancelled || !assistant) return;
+        const vs = (assistant.voice_settings ?? {}) as Record<string, unknown>;
+        const voiceConfigured = typeof vs?.voice === "string" && vs.voice.trim().length > 0;
+        const enabled = (assistant.enabled_features ?? []) as string[];
+        const telephonyEnabled = enabled.includes("telephony");
+        setAssistantReadiness({
+          name: (assistant.name ?? "Assistant").trim() || campaign.assistant_id,
+          voiceConfigured,
+          telephonyEnabled,
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setAssistantReadiness(null);
+      })
+      .finally(() => {
+        if (!cancelled) setAssistantReadinessLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [campaign?.id, campaign?.campaign_type, campaign?.assistant_id]);
 
   const handleSaveConnectionId = async () => {
     if (!campaign) return;
@@ -359,6 +399,50 @@ export default function CampaignDetailPage() {
               </div>
             </dl>
           </div>
+
+          {campaign.campaign_type === "voice" && campaign.assistant_id && (
+            <div className="p-4 rounded-lg border dark:border-gray-700">
+              <h3 className="font-medium mb-2">AI Assistant (outbound)</h3>
+              {assistantReadinessLoading ? (
+                <p className="text-sm text-gray-500">Checking assistant config…</p>
+              ) : assistantReadiness ? (
+                <div className="space-y-2 text-sm">
+                  <p>
+                    <span className="text-gray-500 dark:text-gray-400">Assistant:</span>{" "}
+                    <Link
+                      href={`/ai/assistants/${campaign.assistant_id}`}
+                      className="text-blue-600 dark:text-blue-400 hover:underline"
+                    >
+                      {assistantReadiness.name}
+                    </Link>
+                  </p>
+                  <p>
+                    <span className="text-gray-500 dark:text-gray-400">Voice:</span>{" "}
+                    {assistantReadiness.voiceConfigured ? (
+                      <span className="text-green-600 dark:text-green-400">Configured</span>
+                    ) : (
+                      <span className="text-amber-600 dark:text-amber-400">Not set — assistant may not speak on call</span>
+                    )}
+                  </p>
+                  <p>
+                    <span className="text-gray-500 dark:text-gray-400">Telephony:</span>{" "}
+                    {assistantReadiness.telephonyEnabled ? (
+                      <span className="text-green-600 dark:text-green-400">Enabled</span>
+                    ) : (
+                      <span className="text-gray-500 dark:text-gray-400">Optional for outbound</span>
+                    )}
+                  </p>
+                  {(!assistantReadiness.voiceConfigured || !assistantReadiness.telephonyEnabled) && (
+                    <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">
+                      Open the assistant → Voice tab to set a voice; enable Telephony if Telnyx requires it for the assistant to talk on the call.
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <p className="text-sm text-gray-500">Could not load assistant details.</p>
+              )}
+            </div>
+          )}
 
           {campaign.campaign_type === "voice" && (
             <div className="p-4 rounded-lg border dark:border-gray-700">
