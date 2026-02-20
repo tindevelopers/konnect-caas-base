@@ -8,18 +8,23 @@ Error: {"code": "42704", "message": "unrecognized configuration parameter \"app.
 
 then something in your deployment is trying to **SET** the Postgres session variable `app.current_tenant`. This repo only uses **`app.current_tenant_id`** for RLS and never sets `app.current_tenant`.
 
-## What to do
+## Fix 1: Reset the parameter from roles (do this first)
 
-1. **Find where `app.current_tenant` is set**
-   - **Supabase Dashboard** → Project → **Database** → **Connection string** / **Connection pooler**: check for session or connection options that set a variable named `app.current_tenant`.
-   - **Environment / connection string**: look for `options=-c app.current_tenant=...` or similar. Change it to **`app.current_tenant_id`** (with `_id`) or remove it if you don’t need it.
-   - Any **custom middleware or proxy** that runs SQL or sets Postgres session variables: ensure it uses **`app.current_tenant_id`**, not `app.current_tenant`.
+PostgREST applies **impersonated-role settings** at the start of each transaction. If a Supabase role has `app.current_tenant` in its default config, every request can trigger the 500.
 
-2. **After fixing the SET**
-   - Redeploy and retest. The 500 should stop.
-   - RLS uses `get_current_tenant_id()`, which reads `app.current_tenant_id` first, then falls back to `app.current_tenant` (see migration `20260220100000_get_current_tenant_id_fallback.sql`) so both names work for **reading** once the SET uses an allowed parameter.
+**Run the migration** `supabase/migrations/20260220120000_reset_app_current_tenant_from_roles.sql` in the Supabase SQL Editor. It runs `ALTER ROLE ... RESET app.current_tenant` for `anon`, `authenticated`, and `service_role` so the bad parameter is no longer applied. Safe to run even if the setting is not present.
+
+## Fix 2: Find any other source
+
+1. **Supabase Dashboard** → **Database** → **Roles**: for `authenticated`, `anon`, `service_role` check "Default configuration" for `app.current_tenant` and remove it or change to `app.current_tenant_id`.
+2. **Connection pooler / connection string**: check for options that set `app.current_tenant`; change to **`app.current_tenant_id`** or remove.
+3. **SQL / db_pre_request**: if you have SQL that runs `set_config('app.current_tenant', ...)`, change to **`app.current_tenant_id`** or remove that SET.
+
+## After fixing
+
+Redeploy and retest. The app sets `app.current_tenant_id` via the `set_app_tenant_id` RPC when the tenant cookie is present; RLS uses `get_current_tenant_id()` which reads that (and falls back to `app.current_tenant` or auth metadata).
 
 ## Summary
 
-- **Cause:** Something is running `SET app.current_tenant = ...`, which your Postgres/Supabase setup rejects (42704).
-- **Fix:** Change that configuration to set **`app.current_tenant_id`** (or remove the incorrect SET). The app and RLS expect **`app.current_tenant_id`**.
+- **Cause:** Something runs `SET app.current_tenant = ...`; Postgres/Supabase rejects it (42704). Often a **role default** applied by PostgREST.
+- **Fix:** Run `20260220120000_reset_app_current_tenant_from_roles.sql`, then remove or correct any other source. Use **`app.current_tenant_id`** only.
