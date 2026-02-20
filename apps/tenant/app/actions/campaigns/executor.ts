@@ -48,7 +48,7 @@ export async function processCampaignVoiceBatch(
   const now = new Date().toISOString();
 
   let campaignsQuery = (admin.from("campaigns") as any)
-    .select("id, tenant_id, assistant_id, from_number, settings")
+    .select("id, tenant_id, assistant_id, from_number, settings, max_concurrent_calls")
     .eq("status", "running")
     .eq("campaign_type", "voice");
 
@@ -99,13 +99,16 @@ export async function processCampaignVoiceBatch(
 
     const transport = createTelnyxClient({ apiKey });
 
+    // Cap batch size by campaign max_concurrent_calls to avoid Telnyx "connection channel limit exceeded" (90043)
+    const batchSize = Math.min(10, Math.max(1, Number(campaign.max_concurrent_calls) || 10));
+
     const { data: recipients } = await (admin.from("campaign_recipients") as any)
       .select("id, phone, first_name, last_name, attempts")
       .eq("campaign_id", campaign.id)
       .eq("tenant_id", campaign.tenant_id)
       .eq("status", "scheduled")
       .lte("scheduled_at", now)
-      .limit(10);
+      .limit(batchSize);
 
     if (!recipients?.length) continue;
 

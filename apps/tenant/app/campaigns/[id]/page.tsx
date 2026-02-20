@@ -35,6 +35,7 @@ export default function CampaignDetailPage() {
   const [message, setMessage] = useState<{ type: "error" | "success" | "warning"; text: string } | null>(null);
   const [connectionIdEdit, setConnectionIdEdit] = useState("");
   const [greetingEdit, setGreetingEdit] = useState("");
+  const [maxConcurrentCallsEdit, setMaxConcurrentCallsEdit] = useState<number>(1);
   const [savingConnectionId, setSavingConnectionId] = useState(false);
   const [telnyxApplications, setTelnyxApplications] = useState<
     { value: string; label: string }[]
@@ -103,7 +104,11 @@ export default function CampaignDetailPage() {
     const g = s?.greeting;
     setConnectionIdEdit(typeof cid === "string" ? cid : "");
     setGreetingEdit(typeof g === "string" ? g : "");
-  }, [campaign?.id, campaign?.settings]);
+    const max = campaign?.max_concurrent_calls;
+    setMaxConcurrentCallsEdit(
+      typeof max === "number" && max >= 1 ? Math.min(100, max) : 1
+    );
+  }, [campaign?.id, campaign?.settings, campaign?.max_concurrent_calls]);
 
   const handleSaveConnectionId = async () => {
     if (!campaign) return;
@@ -115,10 +120,14 @@ export default function CampaignDetailPage() {
         connection_id: connectionIdEdit.trim() || null,
         greeting: greetingEdit.trim().slice(0, 3000) || null,
       };
-      const res = await updateCampaign(id, { settings: nextSettings });
+      const maxConcurrent = Math.min(100, Math.max(1, Number(maxConcurrentCallsEdit) || 1));
+      const res = await updateCampaign(id, {
+        settings: nextSettings,
+        max_concurrent_calls: maxConcurrent,
+      });
       if (res.ok) {
-        setCampaign({ ...campaign, settings: nextSettings });
-        setMessage({ type: "success", text: "Voice settings (connection & greeting) saved. Use Process now to retry." });
+        setCampaign({ ...campaign, settings: nextSettings, max_concurrent_calls: maxConcurrent });
+        setMessage({ type: "success", text: "Voice settings (connection, greeting, max concurrent calls) saved. Use Process now to retry." });
       } else {
         setMessage({ type: "error", text: res.error });
       }
@@ -173,13 +182,17 @@ export default function CampaignDetailPage() {
         if (relevantErrors.length > 0) {
           const text = relevantErrors.join(" ");
           const isCallNotAnswered = /90034|Call not answered yet/i.test(text) && relevantErrors.length <= 2;
+          const isChannelLimit = /90043|channel limit exceeded/i.test(text);
+          const displayText = isCallNotAnswered
+            ? "The call was placed but the recipient hadn't answered yet when we tried to start the AI. If they answer later, webhooks will update the status."
+            : res.processed > 0
+              ? `Processed ${res.processed} call(s). Issues: ${text}`
+              : text;
           setMessage({
             type: isCallNotAnswered ? "warning" : "error",
-            text: isCallNotAnswered
-              ? "The call was placed but the recipient hadn't answered yet when we tried to start the AI. If they answer later, webhooks will update the status."
-              : res.processed > 0
-                ? `Processed ${res.processed} call(s). Issues: ${text}`
-                : text,
+            text: isChannelLimit
+              ? `${displayText} Tip: Increase the connection's outbound call limit in Telnyx Portal (Call Control App → Outbound settings), or set this campaign's Max concurrent calls to 1.`
+              : displayText,
           });
         } else if (res.processed > 0) {
           setMessage({ type: "success", text: `Processed ${res.processed} recipient(s).` });
@@ -340,6 +353,10 @@ export default function CampaignDetailPage() {
                 <dt className="text-gray-500">Calls per minute</dt>
                 <dd>{campaign.calls_per_minute}</dd>
               </div>
+              <div>
+                <dt className="text-gray-500">Max concurrent calls</dt>
+                <dd>{campaign.max_concurrent_calls ?? 10}</dd>
+              </div>
             </dl>
           </div>
 
@@ -350,6 +367,21 @@ export default function CampaignDetailPage() {
                 Voice campaigns need a Call Control App ID (connection_id). The app must have a valid webhook URL in the Telnyx portal, or calls will fail with &quot;Invalid connection_id&quot;.
               </p>
               <div className="flex flex-wrap items-end gap-2">
+                <div className="w-full flex flex-wrap gap-4 items-end">
+                  <div className="w-24">
+                    <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Max concurrent calls</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={100}
+                      className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm"
+                      value={maxConcurrentCallsEdit}
+                      onChange={(e) => setMaxConcurrentCallsEdit(Math.min(100, Math.max(1, parseInt(e.target.value, 10) || 1)))}
+                      aria-label="Max concurrent calls (1–100)"
+                    />
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Set to 1 to avoid Telnyx channel limit (90043).</p>
+                  </div>
+                </div>
                 <div className="flex-1 min-w-[200px]">
                   <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Connection ID (Call Control App ID)</label>
                   <select
