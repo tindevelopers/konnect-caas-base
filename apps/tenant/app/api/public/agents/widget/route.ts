@@ -92,15 +92,24 @@ function buildWidgetScript(args: {
 
   let conversationId = "";
 
-  function append(text, role) {
+  function miniMarkdown(md) {
+    return md
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/\\[([^\\]]+)\\]\\(([^)]+)\\)/g, '<a href="$2" target="_blank" rel="noopener" style="color:#4f46e5;text-decoration:underline">$1</a>')
+      .replace(/\\*\\*([^*]+)\\*\\*/g, "<strong>$1</strong>")
+      .replace(/\\n/g, "<br>");
+  }
+
+  function append(text, role, isHtml) {
     const bubble = document.createElement("div");
-    bubble.textContent = text;
+    if (isHtml) { bubble.innerHTML = text; } else { bubble.textContent = text; }
     bubble.style.maxWidth = "86%";
     bubble.style.padding = "9px 11px";
     bubble.style.borderRadius = "10px";
     bubble.style.marginBottom = "8px";
     bubble.style.whiteSpace = "pre-wrap";
     bubble.style.wordBreak = "break-word";
+    bubble.style.lineHeight = "1.5";
     if (role === "user") {
       bubble.style.background = "#4f46e5";
       bubble.style.color = "#fff";
@@ -116,7 +125,7 @@ function buildWidgetScript(args: {
   }
 
   async function sendMessage(text) {
-    append(text, "user");
+    append(text, "user", false);
     const thinking = document.createElement("div");
     thinking.textContent = "Thinking...";
     thinking.style.color = "#6b7280";
@@ -126,12 +135,11 @@ function buildWidgetScript(args: {
     messages.scrollTop = messages.scrollHeight;
 
     try {
-      const res = await fetch(apiBase + "/api/public/agents/chat", {
+      const res = await fetch(apiBase + "/api/public/agents/answer", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           publicKey,
-          listingExternalId,
           message: text,
           conversationId: conversationId || undefined,
           channel: "webchat",
@@ -140,14 +148,15 @@ function buildWidgetScript(args: {
       const data = await res.json();
       thinking.remove();
       if (!res.ok) {
-        append(data.error || "Sorry, I couldn't process that request.", "assistant");
+        append(data.error || "Sorry, I couldn't process that request.", "assistant", false);
         return;
       }
       conversationId = data.conversationId || conversationId;
-      append(data.message || "No response", "assistant");
+      const content = data.chat_markdown || data.voice_text || "No response";
+      append(miniMarkdown(content), "assistant", true);
     } catch (error) {
       thinking.remove();
-      append("Network error. Please try again.", "assistant");
+      append("Network error. Please try again.", "assistant", false);
     }
   }
 
@@ -174,7 +183,7 @@ function buildWidgetScript(args: {
   root.appendChild(toggle);
   document.body.appendChild(root);
 
-  append("Hi! Ask me anything about this business.", "assistant");
+  append("Hi! Ask me anything about this business.", "assistant", false);
 })();
 `;
 }

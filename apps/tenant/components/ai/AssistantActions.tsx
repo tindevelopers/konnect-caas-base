@@ -24,6 +24,7 @@ import { STREAM_CODEC_OPTIONS } from "@/src/lib/stream-codec-options";
 import CallStatusModal from "./CallStatusModal";
 import WebcallModal from "./WebcallModal";
 import AudioStreamPlayer from "./AudioStreamPlayer";
+import EmbedPreviewSection from "./EmbedPreviewSection";
 
 interface AssistantActionsProps {
   assistantId: string;
@@ -778,6 +779,9 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
           <Alert variant="error" title="Test Call Failed" message={testError} />
         </div>
       )}
+
+      {/* Website Embed & Unified Answer Preview */}
+      <EmbedPreviewSection assistantId={assistantId} />
 
       {/* Webcall Modal */}
       <WebcallModal
