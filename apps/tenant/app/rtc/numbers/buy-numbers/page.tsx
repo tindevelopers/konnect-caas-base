@@ -1235,14 +1235,15 @@ export default function BuyNumbersPage() {
               <Button onClick={handleSearch} disabled={isSearching}>
                 {isSearching ? "Searching…" : "Search numbers"}
               </Button>
-              <Button
-                variant="outline"
-                onClick={() => resetSearchForm(true)}
-                disabled={isSearching}
-                title="Clear form and results for a new search"
-              >
-                New search
-              </Button>
+              <span title="Clear form and results for a new search">
+                <Button
+                  variant="outline"
+                  onClick={() => resetSearchForm(true)}
+                  disabled={isSearching}
+                >
+                  New search
+                </Button>
+              </span>
               <Button variant="outline" onClick={selectAllOnPage} disabled={results.length === 0}>
                 Select all
               </Button>

@@ -6,7 +6,7 @@ import Button from "@/components/ui/button/Button";
 import { Modal } from "@/components/ui/modal";
 import Alert from "@/components/ui/alert/Alert";
 import { useModal } from "@/hooks/useModal";
-import { CallIcon, CopyIcon, PencilIcon } from "@/icons";
+import { CallIcon, ChatIcon, CopyIcon, PencilIcon } from "@/icons";
 import {
   callAssistantAction,
   cloneAssistantAction,
@@ -23,6 +23,7 @@ import { getTenantVoiceSettings } from "@/app/actions/voice-settings";
 import { STREAM_CODEC_OPTIONS } from "@/src/lib/stream-codec-options";
 import CallStatusModal from "./CallStatusModal";
 import WebcallModal from "./WebcallModal";
+import TestChatModal from "./TestChatModal";
 import AudioStreamPlayer from "./AudioStreamPlayer";
 import EmbedPreviewSection from "./EmbedPreviewSection";
 
@@ -98,6 +99,7 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
   const [newCallControlAppName, setNewCallControlAppName] = useState("Voice / AI Assistant");
 
   const webcallModal = useModal();
+  const testChatModal = useModal();
 
   useEffect(() => {
     if (!assistantId) return;
@@ -325,6 +327,13 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
           onClick={openCallModal}
         >
           Call Assistant
+        </Button>
+        <Button
+          variant="outline"
+          startIcon={<ChatIcon className="h-4 w-4" />}
+          onClick={testChatModal.openModal}
+        >
+          Test Chat
         </Button>
         <Button
           variant="outline"
@@ -788,6 +797,12 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
         isOpen={webcallModal.isOpen}
         onClose={webcallModal.closeModal}
         assistantId={assistantId}
+      />
+
+      <TestChatModal
+        assistantId={assistantId}
+        isOpen={testChatModal.isOpen}
+        onClose={testChatModal.closeModal}
       />
 
       {/* Call Status Modal */}

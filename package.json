@@ -107,7 +107,7 @@
     "server-only": "^0.0.1",
     "simplebar-react": "^3.3.0",
     "stripe": "^20.0.0",
-    "swiper": "^11.2.0",
+    "swiper": ">=12.1.2",
     "tailwind-merge": "^2.6.0",
     "tailwindcss": "^4.0.0"
   },
@@ -140,6 +140,8 @@
       "ai>svelte": "5.46.4",
       "jsondiffpatch": ">=0.7.2",
       "glob": ">=10.5.0",
+      "minimatch": ">=10.2.1",
+      "ajv": ">=8.18.0",
       "undici": ">=6.23.0"
     }
   }

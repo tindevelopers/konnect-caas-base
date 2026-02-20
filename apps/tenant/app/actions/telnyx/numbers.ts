@@ -761,7 +761,7 @@ export async function deleteNumberReservationAction(reservationId: string) {
         } catch (error) {
           // 404 = already expired or released; 405 = provider may not support DELETE (reservation will expire). Treat as success so UI can remove it.
           if (error instanceof TelnyxApiError && (error.status === 404 || error.status === 405)) {
-            return { data: null } as TelnyxApiResponse<TelnyxNumberReservation>;
+            return { data: null } as unknown as TelnyxApiResponse<TelnyxNumberReservation>;
           }
           throw toPublicProviderError({
             error,

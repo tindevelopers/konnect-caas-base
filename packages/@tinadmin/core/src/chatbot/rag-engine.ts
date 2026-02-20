@@ -37,8 +37,17 @@ export async function retrieveContext(
   // Detect domain
   const domainContext = detectDomain(query);
 
-  // Generate query embedding
-  const queryEmbedding = await generateEmbedding(query);
+  let queryEmbedding: number[];
+  try {
+    queryEmbedding = await generateEmbedding(query);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes('rate limit') || msg.includes('quota') || msg.includes('Failed to generate embedding')) {
+      console.warn('[RAG] Embedding failed (rate limit/quota), continuing without knowledge context:', msg.slice(0, 80));
+      return { chunks: [], citations: [], domainContext };
+    }
+    throw err;
+  }
 
   // Enhance query with domain context if enabled
   const enhancedQuery = includeDomainContext

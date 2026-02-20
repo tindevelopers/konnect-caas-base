@@ -95,7 +95,7 @@ const domain = detectDomain("How do I reset my password?");
 
 ### Environment Variables
 
-- `OPENAI_API_KEY` - Required for embeddings and LLM
+- `OPENAI_API_KEY` or `AI_GATEWAY_API_KEY` - Required for embeddings and LLM. For local development set one of these in `apps/tenant/.env.local` (or use System Admin → API Configuration for the AI gateway). Do not rely on `VERCEL_OIDC_TOKEN` for local runs.
 - `NEXT_PUBLIC_SUPABASE_URL` - Supabase URL
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY` - Supabase anon key
 
