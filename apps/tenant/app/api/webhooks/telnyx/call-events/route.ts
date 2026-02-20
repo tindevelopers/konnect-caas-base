@@ -396,9 +396,9 @@ export async function POST(request: NextRequest) {
   }).catch(() => {});
   // #endregion
 
-  let tenantId = resolveTenantId(request, payload);
+  let tenantId: string | undefined = resolveTenantId(request, payload);
   if (!tenantId) {
-    tenantId = await resolveTenantIdFromCampaignRecipient(payload);
+    tenantId = (await resolveTenantIdFromCampaignRecipient(payload)) ?? undefined;
   }
   if (!tenantId) {
     return NextResponse.json(
