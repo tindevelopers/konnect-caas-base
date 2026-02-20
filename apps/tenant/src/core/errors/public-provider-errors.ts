@@ -132,6 +132,15 @@ export function toPublicProviderError(args: {
       );
     }
 
+    // Telnyx 20003: API Key forbidden — account verification level restricts which numbers can be ordered (e.g. only local numbers in FR for L1).
+    if (status === 400 && upstreamCode === "20003") {
+      return generic(
+        "KX-NUM-003",
+        "Your Telnyx account verification level only allows ordering certain number types or regions. Try a number type and country your account allows, or upgrade your verification level in the Telnyx portal.",
+        `http=${status} upstream_code=${upstreamCode} title=${title ?? "-"} detail=${detail ?? "-"}`
+      );
+    }
+
     if (status === 400 && isApprovalRestriction) {
       return generic(
         "KX-NUM-004",
@@ -164,9 +173,18 @@ export function toPublicProviderError(args: {
       );
     }
 
+    // For 4xx fallback, surface the provider's message when present so users see actionable errors (e.g. "Connection is required", "Reservation expired").
+    const fromDetails = [detail, title].find((s) => typeof s === "string" && s.length > 0 && s.length <= 280);
+    const rawMsg = typeof error.message === "string" ? error.message.trim() : "";
+    const bareFallback = `Telnyx API request failed (${status})`;
+    const clientMsg =
+      rawMsg.length > bareFallback.length + 1 && rawMsg.length <= 320 ? rawMsg : "";
+    const fallbackMessage =
+      (fromDetails?.trim() ?? clientMsg) || "The request failed. Please try again.";
+
     return generic(
       args.defaultCode ?? "KX-UP-001",
-      "The request failed. Please try again.",
+      fallbackMessage,
       `http=${status} upstream_code=${upstreamCode ?? "-"} title=${title ?? "-"} detail=${detail ?? "-"}`
     );
   }
