@@ -275,13 +275,15 @@ export async function getRecipientTimezoneStats(
 /**
  * Run one batch of campaign calls for the current tenant (for "Process now" / testing).
  * In production, the cron job at /api/campaigns/process runs every 2 minutes.
+ * @param tenantId - Optional. When provided (e.g. from campaign page), skips getTenantForCrm()
+ *   so we only use the admin client in the executor, avoiding 502 from Supabase session/RLS.
  */
-export async function processCampaignBatchNow(): Promise<
+export async function processCampaignBatchNow(tenantId?: string): Promise<
   { ok: true; processed: number; errors: string[] } | { ok: false; error: string }
 > {
   try {
-    const tenantId = await getTenantForCrm();
-    const result = await processCampaignVoiceBatch(tenantId);
+    const resolvedTenantId = tenantId ?? (await getTenantForCrm());
+    const result = await processCampaignVoiceBatch(resolvedTenantId);
     return { ok: true, processed: result.processed, errors: result.errors };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);

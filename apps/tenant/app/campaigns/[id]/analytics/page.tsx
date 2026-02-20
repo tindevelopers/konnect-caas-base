@@ -89,7 +89,7 @@ export default function CampaignAnalyticsPage() {
     setMessage(null);
     setProcessing(true);
     try {
-      const res = await processCampaignBatchNow();
+      const res = await processCampaignBatchNow(campaign?.tenant_id);
       if (res.ok) {
         const errs = res.errors.filter(Boolean);
         if (errs.length) {

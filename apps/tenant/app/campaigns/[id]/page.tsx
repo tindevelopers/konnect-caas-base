@@ -163,7 +163,8 @@ export default function CampaignDetailPage() {
     setProcessing(true);
     setMessage(null);
     try {
-      const res = await processCampaignBatchNow();
+      // Pass campaign tenant_id so we skip getTenantForCrm() and avoid Supabase session/502 issues
+      const res = await processCampaignBatchNow(campaign?.tenant_id);
       if (res.ok) {
         const [c, s] = await Promise.all([getCampaign(id), getCampaignStats(id)]);
         setCampaign(c ?? campaign);
