@@ -157,17 +157,19 @@ export async function notifyTicketUpdated(
 export async function notifyTicketEscalated(ticket: SupportTicket) {
   try {
     const admin = createAdminClient();
-    const { data: role } = await admin
+    const { data: roleData } = await admin
       .from("roles")
       .select("id")
       .eq("name", "Platform Admin")
       .limit(1)
       .single();
+    type RoleRow = { id: string } | null;
+    const role: RoleRow = roleData as RoleRow;
     if (!role?.id) return;
     const { data: platformAdmins } = await admin
       .from("users")
       .select("email, full_name")
-      .eq("role_id", (role as { id: string }).id)
+      .eq("role_id", role.id)
       .is("tenant_id", null);
     const recipients = (platformAdmins ?? []).filter(
       (u: { email?: string }) => (u as { email?: string }).email
