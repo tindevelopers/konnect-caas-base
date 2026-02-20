@@ -136,7 +136,7 @@ export default function AgentManagerPage() {
         setTenantAssistants([]);
         return;
       }
-      setTenantAssistants(result.data ?? []);
+      setTenantAssistants("data" in result ? (result.data ?? []) : []);
     } catch {
       setTenantAssistants([]);
     } finally {
