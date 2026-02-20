@@ -47,6 +47,7 @@ export default function EmbedPreviewSection({
 }: EmbedPreviewSectionProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [agentPublicKey, setAgentPublicKey] = useState<string | null>(null);
+  const [platformAgentId, setPlatformAgentId] = useState<string | null>(null);
   const [loadingKey, setLoadingKey] = useState(false);
   const [keyError, setKeyError] = useState<string | null>(null);
 
@@ -84,6 +85,7 @@ export default function EmbedPreviewSection({
         : null;
       if (match?.public_key) {
         setAgentPublicKey(match.public_key as string);
+        if (match.id) setPlatformAgentId(match.id as string);
       } else {
         setKeyError(
           "No platform agent found for this assistant. Create one in Agent Manager to get a publicKey."
@@ -125,10 +127,12 @@ export default function EmbedPreviewSection({
     setChatLoading(true);
 
     try {
-      const endpoint = agentPublicKey
+      const usePublicApi = Boolean(agentPublicKey);
+      const internalId = platformAgentId ?? assistantId;
+      const endpoint = usePublicApi
         ? "/api/public/agents/answer"
-        : `/api/agents/${assistantId}/answer`;
-      const body = agentPublicKey
+        : `/api/agents/${internalId}/answer`;
+      const body = usePublicApi
         ? {
             publicKey: agentPublicKey,
             message: text,
@@ -170,7 +174,7 @@ export default function EmbedPreviewSection({
     } finally {
       setChatLoading(false);
     }
-  }, [chatInput, chatLoading, agentPublicKey, assistantId, chatConversationId]);
+  }, [chatInput, chatLoading, agentPublicKey, platformAgentId, assistantId, chatConversationId]);
 
   const chatWidgetSnippet = agentPublicKey
     ? `<script src="${typeof window !== "undefined" ? window.location.origin : ""}/api/public/agents/widget?publicKey=${agentPublicKey}"></script>`
