@@ -116,22 +116,57 @@ export async function processCampaignVoiceBatch(
           throw new Error("No call_control_id in response");
         }
 
-        const startResponse = await transport.request(
-          `/calls/${callControlId}/actions/ai_assistant_start`,
-          {
+        // Telnyx requires the call to be answered before ai_assistant_start. Set client_state
+        // so the webhook can start the assistant on call.answered (same pattern as callAssistantAction).
+        const greeting =
+          typeof campaign.settings?.greeting === "string" && campaign.settings.greeting.trim()
+            ? campaign.settings.greeting.trim().slice(0, 3000)
+            : undefined;
+        const statePayload = {
+          t: "tinadmin_outbound_assistant",
+          a: campaign.assistant_id,
+          tid: campaign.tenant_id,
+          ...(greeting ? { g: greeting } : {}),
+        };
+        const clientState = Buffer.from(JSON.stringify(statePayload), "utf8").toString("base64");
+        try {
+          await transport.request(
+            `/calls/${callControlId}/actions/client_state_update`,
+            { method: "PUT", body: { client_state: clientState } }
+          );
+          // #region agent log
+          fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
             method: "POST",
-            body: {
-              assistant: { id: campaign.assistant_id },
-            },
-          }
-        );
-        const conversationId = extractConversationId(startResponse);
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              location: "executor.ts:client_state_update",
+              message: "client_state_update succeeded",
+              data: { campaignId: campaign.id, callControlId },
+              timestamp: Date.now(),
+              hypothesisId: "H5",
+            }),
+          }).catch(() => {});
+          // #endregion
+        } catch (stateErr) {
+          // #region agent log
+          fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              location: "executor.ts:client_state_update-err",
+              message: "client_state_update failed",
+              data: { campaignId: campaign.id, error: stateErr instanceof Error ? stateErr.message : String(stateErr) },
+              timestamp: Date.now(),
+              hypothesisId: "H5",
+            }),
+          }).catch(() => {});
+          // #endregion
+          // Log but continue; webhook may still start assistant if state was set elsewhere
+          console.warn("[CampaignExecutor] client_state_update failed:", stateErr);
+        }
 
         await (admin.from("campaign_recipients") as any)
-          .update({
-            call_control_id: callControlId,
-            conversation_id: conversationId ?? null,
-          })
+          .update({ call_control_id: callControlId })
           .eq("id", r.id);
 
         await (admin.from("campaign_events") as any).insert({

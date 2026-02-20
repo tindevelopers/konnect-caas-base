@@ -6,13 +6,16 @@ This directory contains Agent Skills for Cursor that help the AI assistant under
 
 ### Telnyx Skills (JavaScript)
 
-These skills teach the AI how to use Telnyx APIs with the JavaScript SDK:
+Official [Telnyx Agent Skills](https://github.com/team-telnyx/telnyx-ext-agent-skills) — teach the AI how to use Telnyx APIs with the JavaScript SDK. Quick start: [Telnyx AI agent skills (Cursor)](https://telnyx.com/resources/ai-agent-skills-claude-code#quick-start-install-in-30-seconds).
 
 - **telnyx-messaging-javascript** - Send/receive SMS/MMS, manage messaging numbers, handle opt-outs
+- **telnyx-messaging-profiles-javascript** - Messaging profiles, number pools, short codes, auto-response
 - **telnyx-voice-javascript** - Call control: dial, answer, hangup, transfer, bridge
+- **telnyx-voice-media-javascript** - Playback, TTS, call recording
 - **telnyx-numbers-javascript** - Search, order, and manage phone numbers
 - **telnyx-verify-javascript** - Phone verification, number lookup, 2FA
 - **telnyx-ai-assistants-javascript** - AI voice assistants with knowledge bases
+- **telnyx-sip-javascript** - SIP trunking, outbound voice profiles, connections
 
 ### Abacus.AI Skills (JavaScript / REST)
 
