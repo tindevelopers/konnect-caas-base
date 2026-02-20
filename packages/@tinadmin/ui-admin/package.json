@@ -23,7 +23,7 @@
     "@tinadmin/core": "workspace:*",
     "@heroicons/react": "^2.2.0",
     "clsx": "^2.1.1",
-    "tailwind-merge": "^2.6.0"
+    "tailwind-merge": "^3.5.0"
   },
   "devDependencies": {
     "@types/react": "^19.2.7",
