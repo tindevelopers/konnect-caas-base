@@ -93,13 +93,15 @@ async function handleOutboundCallAnsweredAssistant(payload: Record<string, unkno
     ((payload.data as Record<string, unknown> | undefined)?.client_state as string | undefined);
 
   // #region agent log
+  const hasClientState = !!(clientStateRaw && typeof clientStateRaw === "string");
+  console.log("[TelnyxWebhook:outbound-entry]", { eventType, direction, hasClientState });
   fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       location: "call-events/route.ts:handleOutbound-entry",
       message: "handleOutboundCallAnsweredAssistant entry",
-      data: { eventType, direction, hasClientState: !!(clientStateRaw && typeof clientStateRaw === "string") },
+      data: { eventType, direction, hasClientState },
       timestamp: Date.now(),
       hypothesisId: "H3",
     }),
@@ -134,6 +136,7 @@ async function handleOutboundCallAnsweredAssistant(payload: Record<string, unkno
       : "Hello, thanks for taking our call. How can I help you today?";
 
   // #region agent log
+  console.log("[TelnyxWebhook:ai_assistant_start]", { callControlId, assistantId: decoded.a, greetingLength: greeting.length });
   fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -160,6 +163,7 @@ async function handleOutboundCallAnsweredAssistant(payload: Record<string, unkno
       }
     );
     // #region agent log
+    console.log("[TelnyxWebhook:ai_assistant_start-ok]", { callControlId });
     fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -186,11 +190,13 @@ async function handleOutboundCallAnsweredAssistant(payload: Record<string, unkno
       }),
     }).catch(() => {});
     // #endregion
+    const errMsg = error instanceof Error ? error.message : String(error);
+    console.error("[TelnyxWebhook:ai_assistant_start-err]", { callControlId, assistantId: decoded.a, tenantId: decoded.tid, error: errMsg });
     console.error("[TelnyxWebhook] Outbound call.answered ai_assistant_start failed:", {
       callControlId,
       assistantId: decoded.a,
       tenantId: decoded.tid,
-      error: error instanceof Error ? error.message : String(error),
+      error: errMsg,
     });
   }
 }
@@ -383,6 +389,7 @@ export async function POST(request: NextRequest) {
   // #region agent log
   const earlyEventType = resolveEventType(payload);
   const earlyExternalId = resolveExternalId(payload);
+  console.log("[TelnyxWebhook:post-first]", { eventType: earlyEventType, externalId: earlyExternalId ?? null });
   fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -401,6 +408,7 @@ export async function POST(request: NextRequest) {
     tenantId = (await resolveTenantIdFromCampaignRecipient(payload)) ?? undefined;
   }
   if (!tenantId) {
+    console.warn("[TelnyxWebhook:tenant-missing]", { eventType: earlyEventType, externalId: earlyExternalId ?? null });
     return NextResponse.json(
       { error: "tenantId is required" },
       { status: 400 }
