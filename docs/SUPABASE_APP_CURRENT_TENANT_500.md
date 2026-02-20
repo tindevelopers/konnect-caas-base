@@ -12,13 +12,33 @@ then something in your deployment is trying to **SET** the Postgres session vari
 
 PostgREST applies **impersonated-role settings** at the start of each transaction. If a Supabase role has `app.current_tenant` in its default config, every request can trigger the 500.
 
-**Run the migration** `supabase/migrations/20260220120000_reset_app_current_tenant_from_roles.sql` in the Supabase SQL Editor. It runs `ALTER ROLE ... RESET app.current_tenant` for `anon`, `authenticated`, and `service_role` so the bad parameter is no longer applied. Safe to run even if the setting is not present.
+**Run in order:**
+1. `supabase/migrations/20260220120000_reset_app_current_tenant_from_roles.sql` (resets for `anon`, `authenticated`, `service_role`).
+2. If the 500 persists, run `supabase/migrations/20260220130000_reset_app_current_tenant_all_roles.sql` (resets for any role that has the setting in the DB).
+3. If the 500 still persists, run `docs/SUPABASE_APP_CURRENT_TENANT_DIAGNOSTIC.sql` and use the results to find the source (roles, functions, or pooler/connection).
 
 ## Fix 2: Find any other source
 
-1. **Supabase Dashboard** → **Database** → **Roles**: for `authenticated`, `anon`, `service_role` check "Default configuration" for `app.current_tenant` and remove it or change to `app.current_tenant_id`.
-2. **Connection pooler / connection string**: check for options that set `app.current_tenant`; change to **`app.current_tenant_id`** or remove.
-3. **SQL / db_pre_request**: if you have SQL that runs `set_config('app.current_tenant', ...)`, change to **`app.current_tenant_id`** or remove that SET.
+### Step-by-step: Supabase Dashboard
+
+1. **Open Database settings**
+   - In the left sidebar, click **Database**.
+   - Then open **Connection string** (or **Connect** / **Settings** depending on your project’s UI). You may see tabs like “URI”, “Session pooler”, “Transaction pooler”.
+
+2. **Connection string**
+   - You’ll see one or more URIs (e.g. `postgres://...` or `postgresql://...`). Copy the one you use for the app (often “Session pooler” or port **5432** for session mode).
+   - Check if the URI contains **connection parameters**, e.g. `?options=...` or `?options=-c%20app.current_tenant%3D...`. If you see `app.current_tenant` there, remove it or change it to `app.current_tenant_id`.
+   - The Dashboard often shows the URI without extra options; if your app or another service builds the connection string, check that code or env for `options=-c app.current_tenant=...` and fix/remove it.
+
+3. **Database → Settings**
+   - Under **Database**, go to **Settings** (or **Database settings**). Look for “Connection pooler”, “Pooler configuration”, or “Session parameters”.
+   - If there is a field for **default parameters**, **session variables**, or **Parameter status**, see if `app.current_tenant` is listed. Remove it or change to `app.current_tenant_id`. Many projects don’t have this; if you don’t see it, the SET is likely not from the Dashboard.
+
+4. **Roles**
+   - **Database** → **Roles**. Click **authenticated**, **anon**, and **service_role**. Check for “Default configuration” or “Config” and any entry for `app.current_tenant`; remove or change to `app.current_tenant_id`.
+
+5. **If you find nothing**
+   - The 500 may be from your app’s env (e.g. `DATABASE_URL` with `?options=...`), another service using the same DB, or a Supabase feature that isn’t visible in the Dashboard. Search your repo and env for `app.current_tenant` and fix there.
 
 ## After fixing
 

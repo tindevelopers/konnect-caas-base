@@ -131,6 +131,7 @@ export default function NewCampaignPage() {
   const [fromNumber, setFromNumber] = useState("");
   const [messageTemplate, setMessageTemplate] = useState("");
   const [connectionId, setConnectionId] = useState("");
+  const [greeting, setGreeting] = useState("");
   const [contentOptionsLoading, setContentOptionsLoading] = useState(false);
   const [contentOptionsError, setContentOptionsError] = useState<string | null>(null);
 
@@ -514,7 +515,10 @@ export default function NewCampaignPage() {
           max_attempts: maxAttempts,
           retry_delay_minutes: retryDelayMinutes,
           calls_per_minute: callsPerMinute,
-          settings: connectionId ? { connection_id: connectionId } : {},
+          settings: {
+            ...(connectionId ? { connection_id: connectionId } : {}),
+            ...(greeting.trim() ? { greeting: greeting.trim().slice(0, 3000) } : {}),
+          },
         });
         if (!res.ok) {
           setError(res.error);
@@ -1180,6 +1184,23 @@ export default function NewCampaignPage() {
                       </option>
                     ))}
                   </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">
+                    Greeting (optional)
+                  </label>
+                  <textarea
+                    value={greeting}
+                    onChange={(e) => setGreeting(e.target.value)}
+                    placeholder="Hello, thanks for taking our call. How can I help you today?"
+                    rows={3}
+                    maxLength={3000}
+                    className="w-full px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700"
+                    aria-label="Custom greeting when contact answers"
+                  />
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    First thing the AI says when the contact answers. Leave blank to use the default.
+                  </p>
                 </div>
               </>
             )}

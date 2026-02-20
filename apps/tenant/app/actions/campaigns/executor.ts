@@ -62,10 +62,23 @@ export async function processCampaignVoiceBatch(
     return { processed: 0, errors: [] };
   }
 
+  const DEFAULT_GREETING = "Hello, thanks for taking our call. How can I help you today?";
+
   for (const campaign of campaigns) {
+    // Normalize settings (JSONB can sometimes be string from DB/driver)
+    const settings =
+      typeof campaign.settings === "string"
+        ? (() => {
+            try {
+              return JSON.parse(campaign.settings) as Record<string, unknown>;
+            } catch {
+              return {};
+            }
+          })()
+        : (campaign.settings as Record<string, unknown> | undefined) ?? {};
+
     const connectionId =
-      (campaign.settings?.connection_id as string) ??
-      process.env.TELNYX_CONNECTION_ID;
+      (settings.connection_id as string) ?? process.env.TELNYX_CONNECTION_ID;
 
     if (!connectionId?.trim()) {
       errors.push(`Campaign ${campaign.id}: No connection_id configured`);
@@ -118,15 +131,17 @@ export async function processCampaignVoiceBatch(
 
         // Telnyx requires the call to be answered before ai_assistant_start. Set client_state
         // so the webhook can start the assistant on call.answered (same pattern as callAssistantAction).
-        const greeting =
-          typeof campaign.settings?.greeting === "string" && campaign.settings.greeting.trim()
-            ? campaign.settings.greeting.trim().slice(0, 3000)
-            : undefined;
+        // Always include g (greeting) so the webhook has it; use campaign greeting or default.
+        const customGreeting =
+          typeof settings.greeting === "string" && settings.greeting.trim()
+            ? settings.greeting.trim().slice(0, 3000)
+            : "";
+        const greeting = customGreeting || DEFAULT_GREETING;
         const statePayload = {
           t: "tinadmin_outbound_assistant",
           a: campaign.assistant_id,
           tid: campaign.tenant_id,
-          ...(greeting ? { g: greeting } : {}),
+          g: greeting,
         };
         const clientState = Buffer.from(JSON.stringify(statePayload), "utf8").toString("base64");
         try {

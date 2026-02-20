@@ -34,6 +34,7 @@ export default function CampaignDetailPage() {
   const [processing, setProcessing] = useState(false);
   const [message, setMessage] = useState<{ type: "error" | "success" | "warning"; text: string } | null>(null);
   const [connectionIdEdit, setConnectionIdEdit] = useState("");
+  const [greetingEdit, setGreetingEdit] = useState("");
   const [savingConnectionId, setSavingConnectionId] = useState(false);
   const [telnyxApplications, setTelnyxApplications] = useState<
     { value: string; label: string }[]
@@ -97,8 +98,11 @@ export default function CampaignDetailPage() {
   }, [id]);
 
   useEffect(() => {
-    const cid = (campaign?.settings as Record<string, unknown> | undefined)?.connection_id;
+    const s = campaign?.settings as Record<string, unknown> | undefined;
+    const cid = s?.connection_id;
+    const g = s?.greeting;
     setConnectionIdEdit(typeof cid === "string" ? cid : "");
+    setGreetingEdit(typeof g === "string" ? g : "");
   }, [campaign?.id, campaign?.settings]);
 
   const handleSaveConnectionId = async () => {
@@ -106,11 +110,15 @@ export default function CampaignDetailPage() {
     setSavingConnectionId(true);
     setMessage(null);
     try {
-      const nextSettings = { ...(campaign.settings || {}), connection_id: connectionIdEdit.trim() || null };
+      const nextSettings = {
+        ...(campaign.settings || {}),
+        connection_id: connectionIdEdit.trim() || null,
+        greeting: greetingEdit.trim().slice(0, 3000) || null,
+      };
       const res = await updateCampaign(id, { settings: nextSettings });
       if (res.ok) {
         setCampaign({ ...campaign, settings: nextSettings });
-        setMessage({ type: "success", text: "Call Control App ID saved. Use Process now to retry." });
+        setMessage({ type: "success", text: "Voice settings (connection & greeting) saved. Use Process now to retry." });
       } else {
         setMessage({ type: "error", text: res.error });
       }
@@ -370,6 +378,21 @@ export default function CampaignDetailPage() {
                       {telnyxApplicationsError}
                     </p>
                   )}
+                </div>
+                <div className="mt-3">
+                  <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Greeting (optional)</label>
+                  <textarea
+                    className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm"
+                    rows={3}
+                    maxLength={3000}
+                    placeholder="Hello, thanks for taking our call. How can I help you today?"
+                    value={greetingEdit}
+                    onChange={(e) => setGreetingEdit(e.target.value)}
+                    aria-label="Custom greeting when contact answers"
+                  />
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    First thing the AI says when the contact answers. Leave blank for default.
+                  </p>
                 </div>
                 <Button
                   onClick={handleSaveConnectionId}
