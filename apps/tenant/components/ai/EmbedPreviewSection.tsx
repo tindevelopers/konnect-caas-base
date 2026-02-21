@@ -255,48 +255,74 @@ export default function EmbedPreviewSection({
             )}
           </div>
 
-          {/* Section 2: Telnyx Voice Widget Snippet */}
+          {/* Section 2: Telnyx AI Agent — Embed on any website (chat + voice) */}
           <div className="mt-6">
             <h5 className="text-sm font-medium text-gray-800 dark:text-white/90">
-              Telnyx Voice Widget
+              Embed on external website (Telnyx AI Agent)
             </h5>
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              Paste the embed snippet from{" "}
-              <a
-                href="https://portal.telnyx.com/#/ai/assistants"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="underline"
-              >
-                Telnyx Mission Control
-              </a>{" "}
-              (AI Assistants → Widget tab). This enables voice + transcript on your website.
+              Copy this code and paste it into your website’s HTML (e.g. before{" "}
+              <code className="rounded bg-gray-100 px-1 dark:bg-gray-800">&lt;/body&gt;</code>
+              ). Uses the official Telnyx widget for chat + browser call. No backend required.
             </p>
-            <textarea
-              className="mt-2 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-mono dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
-              rows={4}
-              placeholder='<script src="https://...telnyx widget snippet..."></script>'
-              value={telnyxSnippet}
-              onChange={(e) => {
-                setTelnyxSnippet(e.target.value);
-                setSnippetSaved(false);
-              }}
-            />
-            <div className="mt-2 flex items-center gap-3">
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={!telnyxSnippet.trim()}
-                onClick={() => setSnippetSaved(true)}
+            <div className="mt-2 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/60">
+              <pre className="whitespace-pre-wrap break-all text-xs font-mono text-gray-700 dark:text-gray-300">
+                {`<!-- Telnyx AI Agent widget: chat + voice -->
+<telnyx-ai-agent
+  agent-id="${assistantId}"
+  environment="production">
+</telnyx-ai-agent>
+<script async src="https://unpkg.com/@telnyx/ai-agent-widget@next"></script>`}
+              </pre>
+              <button
+                type="button"
+                onClick={() =>
+                  handleCopy(
+                    `<!-- Telnyx AI Agent widget: chat + voice -->\n<telnyx-ai-agent\n  agent-id="${assistantId}"\n  environment="production">\n</telnyx-ai-agent>\n<script async src="https://unpkg.com/@telnyx/ai-agent-widget@next"></script>`,
+                    "telnyxEmbed"
+                  )
+                }
+                className="mt-2 text-xs text-indigo-600 hover:text-indigo-800 dark:text-indigo-400"
               >
-                {snippetSaved ? "Saved" : "Save Snippet"}
-              </Button>
-              {snippetSaved && (
-                <span className="text-xs text-green-600 dark:text-green-400">
-                  Snippet stored for this session.
-                </span>
-              )}
+                {copied === "telnyxEmbed" ? "Copied!" : "Copy embed code"}
+              </button>
             </div>
+            <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">
+              <strong>Note:</strong> The JSON from the Widget tab (theme, start_call_text, etc.) is
+              configuration saved in Telnyx Mission Control — do not paste it as script. The widget
+              above uses that config automatically when you set <code className="rounded bg-gray-100 px-1 dark:bg-gray-800">agent-id</code>.
+            </p>
+            {/* Optional: user can still paste a custom snippet if they have one */}
+            <details className="mt-3">
+              <summary className="cursor-pointer text-xs font-medium text-gray-600 dark:text-gray-400">
+                I have a custom snippet from Telnyx Mission Control
+              </summary>
+              <textarea
+                className="mt-2 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-mono dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
+                rows={3}
+                placeholder='<telnyx-ai-agent agent-id="..." ...></telnyx-ai-agent>\n<script src="..."></script>'
+                value={telnyxSnippet}
+                onChange={(e) => {
+                  setTelnyxSnippet(e.target.value);
+                  setSnippetSaved(false);
+                }}
+              />
+              <div className="mt-2 flex items-center gap-3">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={!telnyxSnippet.trim()}
+                  onClick={() => setSnippetSaved(true)}
+                >
+                  {snippetSaved ? "Saved" : "Save Snippet"}
+                </Button>
+                {snippetSaved && (
+                  <span className="text-xs text-green-600 dark:text-green-400">
+                    Snippet stored for this session.
+                  </span>
+                )}
+              </div>
+            </details>
           </div>
 
           {/* Section 3: Answer API Example */}

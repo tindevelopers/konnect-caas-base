@@ -6,7 +6,7 @@ import Button from "@/components/ui/button/Button";
 import { Modal } from "@/components/ui/modal";
 import Alert from "@/components/ui/alert/Alert";
 import { useModal } from "@/hooks/useModal";
-import { CallIcon, CopyIcon, PencilIcon } from "@/icons";
+import { CallIcon, CopyIcon, PencilIcon, ChatIcon } from "@/icons";
 import {
   callAssistantAction,
   cloneAssistantAction,
@@ -25,6 +25,7 @@ import CallStatusModal from "./CallStatusModal";
 import WebcallModal from "./WebcallModal";
 import AudioStreamPlayer from "./AudioStreamPlayer";
 import EmbedPreviewSection from "./EmbedPreviewSection";
+import TelnyxWidgetModal from "./TelnyxWidgetModal";
 
 interface AssistantActionsProps {
   assistantId: string;
@@ -98,6 +99,7 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
   const [newCallControlAppName, setNewCallControlAppName] = useState("Voice / AI Assistant");
 
   const webcallModal = useModal();
+  const testChatModal = useModal();
 
   useEffect(() => {
     if (!assistantId) return;
@@ -299,6 +301,10 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
     webcallModal.openModal();
   }, [webcallModal]);
 
+  const handleTestChat = useCallback(() => {
+    testChatModal.openModal();
+  }, [testChatModal]);
+
 
   return (
     <div className="mt-8 rounded-2xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-900">
@@ -325,6 +331,13 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
           onClick={openCallModal}
         >
           Call Assistant
+        </Button>
+        <Button
+          variant="outline"
+          startIcon={<ChatIcon className="h-4 w-4" />}
+          onClick={handleTestChat}
+        >
+          Test Chat
         </Button>
         <Button
           variant="outline"
@@ -787,6 +800,13 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
       <WebcallModal
         isOpen={webcallModal.isOpen}
         onClose={webcallModal.closeModal}
+        assistantId={assistantId}
+      />
+
+      {/* Test Chat — official Telnyx AI Agent widget (same as Mission Control demo) */}
+      <TelnyxWidgetModal
+        isOpen={testChatModal.isOpen}
+        onClose={testChatModal.closeModal}
         assistantId={assistantId}
       />
 
