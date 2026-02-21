@@ -86,6 +86,7 @@ function resolveCallPayload(payload: Record<string, unknown>): Record<string, un
 /** Start AI assistant on outbound call when it is answered (set by callAssistantAction via client_state). */
 async function handleOutboundCallAnsweredAssistant(payload: Record<string, unknown>) {
   const eventType = resolveEventType(payload);
+  const normalizedEventType = eventType.replaceAll("_", ".");
   const callPayload = resolveCallPayload(payload);
   const direction = callPayload.direction as string | undefined;
   const clientStateRaw =
@@ -94,24 +95,30 @@ async function handleOutboundCallAnsweredAssistant(payload: Record<string, unkno
 
   // #region agent log
   const hasClientState = !!(clientStateRaw && typeof clientStateRaw === "string");
-  console.log("[TelnyxWebhook:outbound-entry]", { eventType, direction, hasClientState });
+  console.log("[TelnyxWebhook:outbound-entry]", {
+    eventType,
+    normalizedEventType,
+    direction,
+    hasClientState,
+  });
   fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       location: "call-events/route.ts:handleOutbound-entry",
       message: "handleOutboundCallAnsweredAssistant entry",
-      data: { eventType, direction, hasClientState },
+      data: { eventType, normalizedEventType, direction, hasClientState },
       timestamp: Date.now(),
       hypothesisId: "H3",
     }),
   }).catch(() => {});
   // #endregion
 
-  if (eventType !== "call.answered") return;
+  if (normalizedEventType !== "call.answered") return;
 
-  // Telnyx sends "outbound" for outbound calls; accept both.
-  if (direction !== "outgoing" && direction !== "outbound") return;
+  // Some Telnyx event payloads omit `direction`. If direction is present, ensure it's outbound;
+  // otherwise rely on our client_state marker (`tinadmin_outbound_assistant`) to scope behavior.
+  if (direction && direction !== "outgoing" && direction !== "outbound") return;
 
   if (!clientStateRaw || typeof clientStateRaw !== "string") return;
 
