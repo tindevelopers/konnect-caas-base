@@ -123,10 +123,11 @@ export default function CampaignDetailPage() {
       setAssistantReadiness(null);
       return;
     }
+    const assistantId = campaign.assistant_id!;
     let cancelled = false;
     setAssistantReadinessLoading(true);
     setAssistantReadiness(null);
-    getAssistantAction(campaign.assistant_id)
+    getAssistantAction(assistantId)
       .then((assistant) => {
         if (cancelled || !assistant) return;
         const vs = (assistant.voice_settings ?? {}) as Record<string, unknown>;
@@ -134,7 +135,7 @@ export default function CampaignDetailPage() {
         const enabled = (assistant.enabled_features ?? []) as string[];
         const telephonyEnabled = enabled.includes("telephony");
         setAssistantReadiness({
-          name: (assistant.name ?? "Assistant").trim() || campaign.assistant_id,
+          name: (assistant.name ?? "Assistant").trim() || assistantId || "Assistant",
           voiceConfigured,
           telephonyEnabled,
         });

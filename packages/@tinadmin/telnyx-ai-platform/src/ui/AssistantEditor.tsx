@@ -7,6 +7,13 @@ import {
 import { TelnyxAssistantsApi, useAssistantEditor } from "../headless/useAssistants";
 import type { TelnyxIntegration } from "../types/integrations";
 import type { TelnyxCreateIntegrationSecretRequest } from "../types/integrationSecrets";
+import {
+  isVoiceInCatalog,
+  modelsByProvider,
+  parseTelnyxVoiceConfig,
+  voiceProviders,
+  voicesByProviderModel,
+} from "../voices/telnyxVoiceCatalog";
 
 type EditorTab =
   | "Agent"
@@ -183,6 +190,7 @@ export function AssistantEditor({
   const [draft, setDraft] = useState<TelnyxAssistant | null>(null);
   const [jsonFields, setJsonFields] = useState<Record<string, string>>({});
   const [jsonError, setJsonError] = useState<string | null>(null);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [voiceSettings, setVoiceSettings] = useState({
@@ -232,23 +240,24 @@ export function AssistantEditor({
       });
 
       const voice = (assistant.voice_settings ?? {}) as Record<string, unknown>;
+      const voiceValue = typeof voice.voice === "string" ? voice.voice : "";
+      const parsed = voiceValue ? parseTelnyxVoiceConfig(voiceValue) : null;
+      const modelFromField =
+        typeof voice.model === "string" && voice.model.trim() ? voice.model.trim() : "";
       setVoiceSettings((prev) => ({
-        provider:
-          typeof voice.provider === "string" && voice.provider.trim()
-            ? voice.provider.trim()
-            : typeof (voice as { type?: string }).type === "string"
-              ? (voice as { type: string }).type.trim()
-              : prev.provider,
+        // Telnyx-only catalog (v1): default provider to telnyx.
+        provider: "telnyx",
         model:
-          typeof voice.model === "string" && voice.model.trim()
-            ? voice.model.trim()
-            : prev.model,
-        voice: typeof voice.voice === "string" ? voice.voice : "",
+          parsed && modelFromField && modelFromField !== parsed.model
+            ? parsed.model
+            : modelFromField || parsed?.model || prev.model,
+        voice: voiceValue,
         voice_speed:
           typeof voice.voice_speed === "number" || typeof voice.voice_speed === "string"
             ? String(voice.voice_speed)
             : "",
       }));
+      setVoiceError(null);
 
       const transcription = (assistant.transcription ?? {}) as Record<string, unknown>;
       setTranscriptionModel(
@@ -269,6 +278,40 @@ export function AssistantEditor({
       setDynamicVariables(entries.length > 0 ? entries : [{ key: "", value: "" }]);
     }
   }, [assistant]);
+
+  const providerOptions = voiceProviders;
+
+  const modelOptions = useMemo(() => {
+    const provider = (voiceSettings.provider || "").trim() as "telnyx" | "";
+    if (!provider) return [];
+    const base = modelsByProvider[provider] ?? [];
+    const selected = (voiceSettings.model || "").trim();
+    if (!selected) return base;
+    const exists = base.some((m) => m.id === (selected as any));
+    return exists
+      ? base
+      : [{ id: selected as any, label: `Current model (${selected})` }, ...base];
+  }, [voiceSettings.provider, voiceSettings.model]);
+
+  const voiceOptions = useMemo(() => {
+    const provider = (voiceSettings.provider || "").trim() as "telnyx" | "";
+    const model = (voiceSettings.model || "").trim();
+    const current = (voiceSettings.voice || "").trim();
+
+    if (!provider || !model) {
+      return current
+        ? [{ value: current, voiceId: current, label: `Current value: ${current}` }]
+        : [];
+    }
+
+    const base =
+      (voicesByProviderModel[provider] as Record<string, any> | undefined)?.[model] ??
+      [];
+    const hasCurrent = current && base.some((v: any) => v.value === current);
+    return current && !hasCurrent
+      ? [{ value: current, voiceId: current, label: `Current value: ${current}` }, ...base]
+      : base;
+  }, [voiceSettings.provider, voiceSettings.model, voiceSettings.voice]);
 
   const availableIntegrations = useMemo(() => {
     const fromTelnyx = integrations ?? [];
@@ -532,6 +575,7 @@ export function AssistantEditor({
   const handleSave = useCallback(async () => {
     if (!draft) return;
     setJsonError(null);
+    setVoiceError(null);
     setSuccessMessage(null);
 
     const toolsResult = parseJsonField(jsonFields.tools ?? "", "Tools", true);
@@ -570,6 +614,68 @@ export function AssistantEditor({
       return;
     }
 
+    // Voice selection required (Provider -> Model -> Voice) for Telnyx voices.
+    // If the assistant already has a non-Telnyx voice configured, allow saving other fields
+    // without forcing migration, but keep the existing voice_settings unchanged unless user
+    // selects a Telnyx voice from the picker.
+    const provider = (voiceSettings.provider || "").trim();
+    const model = (voiceSettings.model || "").trim();
+    const selectedVoice = (voiceSettings.voice || "").trim();
+    const existingVoiceRaw =
+      (draft.voice_settings as Record<string, unknown> | undefined)?.voice;
+    const existingVoice =
+      (typeof existingVoiceRaw === "string" ? existingVoiceRaw : "").trim();
+
+    if (!selectedVoice && !existingVoice) {
+      setVoiceError("Select Voice Provider, Voice Model, and Voice before saving.");
+      return;
+    }
+
+    const unchangedLegacyVoice =
+      selectedVoice && existingVoice && selectedVoice === existingVoice && !parseTelnyxVoiceConfig(selectedVoice);
+
+    let nextVoiceSettings: Record<string, unknown> | null = null;
+    if (unchangedLegacyVoice) {
+      nextVoiceSettings = {
+        ...((draft.voice_settings as Record<string, unknown>) ?? {}),
+        ...(voiceSettings.voice_speed !== ""
+          ? { voice_speed: Number(voiceSettings.voice_speed) }
+          : {}),
+      };
+    } else {
+      if (!provider || !model || !selectedVoice) {
+        setVoiceError("Select Voice Provider, Voice Model, and Voice before saving.");
+        return;
+      }
+
+      const parsed = parseTelnyxVoiceConfig(selectedVoice);
+      if (!parsed || parsed.provider !== "telnyx") {
+        setVoiceError("Voice must be a valid Telnyx voice (e.g. Telnyx.KokoroTTS.af).");
+        return;
+      }
+
+      if (parsed.model !== model) {
+        setVoiceError("Selected Voice does not match the selected Voice Model.");
+        return;
+      }
+
+      const isLegacyCurrent = selectedVoice === existingVoice;
+      if (!isVoiceInCatalog(selectedVoice) && !isLegacyCurrent) {
+        setVoiceError(
+          "Selected Voice is not in the supported list. Choose a supported voice, or keep the current value."
+        );
+        return;
+      }
+
+      nextVoiceSettings = {
+        provider,
+        model,
+        voice: selectedVoice,
+        voice_speed:
+          voiceSettings.voice_speed !== "" ? Number(voiceSettings.voice_speed) : undefined,
+      };
+    }
+
     const enabled: string[] = [];
     if (enabledFeatures.telephony) enabled.push("telephony");
     if (enabledFeatures.messaging) enabled.push("messaging");
@@ -581,24 +687,10 @@ export function AssistantEditor({
         return acc;
       }, {});
 
-      const voice =
-        voiceSettings.voice?.trim() ||
-        (draft.voice_settings as Record<string, unknown>)?.voice;
-      const payload: TelnyxUpdateAssistantRequest = {
+    const payload: TelnyxUpdateAssistantRequest = {
       ...toUpdatePayload(draft),
       tools: toolsResult.value as Record<string, unknown>[],
-      voice_settings:
-        typeof voice === "string" && voice
-          ? {
-              provider: voiceSettings.provider || undefined,
-              model: voiceSettings.model || undefined,
-              voice,
-              voice_speed:
-                voiceSettings.voice_speed !== ""
-                  ? Number(voiceSettings.voice_speed)
-                  : undefined,
-            }
-          : (draft.voice_settings as Record<string, unknown>),
+      voice_settings: nextVoiceSettings ?? undefined,
       transcription: transcriptionModel ? { model: transcriptionModel } : {},
       telephony_settings: telephonyResult.value as Record<string, unknown>,
       messaging_settings: messagingResult.value as Record<string, unknown>,
@@ -613,7 +705,19 @@ export function AssistantEditor({
     if (updated) {
       setSuccessMessage("Assistant updated.");
     }
-  }, [draft, jsonFields, save]);
+  }, [
+    draft,
+    jsonFields,
+    save,
+    enabledFeatures.messaging,
+    enabledFeatures.telephony,
+    dynamicVariables,
+    transcriptionModel,
+    voiceSettings.model,
+    voiceSettings.provider,
+    voiceSettings.voice,
+    voiceSettings.voice_speed,
+  ]);
 
   const appendWebhookTool = useCallback(
     (server: McpServerDescriptor) => {
@@ -699,10 +803,11 @@ export function AssistantEditor({
         <div className="flex flex-wrap gap-2">{tabs}</div>
       </div>
 
-      {(error || jsonError || successMessage) && (
+      {(error || jsonError || voiceError || successMessage) && (
         <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm dark:border-gray-800 dark:bg-gray-900">
           {error && <p className="text-red-600">{error}</p>}
           {jsonError && <p className="text-red-600">{jsonError}</p>}
+          {voiceError && <p className="text-red-600">{voiceError}</p>}
           {successMessage && <p className="text-green-600">{successMessage}</p>}
         </div>
       )}
@@ -774,40 +879,77 @@ export function AssistantEditor({
             <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
               Voice Provider
             </label>
-            <input
+            <select
               value={voiceSettings.provider}
               onChange={(e) =>
-                setVoiceSettings((prev) => ({ ...prev, provider: e.target.value }))
+                setVoiceSettings((prev) => ({
+                  ...prev,
+                  provider: e.target.value,
+                  model: "",
+                  voice: "",
+                }))
               }
               className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900"
-              placeholder="telnyx"
-            />
+            >
+              <option value="">Select a provider…</option>
+              {providerOptions.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
           </div>
           <div>
             <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
               Voice Model
             </label>
-            <input
+            <select
               value={voiceSettings.model}
               onChange={(e) =>
-                setVoiceSettings((prev) => ({ ...prev, model: e.target.value }))
+                setVoiceSettings((prev) => ({
+                  ...prev,
+                  model: e.target.value,
+                  voice: "",
+                }))
               }
-              className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900"
-              placeholder="NaturalHD"
-            />
+              disabled={!voiceSettings.provider}
+              className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:opacity-60 dark:border-gray-700 dark:bg-gray-900"
+            >
+              <option value="">Select a model…</option>
+              {modelOptions.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
           </div>
           <div>
             <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
               Voice
             </label>
-            <input
+            <select
               value={voiceSettings.voice}
               onChange={(e) =>
                 setVoiceSettings((prev) => ({ ...prev, voice: e.target.value }))
               }
-              className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900"
-              placeholder="astra"
-            />
+              disabled={!voiceSettings.provider || !voiceSettings.model}
+              className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:opacity-60 dark:border-gray-700 dark:bg-gray-900"
+            >
+              <option value="">
+                {voiceSettings.provider && voiceSettings.model
+                  ? "Select a voice…"
+                  : "Select provider and model first…"}
+              </option>
+              {voiceOptions.map((v: any) => (
+                <option key={v.value} value={v.value}>
+                  {v.label}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              Required. Stored as a VoiceConfig string like{" "}
+              <span className="font-mono">Telnyx.KokoroTTS.af_bella</span>.
+            </p>
           </div>
           <div>
             <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
