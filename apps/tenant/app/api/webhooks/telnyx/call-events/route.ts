@@ -114,7 +114,14 @@ async function handleOutboundCallAnsweredAssistant(payload: Record<string, unkno
   }).catch(() => {});
   // #endregion
 
-  if (normalizedEventType !== "call.answered") return;
+  // Some Telnyx setups emit `call.conversation.started` without a `call.answered` webhook.
+  // Treat both as “answered-equivalent” triggers for starting the outbound assistant.
+  if (
+    normalizedEventType !== "call.answered" &&
+    normalizedEventType !== "call.conversation.started"
+  ) {
+    return;
+  }
 
   // Some Telnyx event payloads omit `direction`. If direction is present, ensure it's outbound;
   // otherwise rely on our client_state marker (`tinadmin_outbound_assistant`) to scope behavior.
@@ -546,10 +553,10 @@ async function updateCampaignRecipientFromCallEvent(
 
   if (!recipient) return;
 
-  const norm = eventType.toLowerCase();
+  const norm = eventType.toLowerCase().replaceAll("_", ".");
   let status: string | null = null;
 
-  if (norm === "call.answered") {
+  if (norm === "call.answered" || norm === "call.conversation.started") {
     status = "in_progress";
   } else if (norm === "call.hangup" || norm === "call.completed") {
     const data = payload.data as Record<string, unknown> | undefined;
