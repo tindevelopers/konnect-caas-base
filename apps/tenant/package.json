@@ -16,7 +16,7 @@
     "dev:all": "concurrently \"pnpm dev\" \"pnpm ws:server\""
   },
   "dependencies": {
-    "@ai-sdk/openai": "^2.0.0",
+    "@ai-sdk/openai": "^3.0.30",
     "@builder.io/react": "^9.1.0",
     "@fullcalendar/core": "^6.1.15",
     "@fullcalendar/daygrid": "^6.1.15",
