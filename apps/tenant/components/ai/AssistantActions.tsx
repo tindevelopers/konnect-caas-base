@@ -6,7 +6,7 @@ import Button from "@/components/ui/button/Button";
 import { Modal } from "@/components/ui/modal";
 import Alert from "@/components/ui/alert/Alert";
 import { useModal } from "@/hooks/useModal";
-import { CallIcon, ChatIcon, CopyIcon, PencilIcon } from "@/icons";
+import { CallIcon, CopyIcon, PencilIcon, ChatIcon } from "@/icons";
 import {
   callAssistantAction,
   cloneAssistantAction,
