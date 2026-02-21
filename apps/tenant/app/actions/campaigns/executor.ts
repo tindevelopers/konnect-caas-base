@@ -48,7 +48,7 @@ export async function processCampaignVoiceBatch(
   const now = new Date().toISOString();
 
   let campaignsQuery = (admin.from("campaigns") as any)
-    .select("id, tenant_id, assistant_id, from_number, settings")
+    .select("id, tenant_id, assistant_id, from_number, settings, max_concurrent_calls")
     .eq("status", "running")
     .eq("campaign_type", "voice");
 
@@ -62,10 +62,23 @@ export async function processCampaignVoiceBatch(
     return { processed: 0, errors: [] };
   }
 
+  const DEFAULT_GREETING = "Hello, thanks for taking our call. How can I help you today?";
+
   for (const campaign of campaigns) {
+    // Normalize settings (JSONB can sometimes be string from DB/driver)
+    const settings =
+      typeof campaign.settings === "string"
+        ? (() => {
+            try {
+              return JSON.parse(campaign.settings) as Record<string, unknown>;
+            } catch {
+              return {};
+            }
+          })()
+        : (campaign.settings as Record<string, unknown> | undefined) ?? {};
+
     const connectionId =
-      (campaign.settings?.connection_id as string) ??
-      process.env.TELNYX_CONNECTION_ID;
+      (settings.connection_id as string) ?? process.env.TELNYX_CONNECTION_ID;
 
     if (!connectionId?.trim()) {
       errors.push(`Campaign ${campaign.id}: No connection_id configured`);
@@ -86,13 +99,16 @@ export async function processCampaignVoiceBatch(
 
     const transport = createTelnyxClient({ apiKey });
 
+    // Cap batch size by campaign max_concurrent_calls to avoid Telnyx "connection channel limit exceeded" (90043)
+    const batchSize = Math.min(10, Math.max(1, Number(campaign.max_concurrent_calls) || 10));
+
     const { data: recipients } = await (admin.from("campaign_recipients") as any)
       .select("id, phone, first_name, last_name, attempts")
       .eq("campaign_id", campaign.id)
       .eq("tenant_id", campaign.tenant_id)
       .eq("status", "scheduled")
       .lte("scheduled_at", now)
-      .limit(10);
+      .limit(batchSize);
 
     if (!recipients?.length) continue;
 
@@ -116,22 +132,59 @@ export async function processCampaignVoiceBatch(
           throw new Error("No call_control_id in response");
         }
 
-        const startResponse = await transport.request(
-          `/calls/${callControlId}/actions/ai_assistant_start`,
-          {
+        // Telnyx requires the call to be answered before ai_assistant_start. Set client_state
+        // so the webhook can start the assistant on call.answered (same pattern as callAssistantAction).
+        // Always include g (greeting) so the webhook has it; use campaign greeting or default.
+        const customGreeting =
+          typeof settings.greeting === "string" && settings.greeting.trim()
+            ? settings.greeting.trim().slice(0, 3000)
+            : "";
+        const greeting = customGreeting || DEFAULT_GREETING;
+        const statePayload = {
+          t: "tinadmin_outbound_assistant",
+          a: campaign.assistant_id,
+          tid: campaign.tenant_id,
+          g: greeting,
+        };
+        const clientState = Buffer.from(JSON.stringify(statePayload), "utf8").toString("base64");
+        try {
+          await transport.request(
+            `/calls/${callControlId}/actions/client_state_update`,
+            { method: "PUT", body: { client_state: clientState } }
+          );
+          // #region agent log
+          fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
             method: "POST",
-            body: {
-              assistant: { id: campaign.assistant_id },
-            },
-          }
-        );
-        const conversationId = extractConversationId(startResponse);
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              location: "executor.ts:client_state_update",
+              message: "client_state_update succeeded",
+              data: { campaignId: campaign.id, callControlId },
+              timestamp: Date.now(),
+              hypothesisId: "H5",
+            }),
+          }).catch(() => {});
+          // #endregion
+        } catch (stateErr) {
+          // #region agent log
+          fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              location: "executor.ts:client_state_update-err",
+              message: "client_state_update failed",
+              data: { campaignId: campaign.id, error: stateErr instanceof Error ? stateErr.message : String(stateErr) },
+              timestamp: Date.now(),
+              hypothesisId: "H5",
+            }),
+          }).catch(() => {});
+          // #endregion
+          // Log but continue; webhook may still start assistant if state was set elsewhere
+          console.warn("[CampaignExecutor] client_state_update failed:", stateErr);
+        }
 
         await (admin.from("campaign_recipients") as any)
-          .update({
-            call_control_id: callControlId,
-            conversation_id: conversationId ?? null,
-          })
+          .update({ call_control_id: callControlId })
           .eq("id", r.id);
 
         await (admin.from("campaign_events") as any).insert({
@@ -146,7 +199,7 @@ export async function processCampaignVoiceBatch(
         processed++;
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        errors.push(`Recipient ${r.id}: ${msg}`);
+        errors.push(`Campaign ${campaign.id}: Recipient ${r.id}: ${msg}`);
         await (admin.from("campaign_recipients") as any)
           .update({ status: "failed", result: { error: msg } })
           .eq("id", r.id);

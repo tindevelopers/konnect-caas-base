@@ -5,6 +5,11 @@
   "buildCommand": "pnpm build",
   "outputDirectory": ".next",
   "framework": "nextjs",
-  "regions": ["iad1"]
+  "regions": ["iad1"],
+  "crons": [
+    {
+      "path": "/api/campaigns/process",
+      "schedule": "*/2 * * * *"
+    }
+  ]
 }
-

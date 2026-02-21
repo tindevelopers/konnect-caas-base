@@ -232,15 +232,23 @@ export function AssistantEditor({
       });
 
       const voice = (assistant.voice_settings ?? {}) as Record<string, unknown>;
-      setVoiceSettings({
-        provider: typeof voice.provider === "string" ? voice.provider : "",
-        model: typeof voice.model === "string" ? voice.model : "",
+      setVoiceSettings((prev) => ({
+        provider:
+          typeof voice.provider === "string" && voice.provider.trim()
+            ? voice.provider.trim()
+            : typeof (voice as { type?: string }).type === "string"
+              ? (voice as { type: string }).type.trim()
+              : prev.provider,
+        model:
+          typeof voice.model === "string" && voice.model.trim()
+            ? voice.model.trim()
+            : prev.model,
         voice: typeof voice.voice === "string" ? voice.voice : "",
         voice_speed:
           typeof voice.voice_speed === "number" || typeof voice.voice_speed === "string"
             ? String(voice.voice_speed)
             : "",
-      });
+      }));
 
       const transcription = (assistant.transcription ?? {}) as Record<string, unknown>;
       setTranscriptionModel(

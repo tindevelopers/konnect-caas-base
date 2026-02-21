@@ -124,10 +124,14 @@ export default function NewCampaignPage() {
   // Step 3: Content
   const [assistants, setAssistants] = useState<{ id: string; name?: string }[]>([]);
   const [numbers, setNumbers] = useState<{ phone_number: string }[]>([]);
+  const [telnyxApplications, setTelnyxApplications] = useState<
+    { value: string; label: string }[]
+  >([]);
   const [assistantId, setAssistantId] = useState("");
   const [fromNumber, setFromNumber] = useState("");
   const [messageTemplate, setMessageTemplate] = useState("");
   const [connectionId, setConnectionId] = useState("");
+  const [greeting, setGreeting] = useState("");
   const [contentOptionsLoading, setContentOptionsLoading] = useState(false);
   const [contentOptionsError, setContentOptionsError] = useState<string | null>(null);
 
@@ -351,9 +355,13 @@ export default function NewCampaignPage() {
     setContentOptionsError(null);
     setContentOptionsLoading(true);
     try {
-      const [aList, nList] = await Promise.all([
+      const [aList, nList, appRes] = await Promise.all([
         listAssistantsAction(),
         listOwnedPhoneNumbersAction({ pageNumber: 1, pageSize: 50 }),
+        fetch("/api/integrations/telnyx/applications", {
+          method: "GET",
+          cache: "no-store",
+        }),
       ]);
       // listAssistantsAction returns { data: [...] } (tenant-filtered) or { error: string }
       const aResult = aList as { data?: unknown[]; error?: string };
@@ -373,10 +381,33 @@ export default function NewCampaignPage() {
       setNumbers(numData.map((n: any) => ({ phone_number: n.phone_number ?? n.id })));
       const firstNum = numData[0];
       if (firstNum?.phone_number) setFromNumber((prev) => prev || firstNum.phone_number);
+
+      let appOptions: { value: string; label: string }[] = [];
+      try {
+        const appBody = (await appRes.json()) as {
+          options?: { value: string; label: string }[];
+          error?: string;
+        };
+        if (!appRes.ok) {
+          throw new Error(appBody?.error ?? "Failed to load Telnyx applications");
+        }
+        appOptions = Array.isArray(appBody.options) ? appBody.options : [];
+      } catch (appErr) {
+        throw new Error(
+          appErr instanceof Error ? appErr.message : "Failed to load Telnyx applications"
+        );
+      }
+      setTelnyxApplications(appOptions);
+      if (appOptions[0]) setConnectionId((prev) => prev || appOptions[0].value);
     } catch (e) {
       console.error("Load content options:", e);
-      setContentOptionsError(e instanceof Error ? e.message : "Failed to load assistants and numbers");
+      setContentOptionsError(
+        e instanceof Error
+          ? e.message
+          : "Failed to load assistants, numbers, and Telnyx applications"
+      );
       setAssistants([]);
+      setTelnyxApplications([]);
     } finally {
       setContentOptionsLoading(false);
     }
@@ -458,6 +489,10 @@ export default function NewCampaignPage() {
         setError("Please select an AI assistant");
         return;
       }
+      if (campaignType === "voice" && !connectionId) {
+        setError("Please select a Telnyx Call Control application");
+        return;
+      }
       if (!fromNumber) {
         setError("Please select a from number");
         return;
@@ -480,7 +515,10 @@ export default function NewCampaignPage() {
           max_attempts: maxAttempts,
           retry_delay_minutes: retryDelayMinutes,
           calls_per_minute: callsPerMinute,
-          settings: connectionId ? { connection_id: connectionId } : {},
+          settings: {
+            ...(connectionId ? { connection_id: connectionId } : {}),
+            ...(greeting.trim() ? { greeting: greeting.trim().slice(0, 3000) } : {}),
+          },
         });
         if (!res.ok) {
           setError(res.error);
@@ -1123,14 +1161,46 @@ export default function NewCampaignPage() {
                   )}
                 </div>
                 <div>
-                  <label className="block text-sm font-medium mb-1">Connection ID (optional)</label>
-                  <input
-                    type="text"
+                  <label className="block text-sm font-medium mb-1">
+                    Telnyx Call Control Application
+                  </label>
+                  <select
                     value={connectionId}
                     onChange={(e) => setConnectionId(e.target.value)}
-                    placeholder="Call Control connection ID"
+                    disabled={contentOptionsLoading}
+                    className="w-full px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700 disabled:opacity-60"
+                    aria-label="Select a Telnyx Call Control application"
+                  >
+                    <option value="">
+                      {contentOptionsLoading
+                        ? "Loading applications..."
+                        : telnyxApplications.length === 0
+                          ? "No Call Control applications found"
+                          : "Select an application"}
+                    </option>
+                    {telnyxApplications.map((app) => (
+                      <option key={app.value} value={app.value}>
+                        {app.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">
+                    Greeting (optional)
+                  </label>
+                  <textarea
+                    value={greeting}
+                    onChange={(e) => setGreeting(e.target.value)}
+                    placeholder="Hello, thanks for taking our call. How can I help you today?"
+                    rows={3}
+                    maxLength={3000}
                     className="w-full px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700"
+                    aria-label="Custom greeting when contact answers"
                   />
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    First thing the AI says when the contact answers. Leave blank to use the default.
+                  </p>
                 </div>
               </>
             )}

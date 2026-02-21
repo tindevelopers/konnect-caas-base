@@ -33,9 +33,10 @@ Place Telnyx actions in `app/actions/telnyx/`:
 
 ## Skills Available
 
-Cursor has skills for Telnyx APIs — reference them for SDK examples:
-- Voice (Call Control)
-- Messaging (SMS/MMS)
-- Numbers (search/order)
-- AI Assistants
-- Verify (OTP/lookup)
+Telnyx Agent Skills are in `.cursor/skills/` (see `.cursor/rules/telnyx-agent-skills.mdc` for the full list and usage). Reference them for SDK examples:
+- **telnyx-messaging-javascript**, **telnyx-messaging-profiles-javascript** — SMS/MMS, profiles, short codes
+- **telnyx-voice-javascript**, **telnyx-voice-media-javascript** — Call control, playback, TTS, recording
+- **telnyx-numbers-javascript** — Search, order, manage numbers
+- **telnyx-verify-javascript** — OTP, lookup, 2FA
+- **telnyx-ai-assistants-javascript** — AI voice assistants, knowledge bases
+- **telnyx-sip-javascript** — SIP trunking, outbound voice profiles

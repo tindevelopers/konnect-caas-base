@@ -1,0 +1,37 @@
+---
+description: Telnyx Agent Skills — use official Telnyx SDK knowledge for code generation
+globs: "**/*.ts,**/*.tsx,**/*.js"
+alwaysApply: false
+---
+
+# Telnyx Agent Skills (Cursor)
+
+This project uses **Telnyx Agent Skills** so the AI can write correct Telnyx SDK code. Skills are from the [official Telnyx agent skills repo](https://github.com/team-telnyx/telnyx-ext-agent-skills) and are installed under `.cursor/skills/`.
+
+**Quick start (Telnyx):** https://telnyx.com/resources/ai-agent-skills-claude-code#quick-start-install-in-30-seconds
+
+## In-Project Skills (JavaScript)
+
+Use the following skills when writing Telnyx integrations — they provide SDK setup, examples, and webhook references:
+
+| Skill | Use when |
+|-------|----------|
+| **telnyx-messaging-javascript** | Send/receive SMS/MMS, opt-outs, messaging numbers |
+| **telnyx-messaging-profiles-javascript** | Messaging profiles, number pools, short codes, auto-response |
+| **telnyx-voice-javascript** | Call control: dial, answer, hangup, transfer, bridge |
+| **telnyx-voice-media-javascript** | Playback, TTS, call recording |
+| **telnyx-numbers-javascript** | Search, order, manage phone numbers |
+| **telnyx-verify-javascript** | Phone verification, lookup, 2FA |
+| **telnyx-ai-assistants-javascript** | AI voice assistants, knowledge bases |
+| **telnyx-sip-javascript** | SIP trunking, outbound voice profiles, connections |
+
+## Usage
+
+- When the user asks to send SMS, build IVR, manage numbers, or use Telnyx APIs, **read the relevant skill** from `.cursor/skills/<skill-name>/SKILL.md` and follow its setup and code examples.
+- Prefer the `telnyx` npm package and the patterns shown in the skills (client init, error handling, webhook verification).
+- For more products (10DLC, TeXML, porting, etc.), raw SKILL.md files are available at:
+  `https://raw.githubusercontent.com/team-telnyx/telnyx-ext-agent-skills/main/telnyx-javascript/skills/telnyx-{product}-javascript/SKILL.md`
+
+## Project Telnyx Context
+
+See also `.cursor/rules/telnyx-integrations.mdc` for project-specific paths (config, voice router, webhooks, server actions).
