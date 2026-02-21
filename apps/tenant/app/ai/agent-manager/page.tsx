@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { listTenantAssistantsForVoiceAction } from "@/app/actions/telnyx/assistants";
 
 type Agent = {
   id: string;
@@ -98,6 +99,58 @@ export default function AgentManagerPage() {
     external_ref: "",
   });
   const [isCreating, setIsCreating] = useState(false);
+
+  /** Tenant-available agents with an external_ref, for the Agent ID dropdown */
+  const agentsWithExternalRef = useMemo(
+    () => agents.filter((a) => a.external_ref?.trim()),
+    [agents]
+  );
+
+  /** Tenant-scoped Telnyx assistants (id + name) for Agent ID dropdown */
+  const [tenantAssistants, setTenantAssistants] = useState<
+    Array<{ id: string; name: string }>
+  >([]);
+  const [assistantsLoading, setAssistantsLoading] = useState(false);
+
+  /** Combined options for Agent ID: Telnyx assistants + already-registered platform agents (deduped) */
+  const agentIdOptions = useMemo(() => {
+    const byValue = new Map<string, string>();
+    for (const a of tenantAssistants) {
+      if (a.id.trim()) byValue.set(a.id.trim(), a.name.trim() || a.id);
+    }
+    for (const a of agentsWithExternalRef) {
+      const ref = (a.external_ref ?? "").trim();
+      if (ref) byValue.set(ref, `${a.display_name} (registered)`);
+    }
+    return Array.from(byValue.entries()).map(([value, label]) => ({
+      value,
+      label,
+    }));
+  }, [tenantAssistants, agentsWithExternalRef]);
+
+  const fetchTenantAssistants = useCallback(async () => {
+    setAssistantsLoading(true);
+    try {
+      const result = await listTenantAssistantsForVoiceAction();
+      if ("error" in result && result.error) {
+        setTenantAssistants([]);
+        return;
+      }
+      setTenantAssistants("data" in result ? (result.data ?? []) : []);
+    } catch {
+      setTenantAssistants([]);
+    } finally {
+      setAssistantsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (createPayload.provider === "telnyx") {
+      void fetchTenantAssistants();
+    } else {
+      setTenantAssistants([]);
+    }
+  }, [createPayload.provider, fetchTenantAssistants]);
 
   const [bindingAgentId, setBindingAgentId] = useState<string | null>(null);
   const [listingExternalId, setListingExternalId] = useState("");
@@ -341,14 +394,46 @@ export default function AgentManagerPage() {
           <option value="telnyx">Premium / Enterprise Agent</option>
           <option value="abacus">Enterprise Agent</option>
         </select>
-        <input
-          value={createPayload.external_ref}
-          onChange={(e) =>
-            setCreatePayload((prev) => ({ ...prev, external_ref: e.target.value }))
-          }
-          placeholder="External ref (assistant_id/deployment_id)"
-          className="rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-800"
-        />
+        <div className="flex flex-col gap-1 lg:col-span-1">
+          <select
+            aria-label="Agent ID (external ref)"
+            value={
+              agentIdOptions.some((o) => o.value === createPayload.external_ref)
+                ? createPayload.external_ref
+                : ""
+            }
+            onChange={(e) =>
+              setCreatePayload((prev) => ({
+                ...prev,
+                external_ref: e.target.value,
+              }))
+            }
+            disabled={assistantsLoading && createPayload.provider === "telnyx"}
+            className="rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-800"
+          >
+            <option value="">
+              {createPayload.provider === "telnyx" && assistantsLoading
+                ? "Loading assistants..."
+                : "Select agent or enter below"}
+            </option>
+            {agentIdOptions.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+          <input
+            value={createPayload.external_ref}
+            onChange={(e) =>
+              setCreatePayload((prev) => ({
+                ...prev,
+                external_ref: e.target.value,
+              }))
+            }
+            placeholder="Or type external ref (assistant_id/deployment_id)"
+            className="rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-800"
+          />
+        </div>
         <button
           type="submit"
           disabled={isCreating}

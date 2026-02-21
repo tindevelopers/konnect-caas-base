@@ -308,7 +308,7 @@ export default function AudioStreamPlayer({
                 const sr = audioData.sampleRate;
                 const buffer = ctx.createBuffer(numChannels, numFrames, sr);
                 for (let i = 0; i < numChannels; i++) {
-                  audioData.copyTo(buffer.getChannelData(i) as ArrayBuffer, { planeIndex: i });
+                  audioData.copyTo(buffer.getChannelData(i) as unknown as ArrayBuffer, { planeIndex: i });
                 }
                 audioData.close();
                 audioBufferQueueRef.current.push(buffer);
@@ -326,11 +326,14 @@ export default function AudioStreamPlayer({
               console.error("[TELEMETRY] AudioStreamPlayer Opus decoder error", e);
             },
           });
-          opusDecoderRef.current.configure({
-            codec: "opus",
-            sampleRate: opusRate,
-            numberOfChannels: 1,
-          });
+          const decoder = opusDecoderRef.current;
+          if (decoder) {
+            decoder.configure({
+              codec: "opus",
+              sampleRate: opusRate,
+              numberOfChannels: 1,
+            });
+          }
         }
         const EncodedAudioChunkClass = (window as any).EncodedAudioChunk;
         const timestamp = opusTimestampRef.current;
@@ -340,7 +343,8 @@ export default function AudioStreamPlayer({
           timestamp,
           data: bytes,
         });
-        await opusDecoderRef.current.decode(chunk);
+        const decoder = opusDecoderRef.current;
+        if (decoder) await decoder.decode(chunk);
         const processingTime = performance.now() - startTime;
         console.log("[TELEMETRY] AudioStreamPlayer Opus chunk queued", {
           timestamp: new Date().toISOString(),

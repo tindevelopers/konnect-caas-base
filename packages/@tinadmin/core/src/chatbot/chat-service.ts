@@ -12,11 +12,12 @@ import { createTenantAwareServerClient } from '../database/tenant-client';
 import { getPlatformIntegrationConfig } from '../integrations';
 import type { ChatRequest, ChatResponse, ChatMessage, ChatConversation } from './types';
 
+/** AI SDK 5 only supports models with spec v2 (e.g. gpt-4o-mini, gpt-4o). gpt-3.5-turbo is v1 and unsupported. */
 export interface ChatOptions {
   tenantId: string;
   userId?: string;
   conversationId?: string;
-  model?: 'gpt-4' | 'gpt-3.5-turbo' | 'gpt-4-turbo';
+  model?: 'gpt-4o-mini' | 'gpt-4o' | 'gpt-4-turbo' | 'gpt-4';
   temperature?: number;
   maxTokens?: number;
 }
@@ -32,7 +33,7 @@ export async function processChatMessage(
     tenantId,
     userId,
     conversationId,
-    model = 'gpt-3.5-turbo',
+    model = 'gpt-4o-mini',
     temperature = 0.7,
     maxTokens = 1000,
   } = { ...options, tenantId: request.tenantId, userId: request.userId };
@@ -159,8 +160,10 @@ async function getOpenAIProvider(): Promise<ReturnType<typeof createOpenAI>> {
     // Fall back to env vars if Supabase/admin client isn't available.
   }
 
-  // 2) Environment-configured Vercel AI Gateway
-  const envGatewayKey = process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN;
+  // 2) Environment-configured Vercel AI Gateway. Do not rely on VERCEL_OIDC_TOKEN for local runs; set OPENAI_API_KEY or AI_GATEWAY_API_KEY in apps/tenant/.env.local or System Admin → API Configuration.
+  const envGatewayKey =
+    process.env.AI_GATEWAY_API_KEY ||
+    (process.env.VERCEL === '1' ? process.env.VERCEL_OIDC_TOKEN : undefined);
   if (envGatewayKey) {
     const fingerprint = `gateway:${DEFAULT_AI_GATEWAY_BASE_URL}:${envGatewayKey.slice(0, 6)}`;
     if (openaiProviderCache?.fingerprint === fingerprint) return openaiProviderCache.provider;

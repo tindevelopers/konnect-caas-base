@@ -34,7 +34,7 @@ export async function getTenantVoiceSettings(): Promise<TenantVoiceSettings> {
     const tenantId = await getCurrentUserTenantId();
     if (!tenantId) return { defaultStreamCodec: DEFAULT_STREAM_CODEC };
 
-    const { data, error } = await supabase
+    const { data: rowData, error } = await supabase
       .from("tenants")
       .select("voice_settings")
       .eq("id", tenantId)
@@ -45,7 +45,8 @@ export async function getTenantVoiceSettings(): Promise<TenantVoiceSettings> {
       return { defaultStreamCodec: DEFAULT_STREAM_CODEC };
     }
 
-    const vs = (data?.voice_settings as TenantVoiceSettings) || {};
+    const row = rowData as { voice_settings?: TenantVoiceSettings } | null;
+    const vs = (row?.voice_settings as TenantVoiceSettings | undefined) || {};
     const codec = vs.defaultStreamCodec;
     const valid = STREAM_CODEC_OPTIONS.some((o) => o.value === codec);
     return {
@@ -72,7 +73,7 @@ export async function saveTenantVoiceSettings(
       return { success: false, error: "No tenant context" };
     }
 
-    const { data: row, error: fetchError } = await supabase
+    const { data: fetchRow, error: fetchError } = await supabase
       .from("tenants")
       .select("voice_settings")
       .eq("id", tenantId)
@@ -82,6 +83,7 @@ export async function saveTenantVoiceSettings(
       return { success: false, error: fetchError.message };
     }
 
+    const row = fetchRow as { voice_settings?: Record<string, unknown> } | null;
     const current = (row?.voice_settings as Record<string, unknown>) || {};
     const payload = { ...current };
     if (settings.defaultStreamCodec !== undefined) {
@@ -91,7 +93,7 @@ export async function saveTenantVoiceSettings(
 
     const { error } = await supabase
       .from("tenants")
-      .update({ voice_settings: payload })
+      .update({ voice_settings: payload } as never)
       .eq("id", tenantId);
 
     if (error) {

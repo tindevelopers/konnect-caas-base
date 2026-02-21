@@ -26,11 +26,13 @@ import { parseSupportCodeAndRef } from "@/src/core/errors/parse-support-code";
 export async function getWorkspaceAdminsForTenant(tenantId: string): Promise<Array<{ id: string; full_name: string; email: string }>> {
   const admin = createAdminClient();
   let roleId: string | null = null;
-  const { data: wsRole } = await admin.from("roles").select("id").eq("name", "Workspace Admin").limit(1).single();
-  if (wsRole?.id) roleId = (wsRole as { id: string }).id;
+  const { data: wsRoleData } = await admin.from("roles").select("id").eq("name", "Workspace Admin").limit(1).single();
+  const wsRole = wsRoleData as { id: string } | null;
+  if (wsRole?.id) roleId = wsRole.id;
   if (!roleId) {
-    const { data: orgRole } = await admin.from("roles").select("id").eq("name", "Organization Admin").limit(1).single();
-    if (orgRole?.id) roleId = (orgRole as { id: string }).id;
+    const { data: orgRoleData } = await admin.from("roles").select("id").eq("name", "Organization Admin").limit(1).single();
+    const orgRole = orgRoleData as { id: string } | null;
+    if (orgRole?.id) roleId = orgRole.id;
   }
   if (!roleId) return [];
   const { data: users } = await admin
