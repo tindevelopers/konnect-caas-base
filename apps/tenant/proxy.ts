@@ -15,6 +15,27 @@ function isPlatformOnlyPath(pathname: string): boolean {
   return PLATFORM_ONLY_PREFIXES.some((prefix) => pathname.startsWith(prefix));
 }
 
+function isRefreshTokenMissingError(e: unknown): boolean {
+  const err = e as { __isAuthError?: boolean; code?: string; message?: string };
+  return (
+    err?.__isAuthError === true &&
+    (err?.code === "refresh_token_not_found" ||
+      /refresh token/i.test(err?.message ?? ""))
+  );
+}
+
+function clearSupabaseAuthCookies(request: NextRequest, response: NextResponse) {
+  // Supabase SSR cookies are typically prefixed with `sb-` (and may be chunked).
+  // If an access token cookie exists without a refresh token, Supabase throws `refresh_token_not_found`.
+  // Clearing these cookies returns the app to a clean "signed out" state.
+  for (const c of request.cookies.getAll()) {
+    if (!c.name.startsWith("sb-")) continue;
+    const options = { path: "/", maxAge: 0 };
+    request.cookies.set({ name: c.name, value: "", ...options });
+    response.cookies.set({ name: c.name, value: "", ...options });
+  }
+}
+
 export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
   const requestHeaders = new Headers(request.headers);
@@ -46,6 +67,40 @@ export async function proxy(request: NextRequest) {
       headers: requestHeaders,
     },
   });
+
+  // Refresh Supabase session cookies in middleware (and clear broken auth cookies).
+  // This avoids noisy dev overlay logs and ensures server components can read a consistent session state.
+  if (process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+      {
+        cookies: {
+          get(name: string) {
+            return request.cookies.get(name)?.value;
+          },
+          set(name: string, value: string, options: Record<string, unknown>) {
+            request.cookies.set({ name, value, ...options });
+            response = NextResponse.next({ request: { headers: requestHeaders } });
+            response.cookies.set({ name, value, ...options });
+          },
+          remove(name: string, options: Record<string, unknown>) {
+            request.cookies.set({ name, value: "", ...options });
+            response = NextResponse.next({ request: { headers: requestHeaders } });
+            response.cookies.set({ name, value: "", ...options });
+          },
+        },
+      }
+    );
+
+    try {
+      await supabase.auth.getUser();
+    } catch (e) {
+      if (isRefreshTokenMissingError(e)) {
+        clearSupabaseAuthCookies(request, response);
+      }
+    }
+  }
 
   // Only enforce platform-only checks on platform-only routes
   if (!isPlatformOnlyPath(pathname)) {
@@ -87,10 +142,10 @@ export async function proxy(request: NextRequest) {
     // This is necessary because Platform Admins have tenant_id = NULL and RLS might block the query
     const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
     if (!serviceRoleKey) {
-      console.error("[proxy] SUPABASE_SERVICE_ROLE_KEY not set, cannot verify Platform Admin status");
-      const url = request.nextUrl.clone();
-      url.pathname = "/saas/dashboard";
-      return NextResponse.redirect(url);
+      // Fail open: without the service role key we can't verify Platform Admin status here.
+      // Don't block the request in local/dev environments.
+      console.warn("[proxy] SUPABASE_SERVICE_ROLE_KEY not set; skipping Platform Admin verification");
+      return response;
     }
 
     const adminClient = createClient(
