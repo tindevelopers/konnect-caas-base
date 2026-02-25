@@ -2,6 +2,8 @@
 
 This document describes the **three levels of chat AI agents** built into the platform and how developers can **train and configure** each. Getting agent training right is critical to product quality.
 
+**For a product-focused guide** (how to use each system, comparison table, voice vs web chat), see **[CHAT_SYSTEMS_GUIDE.md](./CHAT_SYSTEMS_GUIDE.md)**.
+
 ## How Agents Manager, AI Assistants, and Individual Assistants Work Together
 
 - **Agent Manager** (Agents Manager page) is where you register **platform agents** (`agent_instances`). Each platform agent has:

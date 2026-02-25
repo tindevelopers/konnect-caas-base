@@ -2,7 +2,7 @@
  * Server-safe entry point: client, services, and types only.
  * No React hooks or UI. Use from server actions and API routes.
  */
-export * from "./client/telnyxClient";
+export * from "./server/createTelnyxClient";
 export * from "./client/types";
 export * from "./services/assistants";
 export * from "./services/integrations";
