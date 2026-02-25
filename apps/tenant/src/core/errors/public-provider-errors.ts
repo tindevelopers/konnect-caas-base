@@ -8,6 +8,7 @@ export type PublicSupportCode =
   | "KX-NUM-001"
   | "KX-NUM-002"
   | "KX-NUM-003"
+  | "KX-NUM-004"
   | "KX-UP-001"
   | "KX-UNK-001";
 
@@ -39,13 +40,32 @@ function normalizeString(value: unknown) {
   return typeof value === "string" ? value.toLowerCase() : "";
 }
 
+/** True if provider error suggests approval/eligibility/restriction (e.g. level 2, compliance). */
+function suggestsApprovalRestriction(detail: string, title: string): boolean {
+  const combined = `${detail} ${title}`;
+  return (
+    combined.includes("approval") ||
+    combined.includes("approve") ||
+    combined.includes("level 2") ||
+    combined.includes("eligibility") ||
+    combined.includes("restricted") ||
+    combined.includes("compliance") ||
+    combined.includes("requirement group") ||
+    combined.includes("permission") ||
+    combined.includes("not allowed") ||
+    combined.includes("not permitted")
+  );
+}
+
 export function toPublicProviderError(args: {
   error: unknown;
   supportRef: string;
   isPlatformAdmin: boolean;
   defaultCode?: PublicSupportCode;
+  /** When true, 403 on provider is treated as approval-level restriction (e.g. number order). */
+  numberOrderContext?: boolean;
 }): Error {
-  const { error, supportRef, isPlatformAdmin } = args;
+  const { error, supportRef, isPlatformAdmin, numberOrderContext } = args;
 
   const generic = (code: PublicSupportCode, message: string, diagnostics?: string) => {
     const base = `${message} (Support code: ${code}, Ref: ${supportRef})`;
@@ -77,6 +97,15 @@ export function toPublicProviderError(args: {
     const status = error.status;
     const detailLower = normalizeString(detail);
     const titleLower = normalizeString(title);
+    const isApprovalRestriction = suggestsApprovalRestriction(detailLower, titleLower);
+
+    if (status === 403 && (isApprovalRestriction || numberOrderContext)) {
+      return generic(
+        "KX-NUM-004",
+        "This tenant needs a higher approval level. We have sent a message to the platform administrator.",
+        `http=${status} upstream_code=${upstreamCode ?? "-"} title=${title ?? "-"} detail=${detail ?? "-"}`
+      );
+    }
 
     if (status === 401 || status === 403) {
       return generic(
@@ -103,10 +132,35 @@ export function toPublicProviderError(args: {
       );
     }
 
+    // Telnyx 20003: API Key forbidden — account verification level restricts which numbers can be ordered (e.g. only local numbers in FR for L1).
+    if (status === 400 && upstreamCode === "20003") {
+      return generic(
+        "KX-NUM-003",
+        "Your Telnyx account verification level only allows ordering certain number types or regions. Try a number type and country your account allows, or upgrade your verification level in the Telnyx portal.",
+        `http=${status} upstream_code=${upstreamCode} title=${title ?? "-"} detail=${detail ?? "-"}`
+      );
+    }
+
+    if (status === 400 && isApprovalRestriction) {
+      return generic(
+        "KX-NUM-004",
+        "This tenant needs a higher approval level. We have sent a message to the platform administrator.",
+        `http=${status} upstream_code=${upstreamCode ?? "-"} title=${title ?? "-"} detail=${detail ?? "-"}`
+      );
+    }
+
     if (status === 400) {
       return generic(
         "KX-NUM-002",
         "The provider rejected the request. Please review your filters and try again.",
+        `http=${status} upstream_code=${upstreamCode ?? "-"} title=${title ?? "-"} detail=${detail ?? "-"}`
+      );
+    }
+
+    if (status >= 400 && status < 500 && isApprovalRestriction) {
+      return generic(
+        "KX-NUM-004",
+        "This tenant needs a higher approval level. We have sent a message to the platform administrator.",
         `http=${status} upstream_code=${upstreamCode ?? "-"} title=${title ?? "-"} detail=${detail ?? "-"}`
       );
     }
@@ -119,9 +173,18 @@ export function toPublicProviderError(args: {
       );
     }
 
+    // For 4xx fallback, surface the provider's message when present so users see actionable errors (e.g. "Connection is required", "Reservation expired").
+    const fromDetails = [detail, title].find((s) => typeof s === "string" && s.length > 0 && s.length <= 280);
+    const rawMsg = typeof error.message === "string" ? error.message.trim() : "";
+    const bareFallback = `Telnyx API request failed (${status})`;
+    const clientMsg =
+      rawMsg.length > bareFallback.length + 1 && rawMsg.length <= 320 ? rawMsg : "";
+    const fallbackMessage =
+      (fromDetails?.trim() ?? clientMsg) || "The request failed. Please try again.";
+
     return generic(
       args.defaultCode ?? "KX-UP-001",
-      "The request failed. Please try again.",
+      fallbackMessage,
       `http=${status} upstream_code=${upstreamCode ?? "-"} title=${title ?? "-"} detail=${detail ?? "-"}`
     );
   }

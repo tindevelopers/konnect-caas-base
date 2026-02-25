@@ -28,6 +28,12 @@ export interface SupportTicket {
   assigned_to: string | null;
   created_at: string;
   updated_at: string;
+  /** Public support code when ticket was created from a failed action (e.g. KX-NUM-004) */
+  support_code?: string | null;
+  /** Reference id from the error (e.g. ref_xxx) */
+  support_ref?: string | null;
+  /** When set, ticket was escalated from org admin to platform admin */
+  escalated_to_platform_admin_at?: string | null;
   // Joined fields
   category?: SupportCategory | null;
   created_by_user?: {
@@ -104,6 +110,9 @@ export interface CreateTicketInput {
   priority?: TicketPriority;
   category_id?: string;
   assigned_to?: string;
+  /** When ticket is created from a failed user action */
+  support_code?: string;
+  support_ref?: string;
 }
 
 export interface UpdateTicketInput {
@@ -113,6 +122,8 @@ export interface UpdateTicketInput {
   priority?: TicketPriority;
   category_id?: string;
   assigned_to?: string;
+  /** Set to escalate ticket to platform admin (e.g. new Date().toISOString()) */
+  escalated_to_platform_admin_at?: string | null;
 }
 
 export interface CreateThreadInput {

@@ -2,6 +2,31 @@
 
 This document describes the **three levels of chat AI agents** built into the platform and how developers can **train and configure** each. Getting agent training right is critical to product quality.
 
+## How Agents Manager, AI Assistants, and Individual Assistants Work Together
+
+- **Agent Manager** (Agents Manager page) is where you register **platform agents** (`agent_instances`). Each platform agent has:
+  - **external_ref**: links to an external assistant (e.g. Telnyx assistant ID like `assistant-c0b92fc3-...`).
+  - **provider**: `telnyx` | `advanced` | `abacus` — determines how chat/voice is handled (Telnyx API vs in-app RAG vs Abacus).
+  - **public_key** (optional): used for public embed/widget and for the “Chat Preview” to call the public Answer API.
+- **AI Assistants** (AI Assistants list page) is where you create and edit **individual assistants** (e.g. in Telnyx). Each has a name, model, instructions, and an ID (e.g. `assistant-c0b92fc3-...`).
+- **Individual assistant** (e.g. “Customer Support Specialist”) is one of those assistants. Its detail page shows the **Chat Preview (Unified Answer API)**.
+
+**Local development (Enhanced / embeddings):** Ensure `OPENAI_API_KEY` or `AI_GATEWAY_API_KEY` is set in `apps/tenant/.env.local` (or in System Admin → API Configuration for the AI gateway). Do not rely on `VERCEL_OIDC_TOKEN` for local runs—it expires and is only refreshed in the Vercel runtime.
+
+For the Chat Preview to work:
+
+1. The preview needs a **platform agent** that points to this assistant. Either:
+   - You have a platform agent in Agent Manager whose **external_ref** equals this assistant’s ID, **or**
+   - You have a platform agent with a **public_key** (the preview then uses the public Answer API with that key).
+2. When you send a message, the app calls the **Answer API** (internal `/api/agents/{id}/answer` or public `/api/public/agents/answer`). The resolved platform agent’s **provider** decides the backend:
+   - **telnyx**: Telnyx handles the message (no in-app embedding).
+   - **advanced**: In-app RAG is used: `processChatMessage` → `retrieveContext` → **generateEmbedding** (OpenAI/Vercel AI Gateway). If embedding credentials are missing or the API fails, you see **“Failed to generate embedding”**.
+   - **abacus**: Abacus handles the message (no in-app embedding).
+
+So: **Agent Manager** = which agents exist and how they’re handled (provider + optional public key). **AI Assistants** = the list of assistants (e.g. Telnyx). **Individual assistant** = one of those; the **test agent in the testing/chat window** is that assistant, backed by the platform agent you linked in Agent Manager. The embedding error occurs when the linked platform agent uses the **advanced** provider and the embedding service (OpenAI or Vercel AI Gateway) is not configured or fails.
+
+---
+
 ## Overview
 
 | Level | Display name | Code / provider | Purpose |

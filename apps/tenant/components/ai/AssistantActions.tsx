@@ -20,10 +20,13 @@ import {
   createCallControlApplicationAction,
 } from "@/app/actions/telnyx/call-control";
 import { listPhoneNumbersAssignedToAssistantAction } from "@/app/actions/telnyx/numbers";
+import { getTenantVoiceSettings } from "@/app/actions/voice-settings";
+import { STREAM_CODEC_OPTIONS } from "@/src/lib/stream-codec-options";
 import CallStatusModal from "./CallStatusModal";
 import WebcallModal from "./WebcallModal";
 import TestChatModal from "./TestChatModal";
 import AudioStreamPlayer from "./AudioStreamPlayer";
+import EmbedPreviewSection from "./EmbedPreviewSection";
 
 interface AssistantActionsProps {
   assistantId: string;
@@ -66,6 +69,7 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
     fromNumber: "",
     connectionId: "",
     streamUrl: "", // Optional WebSocket URL for audio streaming
+    streamCodec: "", // Preferred codec (PCMU, OPUS, etc.); empty = use tenant default
   });
   const [callResult, setCallResult] = useState<CallResult | null>(null);
   const [callError, setCallError] = useState<string | null>(null);
@@ -113,6 +117,13 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
     setCallError(null);
     setCallResult(null);
     setCallControlAppsError(null);
+    try {
+      const voiceSettings = await getTenantVoiceSettings();
+      const codec = voiceSettings.defaultStreamCodec || "PCMU";
+      setCallForm((prev) => ({ ...prev, streamCodec: codec }));
+    } catch {
+      setCallForm((prev) => ({ ...prev, streamCodec: "PCMU" }));
+    }
     setLoadingCallControlApps(true);
     setLoadingContactDialTargets(true);
     try {
@@ -215,7 +226,8 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
         fromNumber: callForm.fromNumber,
         connectionId: callForm.connectionId,
         streamUrl: callForm.streamUrl || undefined,
-        streamTrack: "outbound_track",
+        streamTrack: "both_tracks",
+        streamCodec: callForm.streamCodec || undefined,
       });
       setCallResult(result);
       setBanner({
@@ -582,6 +594,27 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
                 )}
               </p>
             </div>
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-400">
+                Preferred stream codec
+              </label>
+              <select
+                className={inputClasses}
+                value={callForm.streamCodec || "PCMU"}
+                onChange={(e) =>
+                  setCallForm((prev) => ({ ...prev, streamCodec: e.target.value }))
+                }
+              >
+                {STREAM_CODEC_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Audio codec for the stream. Default is set in Communications → Voice → Settings.
+              </p>
+            </div>
           </div>
 
           {callError && (
@@ -787,6 +820,9 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
           <Alert variant="error" title="Test Call Failed" message={testError} />
         </div>
       )}
+
+      {/* Website Embed & Unified Answer Preview */}
+      <EmbedPreviewSection assistantId={assistantId} />
 
       {/* Webcall Modal */}
       <WebcallModal

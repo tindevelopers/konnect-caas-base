@@ -40,6 +40,28 @@ function stringify(value: unknown) {
   return value ? JSON.stringify(value, null, jsonIndent) : "";
 }
 
+function copyToClipboard(text: string) {
+  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(text).catch(() => {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+    });
+    return;
+  }
+
+  // Fallback for older browsers/environments
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  document.body.appendChild(ta);
+  ta.select();
+  document.execCommand("copy");
+  document.body.removeChild(ta);
+}
+
 type IntegrationProviderKey = "shopify" | "notion" | "microsoft_teams";
 
 type IntegrationConnectDraft = {
@@ -170,6 +192,7 @@ export function AssistantEditor({
   const [jsonError, setJsonError] = useState<string | null>(null);
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
   const [voiceSettings, setVoiceSettings] = useState({
     provider: "",
     model: "",
@@ -188,6 +211,21 @@ export function AssistantEditor({
     null
   );
   const [toolTestResult, setToolTestResult] = useState<string | null>(null);
+
+  const telnyxWidgetEmbedCode = useMemo(() => {
+    return `<!-- Telnyx AI Agent widget: chat + voice -->
+<telnyx-ai-agent
+  agent-id="${assistantId}"
+  environment="production">
+</telnyx-ai-agent>
+<script async src="https://unpkg.com/@telnyx/ai-agent-widget@next"></script>`;
+  }, [assistantId]);
+
+  const handleCopy = useCallback((text: string, label: string) => {
+    copyToClipboard(text);
+    setCopied(label);
+    window.setTimeout(() => setCopied(null), 1500);
+  }, []);
 
   useEffect(() => {
     if (assistant) {
@@ -1745,13 +1783,39 @@ export function AssistantEditor({
               })()}
             </div>
           </div>
+
+          <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-gray-900/40">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-medium text-gray-900 dark:text-white/90">
+                  Embed Code
+                </h3>
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  Copy and paste this into any website to embed the official Telnyx
+                  AI Agent widget for this assistant.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleCopy(telnyxWidgetEmbedCode, "telnyxWidget")}
+                className="shrink-0 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-800 hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:hover:bg-gray-800"
+              >
+                {copied === "telnyxWidget" ? "Copied!" : "Copy Code"}
+              </button>
+            </div>
+            <pre className="mt-3 overflow-x-auto rounded-lg border border-gray-200 bg-white p-3 text-xs font-mono text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90">
+              {telnyxWidgetEmbedCode}
+            </pre>
+          </div>
+
           <div>
             <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
               Widget Settings (JSON)
             </label>
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              Appearance and behavior (theme, start_call_text, default_state,
-              etc.).
+              Appearance and behavior (theme, start_call_text, default_state, etc.).
+              This JSON is configuration only — it is not the embed code. Use the
+              Embed Code block above to add the widget to a website.
             </p>
             <textarea
               value={jsonFields.widget_settings ?? ""}

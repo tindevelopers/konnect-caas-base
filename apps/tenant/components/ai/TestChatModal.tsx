@@ -276,4 +276,3 @@ export default function TestChatModal({ isOpen, onClose, assistantId }: TestChat
     </Modal>
   );
 }
-
