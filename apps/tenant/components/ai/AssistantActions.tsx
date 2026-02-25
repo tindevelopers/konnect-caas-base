@@ -6,7 +6,8 @@ import Button from "@/components/ui/button/Button";
 import { Modal } from "@/components/ui/modal";
 import Alert from "@/components/ui/alert/Alert";
 import { useModal } from "@/hooks/useModal";
-import { CallIcon, CopyIcon, PencilIcon, ChatIcon } from "@/icons";
+import { CallIcon, ChatIcon, CopyIcon, PencilIcon } from "@/icons";
+import { listContactDialTargetsAction } from "@/app/actions/crm/contacts";
 import {
   callAssistantAction,
   cloneAssistantAction,
@@ -23,9 +24,9 @@ import { getTenantVoiceSettings } from "@/app/actions/voice-settings";
 import { STREAM_CODEC_OPTIONS } from "@/src/lib/stream-codec-options";
 import CallStatusModal from "./CallStatusModal";
 import WebcallModal from "./WebcallModal";
+import TestChatModal from "./TestChatModal";
 import AudioStreamPlayer from "./AudioStreamPlayer";
 import EmbedPreviewSection from "./EmbedPreviewSection";
-import TelnyxWidgetModal from "./TelnyxWidgetModal";
 
 interface AssistantActionsProps {
   assistantId: string;
@@ -92,6 +93,8 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
   const [testError, setTestError] = useState<string | null>(null);
 
   const [assignedNumbersForCall, setAssignedNumbersForCall] = useState<Array<{ phone_number: string }>>([]);
+  const [contactDialTargets, setContactDialTargets] = useState<Array<{ value: string; label: string }>>([]);
+  const [loadingContactDialTargets, setLoadingContactDialTargets] = useState(false);
   const [callControlApps, setCallControlApps] = useState<Array<{ id: string; application_name: string | null }>>([]);
   const [callControlAppsError, setCallControlAppsError] = useState<string | null>(null);
   const [loadingCallControlApps, setLoadingCallControlApps] = useState(false);
@@ -122,12 +125,18 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
       setCallForm((prev) => ({ ...prev, streamCodec: "PCMU" }));
     }
     setLoadingCallControlApps(true);
+    setLoadingContactDialTargets(true);
     try {
-      const res = await listCallControlApplicationsAction();
+      const [res, contacts] = await Promise.all([
+        listCallControlApplicationsAction(),
+        listContactDialTargetsAction().catch(() => []),
+      ]);
       setCallControlApps(res.data ?? []);
       if (res.error) setCallControlAppsError(res.error);
+      setContactDialTargets(contacts ?? []);
     } finally {
       setLoadingCallControlApps(false);
+      setLoadingContactDialTargets(false);
     }
 
     // Auto-populate WebSocket stream URL
@@ -399,6 +408,25 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
               <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-400">
                 Destination (To)
               </label>
+              {loadingContactDialTargets ? (
+                <p className="mb-2 text-sm text-gray-500 dark:text-gray-400">Loading contact numbers…</p>
+              ) : contactDialTargets.length > 0 ? (
+                <select
+                  className="mb-2 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-gray-600 dark:bg-gray-800 dark:text-white/90"
+                  value={contactDialTargets.some((c) => c.value === callForm.toNumber) ? callForm.toNumber : ""}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v) setCallForm((prev) => ({ ...prev, toNumber: v }));
+                  }}
+                >
+                  <option value="">Choose contact number…</option>
+                  {contactDialTargets.map((c) => (
+                    <option key={c.value} value={c.value}>
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
+              ) : null}
               <input
                 type="text"
                 placeholder="+15551234567"
@@ -803,8 +831,8 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
         assistantId={assistantId}
       />
 
-      {/* Test Chat — official Telnyx AI Agent widget (same as Mission Control demo) */}
-      <TelnyxWidgetModal
+      {/* Test Chat Modal */}
+      <TestChatModal
         isOpen={testChatModal.isOpen}
         onClose={testChatModal.closeModal}
         assistantId={assistantId}

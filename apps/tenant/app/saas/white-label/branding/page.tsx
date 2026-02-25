@@ -8,8 +8,10 @@ import { ArrowUpTrayIcon } from "@heroicons/react/24/outline";
 import React, { useState, useEffect } from "react";
 import { getBrandingSettings, saveBrandingSettings } from "@/app/actions/white-label";
 import type { BrandingSettings } from "@/app/actions/white-label";
+import { useWhiteLabel } from "@/context/WhiteLabelContext";
 
 export default function WhiteLabelBrandingPage() {
+  const { refresh } = useWhiteLabel();
   const [branding, setBranding] = useState<BrandingSettings>({
     companyName: "SaaS Platform",
     logo: "/images/logo/logo.svg",
@@ -57,6 +59,8 @@ export default function WhiteLabelBrandingPage() {
       
       if (result.success) {
         setMessage({ type: "success", text: "Branding settings saved successfully!" });
+        // Ensure header/sidebar update immediately without a full reload.
+        await refresh();
         setTimeout(() => setMessage(null), 3000);
       } else {
         setMessage({ type: "error", text: result.error || "Failed to save branding settings" });
@@ -144,6 +148,16 @@ export default function WhiteLabelBrandingPage() {
                   Upload Logo
                 </Button>
               </div>
+              <div className="mt-3">
+                <Label htmlFor="logo-url">Logo URL</Label>
+                <Input
+                  id="logo-url"
+                  type="url"
+                  value={branding.logo || ""}
+                  onChange={(e) => setBranding({ ...branding, logo: e.target.value })}
+                  placeholder="https://…/logo.svg (or /images/…)"
+                />
+              </div>
               <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
                 Recommended size: 200x50px (PNG, SVG)
               </p>
@@ -170,6 +184,16 @@ export default function WhiteLabelBrandingPage() {
                   <ArrowUpTrayIcon className="h-4 w-4" />
                   Upload Favicon
                 </Button>
+              </div>
+              <div className="mt-3">
+                <Label htmlFor="favicon-url">Favicon URL</Label>
+                <Input
+                  id="favicon-url"
+                  type="url"
+                  value={branding.favicon || ""}
+                  onChange={(e) => setBranding({ ...branding, favicon: e.target.value })}
+                  placeholder="https://…/favicon.png (or /images/…)"
+                />
               </div>
               <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
                 Recommended size: 32x32px (PNG, ICO)

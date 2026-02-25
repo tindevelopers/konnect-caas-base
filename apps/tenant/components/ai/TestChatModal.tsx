@@ -1,190 +1,277 @@
 "use client";
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import Link from "next/link";
-import Button from "@/components/ui/button/Button";
+import { TelnyxAIAgent } from "@telnyx/ai-agent-lib";
 import { Modal } from "@/components/ui/modal";
+import Button from "@/components/ui/button/Button";
 
 interface TestChatModalProps {
-  assistantId: string;
   isOpen: boolean;
   onClose: () => void;
+  assistantId: string;
 }
 
-interface ChatMessage {
+interface TranscriptItem {
   id: string;
   role: "user" | "assistant";
   content: string;
+  timestamp: Date;
 }
 
-interface AnswerApiResponse {
-  conversationId?: string;
-  voice_text?: string;
-  chat_markdown?: string;
-  error?: string;
-}
+export default function TestChatModal({ isOpen, onClose, assistantId }: TestChatModalProps) {
+  const [connectionState, setConnectionState] = useState<
+    "connecting" | "connected" | "disconnected" | "error"
+  >("disconnected");
+  const [isConversationActive, setIsConversationActive] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [transcript, setTranscript] = useState<TranscriptItem[]>([]);
+  const [message, setMessage] = useState("");
 
-export default function TestChatModal({
-  assistantId,
-  isOpen,
-  onClose,
-}: TestChatModalProps) {
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const [chatInput, setChatInput] = useState("");
-  const [chatLoading, setChatLoading] = useState(false);
-  const [chatConversationId, setChatConversationId] = useState<string | null>(null);
-  const [chatError, setChatError] = useState<string | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const agentRef = useRef<TelnyxAIAgent | null>(null);
+  const transcriptEndRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [chatMessages]);
+    transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [transcript]);
 
-  const handleSend = useCallback(async () => {
-    const text = chatInput.trim();
-    if (!text || chatLoading) return;
+  useEffect(() => {
+    if (!isOpen || !assistantId) return;
 
-    setChatInput("");
-    setChatError(null);
-    const userMsg: ChatMessage = {
-      id: `u-${Date.now()}`,
-      role: "user",
-      content: text,
-    };
-    setChatMessages((prev) => [...prev, userMsg]);
-    setChatLoading(true);
+    const agent = new TelnyxAIAgent({
+      agentId: assistantId,
+      environment: "production",
+    });
+    agentRef.current = agent;
 
-    try {
-      const res = await fetch(`/api/agents/${assistantId}/answer`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: text,
-          conversationId: chatConversationId ?? undefined,
-          channel: "webchat",
-        }),
-      });
-      const data: AnswerApiResponse = await res.json();
+    agent.on("agent.connected", () => {
+      setConnectionState("connected");
+      setError(null);
+    });
 
-      if (!res.ok) {
-        const err = data.error ?? "Request failed";
-        setChatError(err);
-        return;
+    agent.on("agent.disconnected", () => {
+      setConnectionState("disconnected");
+      setIsConversationActive(false);
+    });
+
+    agent.on("agent.error", (err: any) => {
+      const errCode = err?.error?.code;
+      const errMsg = err?.error?.message || err?.message;
+      if (errCode === -32001 || (typeof errMsg === "string" && errMsg.includes("Login Incorrect"))) {
+        setError("WIDGET_NOT_CONFIGURED");
+      } else {
+        let detail = "Connection error";
+        try {
+          detail = typeof err === "string" ? err : errMsg || JSON.stringify(err);
+        } catch {
+          detail = String(err);
+        }
+        setError(detail);
       }
+      setConnectionState("error");
+    });
 
-      if (data.conversationId) setChatConversationId(data.conversationId);
+    agent.on("transcript.item", (item: TranscriptItem) => {
+      setTranscript((prev) => [...prev, item]);
+    });
 
-      const assistantMsg: ChatMessage = {
-        id: `a-${Date.now()}`,
-        role: "assistant",
-        content: data.chat_markdown ?? data.voice_text ?? "No response",
-      };
-      setChatMessages((prev) => [...prev, assistantMsg]);
-    } catch (err) {
-      setChatError(err instanceof Error ? err.message : "Network error");
-    } finally {
-      setChatLoading(false);
+    agent.on("conversation.update", (notification: any) => {
+      const callState = notification?.call?.state;
+      if (callState === "active") {
+        setIsConversationActive(true);
+      }
+      if (callState === "hangup" || callState === "destroy") {
+        setIsConversationActive(false);
+      }
+    });
+
+    setConnectionState("connecting");
+    agent.connect().catch((err: any) => {
+      let detail = "Failed to connect";
+      try {
+        detail = typeof err === "string" ? err : err?.message || JSON.stringify(err);
+      } catch {
+        detail = String(err);
+      }
+      setError(detail);
+      setConnectionState("error");
+    });
+
+    return () => {
+      try {
+        agent.disconnect();
+      } catch {
+        // ignore
+      }
+      agentRef.current = null;
+    };
+  }, [isOpen, assistantId]);
+
+  const handleStart = useCallback(async () => {
+    if (!agentRef.current || connectionState !== "connected") {
+      setError("Not connected yet. Please wait for connection.");
+      return;
     }
-  }, [assistantId, chatInput, chatLoading, chatConversationId]);
+    setError(null);
+    try {
+      await agentRef.current.startConversation({ callerName: "Test Chat User" });
+    } catch (err: any) {
+      setError(err?.message || "Failed to start conversation");
+    }
+  }, [connectionState]);
+
+  const handleEnd = useCallback(() => {
+    try {
+      agentRef.current?.endConversation();
+    } catch {
+      // ignore
+    }
+    setIsConversationActive(false);
+  }, []);
+
+  const handleSend = useCallback(() => {
+    const trimmed = message.trim();
+    if (!trimmed) return;
+    if (!agentRef.current || !isConversationActive) {
+      setError("Start the conversation first to send messages.");
+      return;
+    }
+    try {
+      agentRef.current.sendConversationMessage(trimmed);
+      setMessage("");
+    } catch (err: any) {
+      setError(err?.message || "Failed to send message");
+    }
+  }, [isConversationActive, message]);
+
+  const handleClose = useCallback(() => {
+    handleEnd();
+    try {
+      agentRef.current?.disconnect();
+    } catch {
+      // ignore
+    }
+    setConnectionState("disconnected");
+    setTranscript([]);
+    setMessage("");
+    setError(null);
+    onClose();
+  }, [handleEnd, onClose]);
 
   return (
     <Modal
       isOpen={isOpen}
-      onClose={onClose}
-      className="relative w-full max-w-[520px] m-5 sm:m-0 rounded-2xl bg-white dark:bg-gray-900 flex flex-col overflow-hidden"
+      onClose={handleClose}
+      className="relative w-full max-w-[720px] m-5 sm:m-0 rounded-3xl bg-white p-6 lg:p-8 dark:bg-gray-900"
     >
-      <div className="flex items-center justify-between border-b border-gray-200 dark:border-gray-700 px-4 py-3">
-        <h4 className="text-base font-semibold text-gray-900 dark:text-white">
-          Test Chat
-        </h4>
-        <button
-          type="button"
-          onClick={onClose}
-          className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 text-xl leading-none"
-          aria-label="Close"
-        >
-          ×
-        </button>
-      </div>
-      <p className="px-4 pb-2 text-xs text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
-        Same assistant and knowledge as voice. Uses the unified Answer API.
-      </p>
-      <div
-        className="flex-1 overflow-y-auto p-4 bg-gray-50 dark:bg-gray-900/40 space-y-3 min-h-[280px] max-h-[400px]"
-        style={{ minHeight: 280 }}
-      >
-        {chatMessages.length === 0 && (
-          <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-8">
-            Send a message to test the chat. Same backend as your voice assistant.
-          </p>
-        )}
-        {chatMessages.map((msg) => (
-          <div
-            key={msg.id}
-            className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-          >
-            <div
-              className={`max-w-[85%] rounded-xl px-3 py-2 text-sm ${
-                msg.role === "user"
-                  ? "bg-indigo-600 text-white"
-                  : "bg-white border border-gray-200 text-gray-800 dark:bg-gray-800 dark:border-gray-700 dark:text-white/90"
-              }`}
-            >
-              <p className="whitespace-pre-wrap">{msg.content}</p>
+      <div>
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-xl font-semibold text-gray-900 dark:text-white">Test Chat</h3>
+            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+              This uses Telnyx WebRTC under the hood. You may be prompted for microphone access.
+            </p>
+          </div>
+          <div className="text-right text-xs text-gray-500 dark:text-gray-400">
+            <div>
+              <span className="font-medium">Connection:</span>{" "}
+              <span
+                className={
+                  connectionState === "connected"
+                    ? "text-green-600"
+                    : connectionState === "error"
+                      ? "text-red-600"
+                      : "text-gray-600"
+                }
+              >
+                {connectionState}
+              </span>
+            </div>
+            <div className="mt-1">
+              <span className="font-medium">Assistant:</span>{" "}
+              <span className="font-mono">{assistantId}</span>
             </div>
           </div>
-        ))}
-        {chatLoading && (
-          <div className="flex justify-start">
-            <div className="rounded-xl bg-white border border-gray-200 px-3 py-2 dark:bg-gray-800 dark:border-gray-700">
-              <div className="flex gap-1">
-                <div className="h-2 w-2 animate-bounce rounded-full bg-gray-400 [animation-delay:-0.3s]" />
-                <div className="h-2 w-2 animate-bounce rounded-full bg-gray-400 [animation-delay:-0.15s]" />
-                <div className="h-2 w-2 animate-bounce rounded-full bg-gray-400" />
-              </div>
-            </div>
+        </div>
+
+        {error === "WIDGET_NOT_CONFIGURED" && (
+          <div className="mb-4 rounded-lg bg-amber-50 p-4 text-sm text-amber-700 dark:bg-amber-900/20 dark:text-amber-400">
+            <div className="font-semibold mb-2">Widget Setup Required</div>
+            <p className="text-xs">
+              To use Test Chat, enable the Widget for this assistant in the Telnyx portal (AI → Assistants → Edit →
+              Widget tab), then retry.
+            </p>
           </div>
         )}
-        {chatError && (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-900/20">
-            <p className="text-sm text-amber-800 dark:text-amber-200">{chatError}</p>
-            {chatError.includes("Agent Manager") && (
-              <p className="mt-2 text-sm text-amber-700 dark:text-amber-300">
-                <Link
-                  href="/ai/agent-manager"
-                  className="font-medium underline hover:no-underline"
-                >
-                  Open Agent Manager
-                </Link>
-                {" "}→ create or select an agent and set its external ref to this assistant’s ID so chat can use the same backend as voice.
+
+        {error && error !== "WIDGET_NOT_CONFIGURED" && (
+          <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400">
+            {error}
+          </div>
+        )}
+
+        <div className="mb-4 flex flex-wrap gap-3">
+          {!isConversationActive && (
+            <Button onClick={handleStart} disabled={connectionState !== "connected"}>
+              Start Chat
+            </Button>
+          )}
+          {isConversationActive && (
+            <Button onClick={handleEnd} className="bg-red-600 hover:bg-red-700 text-white">
+              End Chat
+            </Button>
+          )}
+          <Button variant="outline" onClick={handleClose}>
+            Close
+          </Button>
+        </div>
+
+        <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-gray-900/60">
+          <div className="max-h-80 overflow-y-auto pr-2">
+            {transcript.length === 0 ? (
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                No messages yet. Click <span className="font-medium">Start Chat</span> to begin.
               </p>
+            ) : (
+              transcript.map((item) => (
+                <div key={item.id} className="mb-3 text-sm">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span
+                      className={
+                        item.role === "assistant"
+                          ? "font-semibold text-blue-700 dark:text-blue-400"
+                          : "font-semibold text-gray-800 dark:text-gray-200"
+                      }
+                    >
+                      {item.role === "assistant" ? "Assistant" : "You"}
+                    </span>
+                    <span className="text-[11px] text-gray-400">
+                      {new Date(item.timestamp).toLocaleTimeString()}
+                    </span>
+                  </div>
+                  <div className="mt-1 text-gray-700 dark:text-gray-300">{item.content}</div>
+                </div>
+              ))
             )}
+            <div ref={transcriptEndRef} />
           </div>
-        )}
-        <div ref={messagesEndRef} />
-      </div>
-      <div className="border-t border-gray-200 dark:border-gray-700 p-3 flex gap-2 bg-white dark:bg-gray-900">
-        <input
-          type="text"
-          className="flex-1 rounded-lg border border-gray-300 bg-transparent px-3 py-2 text-sm dark:border-gray-600 dark:text-white/90"
-          placeholder="Type a message..."
-          value={chatInput}
-          onChange={(e) => setChatInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              void handleSend();
-            }
-          }}
-          disabled={chatLoading}
-        />
-        <Button
-          size="sm"
-          onClick={() => void handleSend()}
-          disabled={!chatInput.trim() || chatLoading}
-        >
-          Send
-        </Button>
+
+          <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+            <input
+              type="text"
+              className="dark:bg-dark-900 shadow-theme-xs focus:border-brand-300 focus:ring-brand-500/10 dark:focus:border-brand-800 h-11 w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm text-gray-800 placeholder:text-gray-400 focus:ring-3 focus:outline-hidden dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:placeholder:text-white/30"
+              placeholder={isConversationActive ? "Type a message…" : "Start chat to send messages…"}
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleSend();
+              }}
+              disabled={!isConversationActive}
+            />
+            <Button onClick={handleSend} disabled={!isConversationActive || !message.trim()}>
+              Send
+            </Button>
+          </div>
+        </div>
       </div>
     </Modal>
   );

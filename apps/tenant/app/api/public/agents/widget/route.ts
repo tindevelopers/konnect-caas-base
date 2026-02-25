@@ -152,8 +152,21 @@ function buildWidgetScript(args: {
         return;
       }
       conversationId = data.conversationId || conversationId;
-      const content = data.chat_markdown || data.voice_text || "No response";
+      const content = data.chat_markdown || data.voice_text || data.message || "No response";
       append(miniMarkdown(content), "assistant", true);
+
+      if (data && data.handoffMode === "help" && data.helpContent) {
+        append("Specialist help:\n" + data.helpContent, "assistant", false);
+      }
+
+      if (data && data.handoffMode === "handoff" && data.handoffSuggested) {
+        const reason = data.handoffReason ? " (" + data.handoffReason + ")" : "";
+        append(
+          "Handoff requested" + reason + ". Please contact support or continue in the main app for a full transfer.",
+          "assistant",
+          false
+        );
+      }
     } catch (error) {
       thinking.remove();
       append("Network error. Please try again.", "assistant", false);

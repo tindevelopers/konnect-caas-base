@@ -164,6 +164,8 @@ export interface AgentProviderRequest {
   metadata?: Record<string, unknown>;
 }
 
+export type CrossAgentMode = "help" | "handoff";
+
 export interface AgentProviderResponse {
   content: string;
   conversationId?: string;
@@ -179,6 +181,10 @@ export interface AgentProviderResponse {
   };
   handoffSuggested?: boolean;
   handoffReason?: string;
+  handoffTargetAgentId?: string;
+  handoffMode?: CrossAgentMode;
+  helpFromAgentId?: string;
+  helpContent?: string;
   toolResults?: unknown;
   raw?: unknown;
 }
@@ -203,6 +209,10 @@ export interface AgentChatResponse {
   externalConversationId?: string;
   handoffSuggested?: boolean;
   handoffReason?: string;
+  handoffTargetAgentId?: string;
+  handoffMode?: CrossAgentMode;
+  helpFromAgentId?: string;
+  helpContent?: string;
   usage?: RecordAgentUsageInput;
 }
 

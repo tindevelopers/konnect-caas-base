@@ -434,6 +434,50 @@ export async function importAssistantsAction(payload: TelnyxImportAssistantsRequ
   );
 }
 
+/**
+ * Link an existing Telnyx assistant ID to the current tenant.
+ *
+ * This is only required when using a shared Telnyx API key (env/platform default),
+ * where we filter assistants via tenant_ai_assistants.
+ */
+export async function linkExistingTelnyxAssistantAction(assistantId: string): Promise<{ success: boolean; error?: string }> {
+  const { tenantId, userId } = await getTelemetryContext();
+  if (!tenantId) {
+    return { success: false, error: "Tenant context missing. Select a workspace and try again." };
+  }
+
+  const trimmed = assistantId?.trim();
+  if (!trimmed) {
+    return { success: false, error: "Assistant ID is required." };
+  }
+
+  try {
+    const { transport, credentialSource } = await getTelnyxTransportWithSource("integrations.read");
+
+    // If tenant has their own Telnyx account, assistants are already isolated by account.
+    if (credentialSource === "tenant") {
+      return { success: true };
+    }
+
+    // Validate the assistant exists in Telnyx (helps avoid typos).
+    await trackApiCall(
+      "getAssistant",
+      TELNYX_PROVIDER,
+      () => getAssistant(transport, trimmed),
+      { tenantId, userId, requestData: { assistantId: trimmed } }
+    );
+
+    await registerAssistantMapping(tenantId, trimmed, userId);
+    return { success: true };
+  } catch (e) {
+    if (e instanceof TelnyxApiError && e.status === 404) {
+      return { success: false, error: "Assistant not found in Telnyx. Double-check the assistant ID." };
+    }
+    const msg = e instanceof Error ? e.message : String(e);
+    return { success: false, error: msg || "Failed to link assistant." };
+  }
+}
+
 export async function callAssistantAction(payload: CallAssistantPayload): Promise<CallAssistantResult> {
   console.log("[callAssistantAction] Starting call with payload:", {
     assistantId: payload.assistantId,
@@ -499,7 +543,7 @@ export async function callAssistantAction(payload: CallAssistantPayload): Promis
           if (payload.streamUrl?.trim()) {
             const streamUrl = payload.streamUrl.trim();
             dialBody.stream_url = streamUrl;
-            dialBody.stream_track = payload.streamTrack || "both_tracks";
+            dialBody.stream_track = payload.streamTrack || "outbound_track";
             // Request PCMU so stream matches our player (PCMU, PCMA, L16 supported)
             dialBody.stream_codec = payload.streamCodec || "PCMU";
 

@@ -35,6 +35,12 @@ So: **Agent Manager** = which agents exist and how they’re handled (provider +
 | **2** | **Enhanced** | `advanced` | In-platform RAG chatbot with domain intelligence, knowledge bases, and optional MCP tools. |
 | **3** | **Abacus** | `abacus` | Abacus.AI ChatLLM / Super Assistants. External LLM with configurable system prompt and models. |
 
+These map to the product tiers in `agent_instances.tier`:
+
+- **Tier 1 – Simple**: Telnyx-only (`provider="telnyx"`). Voice + Telnyx chat + Telnyx KB. No in-app RAG.
+- **Tier 2 – Enhanced**: RAG + MCP for webchat (`provider="advanced"`). Use Telnyx for voice/messaging channels separately.
+- **Tier 3 – Abacus**: External LLM (`provider="abacus"`).
+
 Implementation lives in:
 
 - **Types:** `apps/tenant/src/core/agents/types.ts` — `AgentProvider = "telnyx" | "advanced" | "abacus"`.
@@ -92,6 +98,22 @@ Implementation lives in:
 
 4. **Optional tools**
    - Enhanced provider can surface **tool hints** (e.g. scheduling, support ticket context) and **MCP servers** (`telnyx_mcp_servers`). Configure MCP and tool behavior in the provider and in the database so agents know when to suggest handoffs or tools.
+
+### Cross-agent help vs handoff (routing config)
+
+Enhanced (and other providers as they add support) can suggest escalation and optionally target a specific agent. Configuration is stored on the agent record in `agent_instances.routing`:
+
+- `routing.crossAgentMode`: `"help"` or `"handoff"`
+  - **help**: ask another agent for help and return a supplemental `helpContent` (no formal transfer)
+  - **handoff**: return a target agent for the client/UI to perform an explicit transfer
+- `routing.handoffTargets`: `[{ agentId: string, role?: string }]` — allowed target agents
+- `routing.defaultHandoffAgentId`: `string` — single default target (optional)
+
+API responses from agent chat may include:
+
+- `handoffSuggested`, `handoffReason`
+- `handoffTargetAgentId`, `handoffMode`
+- `helpFromAgentId`, `helpContent` (when `handoffMode === "help"`)
 
 **Key files:** `packages/@tinadmin/core/src/chatbot/` (README, chat-service, rag-engine, knowledge-base, vector-store, prompts), `apps/tenant/src/core/agents/providers/advanced.ts`, `apps/tenant/src/core/agents/knowledge.ts`. API routes: `POST /api/chatbot/chat`, knowledge-base routes under `/api/chatbot/knowledge-base`.
 
