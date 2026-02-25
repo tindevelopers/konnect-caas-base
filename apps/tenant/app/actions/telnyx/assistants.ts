@@ -543,7 +543,7 @@ export async function callAssistantAction(payload: CallAssistantPayload): Promis
           if (payload.streamUrl?.trim()) {
             const streamUrl = payload.streamUrl.trim();
             dialBody.stream_url = streamUrl;
-            dialBody.stream_track = payload.streamTrack || "both_tracks";
+            dialBody.stream_track = payload.streamTrack || "outbound_track";
             // Request PCMU so stream matches our player (PCMU, PCMA, L16 supported)
             dialBody.stream_codec = payload.streamCodec || "PCMU";
 

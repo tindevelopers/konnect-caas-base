@@ -14,12 +14,42 @@ import type {
   AgentChatRequest,
   AgentChatResponse,
   AgentInstance,
+  CrossAgentMode,
   RecordAgentUsageInput,
 } from "./types";
 
 function buildConversationTitle(message: string) {
   const title = message.trim().slice(0, 60);
   return title.length < message.trim().length ? `${title}...` : title;
+}
+
+function extractString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function resolveCrossAgentMode(agent: AgentInstance): CrossAgentMode {
+  const mode = extractString(agent.routing?.crossAgentMode);
+  return mode === "help" ? "help" : "handoff";
+}
+
+function buildHelpRequestMessage(args: {
+  userMessage: string;
+  primaryAgentName: string;
+  primaryAgentResponse: string;
+  handoffReason?: string;
+}) {
+  return [
+    "You are a specialist assistant helping another agent respond better.",
+    "Provide a concise improvement or additional helpful details that can be shown to the user.",
+    "Do not mention internal system details unless the user asked for them.",
+    "",
+    `User message:\n${args.userMessage}`,
+    "",
+    `Primary agent (${args.primaryAgentName}) draft response:\n${args.primaryAgentResponse}`,
+    ...(args.handoffReason
+      ? ["", `Context: escalation intent detected (${args.handoffReason}).`]
+      : []),
+  ].join("\n");
 }
 
 async function ensureConversation(args: {
@@ -262,6 +292,8 @@ export async function routeAgentChat(
     },
   });
 
+  const derivedHandoffMode = providerResult.handoffMode ?? resolveCrossAgentMode(agent);
+
   let conversationId =
     providerResult.conversationId ?? input.conversationId ?? undefined;
   if (!conversationId) {
@@ -326,9 +358,95 @@ export async function routeAgentChat(
       provider_conversation_id: providerResult.externalConversationId ?? null,
       handoff_suggested: providerResult.handoffSuggested ?? false,
       handoff_reason: providerResult.handoffReason ?? null,
+      handoff_target_agent_id: providerResult.handoffTargetAgentId ?? null,
+      handoff_mode: derivedHandoffMode,
       usage,
     },
   });
+
+  const isInternalCrossAgent =
+    Boolean((input.metadata ?? {}).__internal_cross_agent) ||
+    Number((input.metadata ?? {}).__cross_agent_depth ?? 0) > 0;
+
+  let helpFromAgentId: string | undefined;
+  let helpContent: string | undefined;
+
+  if (
+    !isInternalCrossAgent &&
+    providerResult.handoffSuggested &&
+    providerResult.handoffTargetAgentId &&
+    derivedHandoffMode === "help"
+  ) {
+    await emitAgentEvent({
+      tenantId,
+      provider: agent.provider,
+      eventType: "agent.help.requested",
+      externalId: agent.external_ref ?? undefined,
+      payload: {
+        trace_id: traceId,
+        from_agent_id: agent.id,
+        to_agent_id: providerResult.handoffTargetAgentId,
+        conversation_id: conversationId,
+      },
+    });
+
+    const helpResponse = await routeAgentChat({
+      tenantId,
+      agentId: providerResult.handoffTargetAgentId,
+      message: buildHelpRequestMessage({
+        userMessage: input.message,
+        primaryAgentName: agent.display_name,
+        primaryAgentResponse: providerResult.content,
+        handoffReason: providerResult.handoffReason,
+      }),
+      channel: input.channel ?? "webchat",
+      userId: input.userId,
+      metadata: {
+        ...(input.metadata ?? {}),
+        __internal_cross_agent: true,
+        __cross_agent_depth: 1,
+        requestedByAgentId: agent.id,
+        requestedByConversationId: conversationId,
+        requestedByTraceId: traceId,
+      },
+    });
+
+    helpFromAgentId = helpResponse.agentId;
+    helpContent = helpResponse.message;
+
+    await emitAgentEvent({
+      tenantId,
+      provider: agent.provider,
+      eventType: "agent.help.completed",
+      externalId: agent.external_ref ?? undefined,
+      payload: {
+        trace_id: traceId,
+        from_agent_id: agent.id,
+        to_agent_id: providerResult.handoffTargetAgentId,
+        conversation_id: conversationId,
+        help_conversation_id: helpResponse.conversationId,
+      },
+    });
+  } else if (
+    !isInternalCrossAgent &&
+    providerResult.handoffSuggested &&
+    providerResult.handoffTargetAgentId &&
+    derivedHandoffMode === "handoff"
+  ) {
+    await emitAgentEvent({
+      tenantId,
+      provider: agent.provider,
+      eventType: "agent.handoff.suggested",
+      externalId: agent.external_ref ?? undefined,
+      payload: {
+        trace_id: traceId,
+        from_agent_id: agent.id,
+        to_agent_id: providerResult.handoffTargetAgentId,
+        conversation_id: conversationId,
+        reason: providerResult.handoffReason ?? null,
+      },
+    });
+  }
 
   await updateAgentInstance(tenantId, agent.id, {
     metadata: {
@@ -352,6 +470,10 @@ export async function routeAgentChat(
     externalConversationId: providerResult.externalConversationId,
     handoffSuggested: providerResult.handoffSuggested,
     handoffReason: providerResult.handoffReason,
+    handoffTargetAgentId: providerResult.handoffTargetAgentId,
+    handoffMode: derivedHandoffMode,
+    helpFromAgentId,
+    helpContent,
     usage,
   };
 }

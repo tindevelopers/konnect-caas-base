@@ -42,6 +42,8 @@ export default function AudioStreamPlayer({
   const audioBufferQueueRef = useRef<AudioBuffer[]>([]);
   const isProcessingRef = useRef(false);
   const mediaFormatRef = useRef<MediaFormat>({ ...DEFAULT_MEDIA_FORMAT });
+  /** Next start time for scheduled playback (avoids gaps/pops between chunks). */
+  const nextScheduleTimeRef = useRef<number>(0);
 
   useEffect(() => {
     if (!isActive || !streamUrl) {
@@ -110,9 +112,14 @@ export default function AudioStreamPlayer({
       };
 
       ws.onerror = (err) => {
+        // Browser passes an Event, not an Error — it often stringifies as "{}". Log a clear message instead.
+        const isLocalhost = /localhost|127\.0\.0\.1/.test(streamUrl);
+        const hint = isLocalhost
+          ? " Ensure the local WebSocket server is running: pnpm ws:server (port 3012)."
+          : "";
         console.error("[TELEMETRY] AudioStreamPlayer WebSocket error", {
           timestamp: new Date().toISOString(),
-          error: err,
+          message: "WebSocket connection failed (network or server unreachable)." + hint,
           streamUrl: streamUrl.substring(0, 100),
           readyState: ws.readyState,
         });
@@ -182,6 +189,10 @@ export default function AudioStreamPlayer({
           };
         } else {
           mediaFormatRef.current = { ...DEFAULT_MEDIA_FORMAT };
+        }
+        // Align next scheduled time with stream start so chunks play back-to-back with no gaps
+        if (audioContextRef.current) {
+          nextScheduleTimeRef.current = audioContextRef.current.currentTime;
         }
         console.log("[TELEMETRY] AudioStreamPlayer stream started", {
           timestamp: new Date().toISOString(),
@@ -330,26 +341,32 @@ export default function AudioStreamPlayer({
     }
   };
 
-  const processAudioQueue = async () => {
-    if (!audioContextRef.current || isProcessingRef.current) return;
-    
+  const processAudioQueue = () => {
+    const ctx = audioContextRef.current;
+    if (!ctx || isProcessingRef.current) return;
+
     isProcessingRef.current = true;
 
-    while (audioBufferQueueRef.current.length > 0 && audioContextRef.current.state === "running") {
+    while (audioBufferQueueRef.current.length > 0 && ctx.state !== "closed") {
       const buffer = audioBufferQueueRef.current.shift();
       if (!buffer) break;
 
       try {
-        const source = audioContextRef.current.createBufferSource();
-        source.buffer = buffer;
-        source.connect(audioContextRef.current.destination);
-        source.start();
+        // Resume context if suspended (e.g. browser autoplay policy)
+        if (ctx.state === "suspended") {
+          ctx.resume().catch(() => {});
+        }
+        if (ctx.state !== "running" && ctx.state !== "suspended") break;
 
-        // Wait for buffer to finish playing (approximate)
-        await new Promise((resolve) => {
-          source.onended = resolve;
-          setTimeout(resolve, buffer.duration * 1000);
-        });
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(ctx.destination);
+
+        // Schedule at exact time to avoid gaps/pops between chunks (no event-loop jitter)
+        const now = ctx.currentTime;
+        const startTime = Math.max(nextScheduleTimeRef.current, now);
+        source.start(startTime);
+        nextScheduleTimeRef.current = startTime + buffer.duration;
       } catch (err) {
         console.error("[AudioStreamPlayer] Error playing audio buffer:", err);
       }
@@ -370,6 +387,7 @@ export default function AudioStreamPlayer({
     }
 
     audioBufferQueueRef.current = [];
+    nextScheduleTimeRef.current = 0;
     setIsConnected(false);
     setIsPlaying(false);
   };

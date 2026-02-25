@@ -63,6 +63,26 @@ function estimateTokenCount(text: string) {
   return Math.max(1, Math.ceil(text.length / 4));
 }
 
+function extractString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function resolveHandoffTargetAgentId(
+  routing: Record<string, unknown>
+): string | undefined {
+  const defaultId = extractString(routing.defaultHandoffAgentId);
+  if (defaultId) return defaultId;
+
+  const targets = routing.handoffTargets;
+  if (!Array.isArray(targets)) return undefined;
+  for (const target of targets) {
+    if (!target || typeof target !== "object") continue;
+    const id = extractString((target as Record<string, unknown>).agentId);
+    if (id) return id;
+  }
+  return undefined;
+}
+
 function estimateModelCost(inputTokens: number, outputTokens: number, model?: string) {
   const normalized = (model ?? "").toLowerCase();
   if (normalized.includes("mini") || normalized.includes("haiku")) {
@@ -106,6 +126,9 @@ export class AdvancedAgentProvider implements AgentProviderDriver {
     const handoffReason = handoffSuggested
       ? "User requested escalation to a human."
       : undefined;
+    const handoffTargetAgentId = handoffSuggested
+      ? resolveHandoffTargetAgentId(request.agent.routing ?? {})
+      : undefined;
     const inputTokens = estimateTokenCount(request.message);
     const outputTokens = estimateTokenCount(response.message);
     const model = request.agent.model_profile?.model as string | undefined;
@@ -123,6 +146,7 @@ export class AdvancedAgentProvider implements AgentProviderDriver {
       },
       handoffSuggested,
       handoffReason,
+      handoffTargetAgentId,
       toolResults,
       raw: response.metadata ?? {},
     };

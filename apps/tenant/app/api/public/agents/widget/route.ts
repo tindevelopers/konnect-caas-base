@@ -145,6 +145,18 @@ function buildWidgetScript(args: {
       }
       conversationId = data.conversationId || conversationId;
       append(data.message || "No response", "assistant");
+
+      if (data && data.handoffMode === "help" && data.helpContent) {
+        append("Specialist help:\n" + data.helpContent, "assistant");
+      }
+
+      if (data && data.handoffMode === "handoff" && data.handoffSuggested) {
+        const reason = data.handoffReason ? " (" + data.handoffReason + ")" : "";
+        append(
+          "Handoff requested" + reason + ". Please contact support or continue in the main app for a full transfer.",
+          "assistant"
+        );
+      }
     } catch (error) {
       thinking.remove();
       append("Network error. Please try again.", "assistant");

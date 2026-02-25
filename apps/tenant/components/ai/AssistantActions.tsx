@@ -6,7 +6,8 @@ import Button from "@/components/ui/button/Button";
 import { Modal } from "@/components/ui/modal";
 import Alert from "@/components/ui/alert/Alert";
 import { useModal } from "@/hooks/useModal";
-import { CallIcon, CopyIcon, PencilIcon } from "@/icons";
+import { CallIcon, ChatIcon, CopyIcon, PencilIcon } from "@/icons";
+import { listContactDialTargetsAction } from "@/app/actions/crm/contacts";
 import {
   callAssistantAction,
   cloneAssistantAction,
@@ -21,6 +22,7 @@ import {
 import { listPhoneNumbersAssignedToAssistantAction } from "@/app/actions/telnyx/numbers";
 import CallStatusModal from "./CallStatusModal";
 import WebcallModal from "./WebcallModal";
+import TestChatModal from "./TestChatModal";
 import AudioStreamPlayer from "./AudioStreamPlayer";
 
 interface AssistantActionsProps {
@@ -87,6 +89,8 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
   const [testError, setTestError] = useState<string | null>(null);
 
   const [assignedNumbersForCall, setAssignedNumbersForCall] = useState<Array<{ phone_number: string }>>([]);
+  const [contactDialTargets, setContactDialTargets] = useState<Array<{ value: string; label: string }>>([]);
+  const [loadingContactDialTargets, setLoadingContactDialTargets] = useState(false);
   const [callControlApps, setCallControlApps] = useState<Array<{ id: string; application_name: string | null }>>([]);
   const [callControlAppsError, setCallControlAppsError] = useState<string | null>(null);
   const [loadingCallControlApps, setLoadingCallControlApps] = useState(false);
@@ -94,6 +98,7 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
   const [newCallControlAppName, setNewCallControlAppName] = useState("Voice / AI Assistant");
 
   const webcallModal = useModal();
+  const testChatModal = useModal();
 
   useEffect(() => {
     if (!assistantId) return;
@@ -109,12 +114,18 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
     setCallResult(null);
     setCallControlAppsError(null);
     setLoadingCallControlApps(true);
+    setLoadingContactDialTargets(true);
     try {
-      const res = await listCallControlApplicationsAction();
+      const [res, contacts] = await Promise.all([
+        listCallControlApplicationsAction(),
+        listContactDialTargetsAction().catch(() => []),
+      ]);
       setCallControlApps(res.data ?? []);
       if (res.error) setCallControlAppsError(res.error);
+      setContactDialTargets(contacts ?? []);
     } finally {
       setLoadingCallControlApps(false);
+      setLoadingContactDialTargets(false);
     }
 
     // Auto-populate WebSocket stream URL
@@ -204,7 +215,7 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
         fromNumber: callForm.fromNumber,
         connectionId: callForm.connectionId,
         streamUrl: callForm.streamUrl || undefined,
-        streamTrack: "both_tracks",
+        streamTrack: "outbound_track",
       });
       setCallResult(result);
       setBanner({
@@ -287,6 +298,10 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
     webcallModal.openModal();
   }, [webcallModal]);
 
+  const handleTestChat = useCallback(() => {
+    testChatModal.openModal();
+  }, [testChatModal]);
+
 
   return (
     <div className="mt-8 rounded-2xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-900">
@@ -313,6 +328,13 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
           onClick={openCallModal}
         >
           Call Assistant
+        </Button>
+        <Button
+          variant="outline"
+          startIcon={<ChatIcon className="h-4 w-4" />}
+          onClick={handleTestChat}
+        >
+          Test Chat
         </Button>
         <Button
           variant="outline"
@@ -374,6 +396,25 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
               <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-400">
                 Destination (To)
               </label>
+              {loadingContactDialTargets ? (
+                <p className="mb-2 text-sm text-gray-500 dark:text-gray-400">Loading contact numbers…</p>
+              ) : contactDialTargets.length > 0 ? (
+                <select
+                  className="mb-2 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-gray-600 dark:bg-gray-800 dark:text-white/90"
+                  value={contactDialTargets.some((c) => c.value === callForm.toNumber) ? callForm.toNumber : ""}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v) setCallForm((prev) => ({ ...prev, toNumber: v }));
+                  }}
+                >
+                  <option value="">Choose contact number…</option>
+                  {contactDialTargets.map((c) => (
+                    <option key={c.value} value={c.value}>
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
+              ) : null}
               <input
                 type="text"
                 placeholder="+15551234567"
@@ -751,6 +792,13 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
       <WebcallModal
         isOpen={webcallModal.isOpen}
         onClose={webcallModal.closeModal}
+        assistantId={assistantId}
+      />
+
+      {/* Test Chat Modal */}
+      <TestChatModal
+        isOpen={testChatModal.isOpen}
+        onClose={testChatModal.closeModal}
         assistantId={assistantId}
       />
 
