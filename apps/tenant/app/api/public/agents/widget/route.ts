@@ -152,6 +152,9 @@ function buildWidgetScript(args: {
         return;
       }
       conversationId = data.conversationId || conversationId;
+      if (data && typeof data.tieredEscalationBanner === "string" && data.tieredEscalationBanner.trim()) {
+        append(data.tieredEscalationBanner.trim(), "assistant", false);
+      }
       const content = data.chat_markdown || data.voice_text || data.message || "No response";
       append(miniMarkdown(content), "assistant", true);
 

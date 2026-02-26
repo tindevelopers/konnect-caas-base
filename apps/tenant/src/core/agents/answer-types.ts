@@ -54,6 +54,7 @@ export interface AnswerResponse {
 
   handoffSuggested: boolean;
   handoffReason?: string;
+  tieredEscalationBanner?: string;
 
   toolResults?: unknown;
   usage?: RecordAgentUsageInput;

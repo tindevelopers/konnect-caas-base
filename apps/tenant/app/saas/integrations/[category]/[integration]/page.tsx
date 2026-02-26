@@ -332,6 +332,9 @@ export default function IntegrationDetailPage() {
       });
       if (result.ok) {
         setIsConnected(true);
+        setError(null);
+      } else {
+        setError(result.message);
       }
     } catch (testError) {
       setHealth({

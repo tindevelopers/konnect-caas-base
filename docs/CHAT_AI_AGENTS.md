@@ -49,6 +49,27 @@ Implementation lives in:
 
 ---
 
+## How chat works and how the three tiers work together
+
+**One agent = one provider.** Each platform agent (`agent_instances`) has a single `provider` (`telnyx`, `advanced`, or `abacus`). When a user sends a chat message, they are always talking to **one agent**. The app resolves that agent (by `agentId`, `publicKey`, or `listingExternalId`), then calls that agent’s provider’s `sendMessage()`. So:
+
+- **Telnyx agent** → Telnyx provider → Telnyx AI Assistants API (chat and/or voice).
+- **Enhanced agent** → Advanced provider → in-app RAG (`processChatMessage`).
+- **Abacus agent** → Abacus provider → Abacus getChatResponse API.
+
+The three tiers do **not** run in sequence in a single request. There is no “try Telnyx first, then Abacus.” The user (or embed) chooses which agent to talk to; that agent’s provider handles the message.
+
+**Channels.** The same agent can be used for different channels (`webchat`, `sms`, `voice`). For **voice**, the platform uses Telnyx call control and (when configured) a Telnyx AI assistant on the call — that’s a separate path from the web chat API. So “Telnyx” in practice often means: voice/calls handled by Telnyx; **chat** to a Telnyx-backed agent goes through the same `routeAgentChat` → Telnyx provider → Telnyx `/ai/assistants/{id}/chat` API.
+
+**Handoff (cross-agent).** Only the **Advanced** provider currently implements handoff. It detects keywords (“human”, “live agent”, “representative”, “manager”) and can return `handoffSuggested` and `handoffTargetAgentId` (from the agent’s `routing.handoffTargets` or `routing.defaultHandoffAgentId`). The **target agent** can be any platform agent — including one backed by **Abacus**. So:
+
+- **Advanced → Abacus:** Yes, in the sense that the Advanced agent can suggest a handoff to another agent, and that other agent can be an Abacus agent. The client receives `handoffTargetAgentId`; the widget today only shows a message (“Handoff requested… Please contact support or continue in the main app for a full transfer”) and does not auto-switch the conversation to the target agent.
+- **Telnyx → Abacus:** No. The Telnyx provider does **not** return `handoffSuggested` or `handoffTargetAgentId`. So a Telnyx-backed agent (voice or chat) does not hand off to Abacus or to any other agent in the current implementation. To get “Telnyx agent hands off to Abacus chatbot,” you would need to add handoff logic in the Telnyx provider (e.g. call Telnyx with handoff config, or detect intent and return a target Abacus agent ID) and/or implement a voice-to-chat transfer flow that assigns the conversation to an Abacus agent.
+
+**Summary:** Chat is “one request → one agent → one provider.” Handoff is “Advanced suggests another agent (e.g. Abacus); client can then start a new conversation with that agent.” Telnyx does not yet perform handoff to Abacus.
+
+---
+
 ## 1. Telnyx
 
 **What it is:** AI assistants powered by the Telnyx AI Assistants API. Used for **voice** (PSTN, WebRTC) and optionally chat. The platform stores an agent record whose `external_ref` is the Telnyx assistant ID.
