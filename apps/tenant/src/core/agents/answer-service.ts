@@ -296,7 +296,7 @@ export async function getAgentAnswer(
     return buildAnswerResponse(request, {
       agentId: entryAgent.id,
       provider: entryAgent.provider,
-      conversationId: request.conversationId,
+      conversationId: request.conversationId ?? "",
       externalConversationId: request.externalConversationId,
       message:
         "This assistant is configured for proxy-brain mode but is missing `routing.level1AgentId`. Please set level1AgentId to a non-proxy Telnyx agent instance.",
