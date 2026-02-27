@@ -251,6 +251,7 @@ export async function getAgentAnswer(
   };
 
   const entryAgent = await getEntryAgent(request);
+
   if (!entryAgent || !asBoolean(entryAgent.routing?.tieredChat)) {
     const chatResponse: AgentChatResponse = await routeAgentChat({
       tenantId: request.tenantId ?? "",
@@ -276,6 +277,32 @@ export async function getAgentAnswer(
     routing.tieredResetIdleMinutes,
     DEFAULT_RESET_IDLE_MINUTES
   );
+
+  // Prevent infinite recursion when a Telnyx “proxy brain” assistant is used as the entry agent.
+  // In this mode, the entry agent MUST route L1 to a different (non-proxy) assistant via routing.level1AgentId.
+  if (
+    baseMetadata &&
+    (baseMetadata as Record<string, unknown>).telnyx_proxy_brain === true &&
+    level1AgentId === entryAgent.id
+  ) {
+    await logTieredWarning({
+      tenantId,
+      level: 2,
+      reason: "proxy_brain_missing_level1_agent",
+      conversationId: request.conversationId,
+      entryAgentId: entryAgent.id,
+    });
+
+    return buildAnswerResponse(request, {
+      agentId: entryAgent.id,
+      provider: entryAgent.provider,
+      conversationId: request.conversationId,
+      externalConversationId: request.externalConversationId,
+      message:
+        "This assistant is configured for proxy-brain mode but is missing `routing.level1AgentId`. Please set level1AgentId to a non-proxy Telnyx agent instance.",
+      usage: undefined,
+    });
+  }
 
   let existingEscalatedAgentId: string | undefined;
   let existingConversationMetadata: Record<string, unknown> | undefined;

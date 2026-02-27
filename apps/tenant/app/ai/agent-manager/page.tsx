@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { listTenantAssistantsForVoiceAction } from "@/app/actions/telnyx/assistants";
 
 type Agent = {
@@ -529,7 +530,12 @@ export default function AgentManagerPage() {
                 <tr key={agent.id} className="border-b border-gray-100 dark:border-gray-800">
                   <td className="px-4 py-3">
                     <div className="font-medium text-gray-900 dark:text-white">
-                      {agent.display_name}
+                      <Link
+                        href={`/ai/agent-manager/${agent.id}`}
+                        className="text-indigo-600 hover:text-indigo-800 hover:underline dark:text-indigo-400 dark:hover:text-indigo-300"
+                      >
+                        {agent.display_name}
+                      </Link>
                     </div>
                     <div className="text-xs text-gray-500 dark:text-gray-400">
                       {agent.external_ref || "No external ref"} · {agent.status}

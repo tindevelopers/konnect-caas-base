@@ -18,6 +18,7 @@ interface AnswerApiResponse {
   conversationId?: string;
   voice_text?: string;
   chat_markdown?: string;
+  tieredEscalationBanner?: string;
   citations?: Array<{ title: string; source: string; url?: string }>;
   product_recommendations?: Array<{
     kind: string;
@@ -160,6 +161,18 @@ export default function EmbedPreviewSection({
       if (data.conversationId) setChatConversationId(data.conversationId);
       if (data.product_recommendations?.length) setLastSuggestions(data.product_recommendations);
       if (data.citations?.length) setLastCitations(data.citations);
+
+      const banner = typeof data.tieredEscalationBanner === "string" ? data.tieredEscalationBanner.trim() : "";
+      if (banner) {
+        setChatMessages((prev) => [
+          ...prev,
+          {
+            id: `banner-${Date.now()}`,
+            role: "assistant",
+            content: banner,
+          },
+        ]);
+      }
 
       const assistantMsg: ChatMessage = {
         id: `a-${Date.now()}`,

@@ -24,6 +24,21 @@ const LEVEL3_PHRASES = [
   "i want to purchase",
   "place an order",
   "order this",
+  // Strategic / enterprise / complex intents
+  "compare plans",
+  "compare pricing",
+  "pricing options",
+  "enterprise",
+  "implementation roadmap",
+  "rollout plan",
+  "integration plan",
+  "security review",
+  "data residency",
+  "sla",
+  "roi",
+  "call center",
+  "contact center",
+  "50 agents",
 ];
 
 const LEVEL2_L1_HINTS = [
@@ -38,6 +53,9 @@ const LEVEL3_L1_HINTS = [
   "i can't process orders",
   "connect you to a specialist",
   "sales specialist",
+  "enterprise team",
+  "solutions engineer",
+  "implementation team",
 ];
 
 const RESET_PHRASES = [
