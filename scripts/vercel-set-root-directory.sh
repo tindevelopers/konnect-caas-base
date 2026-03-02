@@ -51,10 +51,11 @@ echo "Project: $PROJECT_ID"
 URL="https://api.vercel.com/v9/projects/${PROJECT_ID}"
 [[ -n "$TEAM_ID" ]] && URL="${URL}?teamId=${TEAM_ID}"
 
+# Set rootDirectory and clear outputDirectory (use default .next inside app root)
 RESPONSE="$(curl -s -w "\n%{http_code}" -X PATCH "$URL" \
   -H "Authorization: Bearer $VERCEL_TOKEN" \
   -H "Content-Type: application/json" \
-  -d "{\"rootDirectory\": \"$ROOT_DIRECTORY\"}")"
+  -d "{\"rootDirectory\": \"$ROOT_DIRECTORY\", \"outputDirectory\": null}")"
 HTTP_CODE="$(echo "$RESPONSE" | tail -n1)"
 BODY="$(echo "$RESPONSE" | sed '$d')"
 
@@ -62,4 +63,4 @@ if [[ "$HTTP_CODE" != "200" ]]; then
   echo "API error (HTTP $HTTP_CODE): $BODY"
   exit 1
 fi
-echo "Root Directory updated successfully. Redeploy (e.g. push a commit or Redeploy in dashboard) for it to take effect."
+echo "Root Directory and Output Directory (cleared) updated. Redeploy (e.g. push a commit or Redeploy in dashboard) for it to take effect."
