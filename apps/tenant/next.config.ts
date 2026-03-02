@@ -12,7 +12,6 @@ if (process.env.NODE_ENV && !['development', 'production', 'test'].includes(proc
 }
 
 const nextConfig: NextConfig = {
-  output: "standalone",
   serverExternalPackages: ['openai'],
   outputFileTracingRoot: path.join(__dirname, "../.."),
 
