@@ -322,6 +322,7 @@ export class AbacusAgentProvider implements AgentProviderDriver {
         "Abacus API key or deployment token is not configured. Connect Abacus under Integrations first."
       );
     }
+    const useDeploymentApi = Boolean(deploymentId?.trim() && deploymentToken);
     // Predictions API (apps.abacus.ai): deploymentToken + deploymentId in query; body has messages only.
     const systemPrompt = request.agent.model_profile?.systemPrompt as
       | string
