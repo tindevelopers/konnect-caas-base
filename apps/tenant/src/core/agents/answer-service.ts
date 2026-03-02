@@ -171,6 +171,33 @@ async function updateConversationMetadata(args: {
     .eq("id", args.conversationId);
 }
 
+async function markConversationEscalated(args: {
+  tenantId: string;
+  conversationId?: string;
+  targetAgentId: string;
+  existingMetadata?: Record<string, unknown>;
+}) {
+  if (!args.conversationId) return;
+  const stateAfterEscalation =
+    (await getConversationState(args.tenantId, args.conversationId)) ??
+    ({
+      metadata: args.existingMetadata ?? {},
+    } as {
+      metadata: Record<string, unknown>;
+      lastActivityAt?: string;
+    });
+
+  await updateConversationMetadata({
+    tenantId: args.tenantId,
+    conversationId: args.conversationId,
+    metadata: {
+      ...stateAfterEscalation.metadata,
+      tiered_escalated_to_agent_id: args.targetAgentId,
+      tiered_escalated_at: new Date().toISOString(),
+    },
+  });
+}
+
 async function logTieredWarning(args: {
   tenantId: string;
   level: 2;
@@ -602,12 +629,12 @@ export async function getAgentAnswer(
     // #endregion
     console.error("[TieredOrchestration] L1 routing failed", error);
 
-    // In proxy-brain mode, direct Telnyx L1 can fail (e.g. conversation parameter errors).
-    // Fallback to delegate/L2 routing if available so chat still responds.
-    if (isProxyBrain && (proxyDelegateAgentId || level2AgentId || entryAgent.provider !== "telnyx")) {
+    // In transport-only proxy mode, always delegate processing to the configured agent.
+    if (isProxyBrain && proxyDelegateAgentId) {
       try {
-        const fallbackAgentId =
-          proxyDelegateAgentId || level2AgentId || entryAgent.id;
+        const fallbackAgentId = proxyDelegateAgentId;
+        const proxyFallbackTimeoutMs = Math.min(l1TimeoutMs, 7000);
+        const fallbackStartedAt = Date.now();
         // #region agent log
         fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
           method: "POST",
@@ -620,26 +647,66 @@ export async function getAgentAnswer(
               proxyDelegateAgentId: proxyDelegateAgentId ?? null,
               level2AgentId: level2AgentId ?? null,
               provider: entryAgent.provider,
+              proxyFallbackTimeoutMs,
             },
             timestamp: Date.now(),
             hypothesisId: "H16",
           }),
         }).catch(() => {});
         // #endregion
-        const providerFallbackL1 = await routeAgentChat({
-          tenantId,
-          agentId: fallbackAgentId,
-          message: request.message,
-          conversationId: request.conversationId,
-          channel: request.channel,
-          userId: request.userId,
-          metadata: {
-            ...baseMetadata,
-            tieredEscalationSource: "proxy_l1_provider_fallback",
-          },
-        });
+        const providerFallbackL1 = await withTimeout(
+          routeAgentChat({
+            tenantId,
+            agentId: fallbackAgentId,
+            message: request.message,
+            conversationId: request.conversationId,
+            channel: request.channel,
+            userId: request.userId,
+            metadata: {
+              ...baseMetadata,
+              tieredEscalationSource: "proxy_l1_provider_fallback",
+            },
+          }),
+          proxyFallbackTimeoutMs,
+          "Proxy L1 fallback routing timed out"
+        );
+        // #region agent log
+        fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            location: "answer-service.ts:L1catch:fallback-success",
+            message: "Proxy L1 fallback completed",
+            data: {
+              fallbackAgentId,
+              elapsedMs: Date.now() - fallbackStartedAt,
+            },
+            timestamp: Date.now(),
+            hypothesisId: "H16",
+          }),
+        }).catch(() => {});
+        // #endregion
         return buildAnswerResponse(request, providerFallbackL1);
       } catch (providerFallbackError) {
+        // #region agent log
+        fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            location: "answer-service.ts:L1catch:fallback-error",
+            message: "Proxy L1 fallback failed",
+            data: {
+              error:
+                providerFallbackError instanceof Error
+                  ? providerFallbackError.message
+                  : String(providerFallbackError),
+              elapsedMs: Date.now() - fallbackStartedAt,
+            },
+            timestamp: Date.now(),
+            hypothesisId: "H16",
+          }),
+        }).catch(() => {});
+        // #endregion
         console.error(
           "[TieredOrchestration] Proxy L1 provider fallback failed",
           providerFallbackError
@@ -666,6 +733,12 @@ export async function getAgentAnswer(
             ...baseMetadata,
             tieredEscalationSource: "l1_fallback",
           },
+        });
+        await markConversationEscalated({
+          tenantId,
+          conversationId: fallbackL2.conversationId,
+          targetAgentId: level2AgentId,
+          existingMetadata: existingConversationMetadata,
         });
         return buildAnswerResponse(request, fallbackL2, TIERED_LEVEL2_BANNER);
       } catch (l2Error) {
@@ -788,24 +861,11 @@ export async function getAgentAnswer(
     });
   }
 
-  const conversationId = escalatedResponse.conversationId;
-  const stateAfterEscalation =
-    (await getConversationState(tenantId, conversationId)) ??
-    ({
-      metadata: existingConversationMetadata ?? {},
-    } as {
-      metadata: Record<string, unknown>;
-      lastActivityAt?: string;
-    });
-
-  await updateConversationMetadata({
+  await markConversationEscalated({
     tenantId,
-    conversationId,
-    metadata: {
-      ...stateAfterEscalation.metadata,
-      tiered_escalated_to_agent_id: targetAgentId,
-      tiered_escalated_at: new Date().toISOString(),
-    },
+    conversationId: escalatedResponse.conversationId,
+    targetAgentId,
+    existingMetadata: existingConversationMetadata,
   });
 
   return buildAnswerResponse(request, escalatedResponse, TIERED_LEVEL2_BANNER);
