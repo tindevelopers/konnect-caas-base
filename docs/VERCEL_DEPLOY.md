@@ -1,25 +1,25 @@
 # Vercel deployment (tenant app)
 
-This project deploys the **tenant** app (`apps/tenant`) from the monorepo root.
+This project deploys the **tenant** app (`apps/tenant`). Use the app as the project root to avoid deploy-time internal errors.
 
-## Configuration
+## Recommended: Root Directory = `apps/tenant`
 
-- **Root**: Build runs from repo root (no Root Directory override).
-- **Build**: `pnpm turbo run build --filter=@tinadmin/tenant`
-- **Output**: `apps/tenant/.next` (set in root `vercel.json` via `outputDirectory`).
+To avoid **"We encountered an internal error"** during **Deploying outputs**, set the project root to the app:
+
+1. **Vercel Dashboard** → your project → **Settings** → **General**.
+2. Under **Root Directory**, set **`apps/tenant`** (or click **Edit** and choose `apps/tenant`).
+3. Leave **Output Directory** empty (Vercel will use `.next` inside `apps/tenant`).
+4. **Redeploy** (e.g. push a commit or use **Redeploy** on the latest deployment).
+
+With this, Vercel uses `apps/tenant/vercel.json`: install and build run from the repo root via `cd ../..`, and the built output is `apps/tenant/.next`, which matches the project root.
+
+## Alternative: Deploy from repo root
+
+If you keep **Root Directory** empty (repo root), root `vercel.json` sets `outputDirectory: "apps/tenant/.next"` and the turbo build command. Build may succeed but **Deploying outputs** can hit an internal error; if so, switch to **Root Directory = apps/tenant** above.
 
 ## If you see "apps/admin/.next was not found"
 
-The build produces `apps/tenant/.next`, not `apps/admin/.next`. There is no `apps/admin` in this repo.
-
-1. **Output directory**  
-   Root `vercel.json` now sets `outputDirectory: "apps/tenant/.next"`. If your project was created with a different output path, this should fix it.
-
-2. **Root Directory in Vercel**  
-   In **Project Settings → General → Root Directory**, leave it **empty** (or `.`) so the build runs from the repo root. If it is set to `apps/admin`, clear it.
-
-3. **Redeploy**  
-   Trigger a new deployment after changing settings or pushing the `vercel.json` update.
+The build produces `apps/tenant/.next`; there is no `apps/admin` in this repo. Set **Output Directory** to `apps/tenant/.next` (when using repo root) or use **Root Directory = apps/tenant** so the default `.next` is correct.
 
 ## Node version
 
