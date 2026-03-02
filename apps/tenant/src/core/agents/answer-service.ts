@@ -563,6 +563,31 @@ export async function getAgentAnswer(
     }).catch(() => {});
     // #endregion
     console.error("[TieredOrchestration] L1 routing failed", error);
+    // When L1 fails, still consider escalation from user message so strategic intents get L2
+    const intentOnFailure = detectTieredIntent(request.message, "");
+    if (
+      level2AgentId &&
+      intentOnFailure.escalate &&
+      intentOnFailure.confidence >= TIERED_ESCALATION_CONFIDENCE_THRESHOLD
+    ) {
+      try {
+        const fallbackL2 = await routeAgentChat({
+          tenantId,
+          agentId: level2AgentId,
+          message: request.message,
+          conversationId: request.conversationId ?? "",
+          channel: request.channel,
+          userId: request.userId,
+          metadata: {
+            ...baseMetadata,
+            tieredEscalationSource: "l1_fallback",
+          },
+        });
+        return buildAnswerResponse(request, fallbackL2, TIERED_LEVEL2_BANNER);
+      } catch (l2Error) {
+        console.error("[TieredOrchestration] L2 fallback after L1 failure", l2Error);
+      }
+    }
     return buildAnswerResponse(request, {
       agentId: entryAgent.id,
       provider: entryAgent.provider,

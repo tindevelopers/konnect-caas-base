@@ -4,7 +4,24 @@ This project deploys the **tenant** app (`apps/tenant`). Use the app as the proj
 
 ## Recommended: Root Directory = `apps/tenant`
 
-To avoid **"We encountered an internal error"** during **Deploying outputs**, set the project root to the app:
+To avoid **"We encountered an internal error"** during **Deploying outputs**, set the project root to the app.
+
+### Option A: Vercel CLI + API script
+
+1. **Link** (once from repo root): `vercel link` and choose your project.
+2. **Create a token** at [Vercel Account Tokens](https://vercel.com/account/tokens).
+3. **Run the script** from repo root:
+   ```bash
+   export VERCEL_TOKEN=your_token
+   ./scripts/vercel-set-root-directory.sh
+   ```
+   To set a different directory: `./scripts/vercel-set-root-directory.sh apps/portal`
+4. **Redeploy** (push a commit or use **Redeploy** in the dashboard).
+
+If the project is not linked (no `.vercel/project.json`), set:
+`VERCEL_PROJECT_NAME=your-vercel-project-name` and, for team projects, `VERCEL_TEAM_ID=team_xxx`.
+
+### Option B: Dashboard
 
 1. **Vercel Dashboard** → your project → **Settings** → **General**.
 2. Under **Root Directory**, set **`apps/tenant`** (or click **Edit** and choose `apps/tenant`).
