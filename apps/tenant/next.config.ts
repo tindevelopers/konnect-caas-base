@@ -12,9 +12,8 @@ if (process.env.NODE_ENV && !['development', 'production', 'test'].includes(proc
 }
 
 const nextConfig: NextConfig = {
-  // Server external packages (moved from experimental in Next.js 16)
+  output: "standalone",
   serverExternalPackages: ['openai'],
-  // Monorepo: trace serverless deps from repo root so workspace packages are included
   outputFileTracingRoot: path.join(__dirname, "../.."),
 
   experimental: {
