@@ -12,7 +12,10 @@
         "NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY",
         "STRIPE_SECRET_KEY",
         "STRIPE_WEBHOOK_SECRET",
-        "NODE_ENV"
+        "NODE_ENV",
+        "TELNYX_API_KEY",
+        "WEBSOCKET_URL",
+        "WEBSOCKET_AUTH_TOKEN"
       ]
     },
     "dev": {
