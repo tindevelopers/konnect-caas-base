@@ -26,7 +26,7 @@ If the project is not linked (no `.vercel/project.json`), set:
 1. **Vercel Dashboard** → your project → **Settings** → **General**.
 2. Under **Root Directory**, set **`apps/tenant`** (or click **Edit** and choose `apps/tenant`).
 3. Leave **Output Directory** empty (Vercel will use `.next` inside `apps/tenant`).
-4. **Redeploy** (e.g. push a commit or use **Redeploy** on the latest deployment).
+4. **Redeploy** (e.g. push a commit or use **Redeploy** on the latest deployment). For a full rebuild (avoids 404 on production), use a **Git push** so Vercel runs the full build; CLI deploys from repo root can reuse a fast cache and serve an empty or wrong output.
 
 With this, Vercel uses `apps/tenant/vercel.json`: install and build run from the repo root via `cd ../..`, and the built output is `apps/tenant/.next`, which matches the project root.
 
@@ -36,7 +36,10 @@ If you keep **Root Directory** empty (repo root), root `vercel.json` sets `outpu
 
 ## If you see "apps/admin/.next was not found"
 
-The build produces `apps/tenant/.next`; there is no `apps/admin` in this repo. Set **Output Directory** to `apps/tenant/.next` (when using repo root) or use **Root Directory = apps/tenant** so the default `.next` is correct.
+The project may still have **Output Directory** set to the old path `apps/admin/.next`. With **Root Directory = apps/tenant**, the output is `.next` inside that folder, so:
+
+- In **Vercel** → **Settings** → **Build & Development Settings**, set **Output Directory** to **empty** (leave blank so Vercel uses the default `.next`).
+- Or run `./scripts/vercel-set-root-directory.sh` again (it now also clears Output Directory via the API).
 
 ## Node version
 
