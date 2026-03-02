@@ -2,8 +2,9 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "version": 2,
   "framework": "nextjs",
-  "installCommand": "pnpm install",
-  "buildCommand": "pnpm turbo run build --filter=@tinadmin/tenant --force",
+  "installCommand": "corepack enable && pnpm install",
+  "buildCommand": "pnpm turbo run build --filter=@tinadmin/tenant",
   "outputDirectory": "apps/tenant/.next",
   "regions": ["iad1"]
 }
+
