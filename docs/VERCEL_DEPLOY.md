@@ -2,6 +2,17 @@
 
 This project deploys the **tenant** app (`apps/tenant`). Use the app as the project root to avoid deploy-time internal errors.
 
+## If 404 persists with Root Directory = apps/tenant: try repo root
+
+If you still get 404 NOT_FOUND after setting Root Directory to `apps/tenant`, switch to repo root:
+
+```bash
+export VERCEL_TOKEN=your_token
+./scripts/vercel-use-repo-root.sh
+```
+
+Then redeploy (push or Redeploy without cache). Root `vercel.json` will control the build and output.
+
 ## Recommended: Root Directory = `apps/tenant`
 
 To avoid **"We encountered an internal error"** during **Deploying outputs**, set the project root to the app.

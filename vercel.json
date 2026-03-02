@@ -3,7 +3,7 @@
   "version": 2,
   "framework": "nextjs",
   "installCommand": "corepack enable && pnpm install",
-  "buildCommand": "pnpm turbo run build --filter=@tinadmin/tenant",
+  "buildCommand": "TURBO_FORCE=true pnpm turbo run build --filter=@tinadmin/tenant --force",
   "outputDirectory": "apps/tenant/.next",
   "regions": ["iad1"]
 }
