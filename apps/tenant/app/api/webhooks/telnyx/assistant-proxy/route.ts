@@ -397,9 +397,19 @@ async function handleProxyPost(request: NextRequest) {
             providerConversationId,
           })
         : undefined;
+    const resolvedProxyAssistantId =
+      (assistantId && assistantId.trim()) ||
+      ((entryAgent as { external_ref?: string }).external_ref?.trim() ?? null);
 
     // #region agent log
-    const _logBefore = { step: "beforeGetAgentAnswer", entryAgentId: entryAgent.id, messageLen: message.length, hasConversationId: !!internalConversationId };
+    const _logBefore = {
+      step: "beforeGetAgentAnswer",
+      entryAgentId: entryAgent.id,
+      messageLen: message.length,
+      hasConversationId: !!internalConversationId,
+      assistantIdFromPayload: assistantId ?? null,
+      resolvedProxyAssistantId,
+    };
     fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -416,7 +426,7 @@ async function handleProxyPost(request: NextRequest) {
       externalConversationId: providerConversationId ?? undefined,
       metadata: {
         telnyx_proxy_brain: true,
-        telnyx_proxy_assistant_id: assistantId ?? null,
+        telnyx_proxy_assistant_id: resolvedProxyAssistantId,
       },
     });
 

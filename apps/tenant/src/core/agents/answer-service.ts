@@ -320,21 +320,53 @@ async function getDirectTelnyxL1Response(args: {
   timeoutMs: number;
 }) {
   const { transport } = await getTelnyxTransportForWebhook(args.tenantId);
-  const providerConversationId = args.providerConversationId ?? randomUUID();
-  const telnyxResponse = await withTimeout(
-    transport.request<TelnyxDirectChatResponse>(
-      `/ai/assistants/${args.assistantId}/chat`,
-      {
-        method: "POST",
-        body: {
-          content: args.message,
-          conversation_id: providerConversationId,
-        },
-      }
-    ),
-    args.timeoutMs,
-    "Telnyx L1 request timed out"
-  );
+  const providedConversationId = args.providerConversationId?.trim();
+  let providerConversationId = providedConversationId ?? randomUUID();
+
+  const requestBodyBase: Record<string, unknown> = {
+    content: args.message,
+  };
+  const requestBodyWithConversation: Record<string, unknown> = providedConversationId
+    ? { ...requestBodyBase, conversation_id: providedConversationId }
+    : requestBodyBase;
+
+  let telnyxResponse: TelnyxDirectChatResponse;
+  try {
+    telnyxResponse = await withTimeout(
+      transport.request<TelnyxDirectChatResponse>(
+        `/ai/assistants/${args.assistantId}/chat`,
+        {
+          method: "POST",
+          body: requestBodyWithConversation,
+        }
+      ),
+      args.timeoutMs,
+      "Telnyx L1 request timed out"
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const isConversationNotFound =
+      /10005|Resource not found|Error fetching conversation/i.test(message);
+
+    // If provider rejected a conversation_id, retry once without it.
+    if (providedConversationId && isConversationNotFound) {
+      telnyxResponse = await withTimeout(
+        transport.request<TelnyxDirectChatResponse>(
+          `/ai/assistants/${args.assistantId}/chat`,
+          {
+            method: "POST",
+            body: requestBodyBase,
+          }
+        ),
+        args.timeoutMs,
+        "Telnyx L1 retry without conversation_id timed out"
+      );
+      providerConversationId = randomUUID();
+    } else {
+      throw error;
+    }
+  }
+
   const l1Message = extractTelnyxContent(telnyxResponse);
   const resolvedProviderConversationId =
     extractTelnyxConversationId(telnyxResponse) ?? providerConversationId;
@@ -404,6 +436,7 @@ export async function getAgentAnswer(
       data: {
         entryAgentId: entryAgent?.id ?? null,
         tieredChat: entryAgent ? asBoolean(entryAgent.routing?.tieredChat) : null,
+        provider: entryAgent?.provider ?? null,
       },
       timestamp: Date.now(),
       hypothesisId: "H1",
@@ -556,13 +589,64 @@ export async function getAgentAnswer(
       body: JSON.stringify({
         location: "answer-service.ts:L1catch",
         message: "L1 routing failed",
-        data: { error: error instanceof Error ? error.message : String(error) },
+        data: {
+          error: error instanceof Error ? error.message : String(error),
+          provider: entryAgent.provider,
+          isProxyBrain,
+          proxyAssistantId: proxyAssistantId ?? null,
+        },
         timestamp: Date.now(),
         hypothesisId: "H4",
       }),
     }).catch(() => {});
     // #endregion
     console.error("[TieredOrchestration] L1 routing failed", error);
+
+    // In proxy-brain mode, direct Telnyx L1 can fail (e.g. conversation parameter errors).
+    // Fallback to delegate/L2 routing if available so chat still responds.
+    if (isProxyBrain && (proxyDelegateAgentId || level2AgentId || entryAgent.provider !== "telnyx")) {
+      try {
+        const fallbackAgentId =
+          proxyDelegateAgentId || level2AgentId || entryAgent.id;
+        // #region agent log
+        fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            location: "answer-service.ts:L1catch:fallback",
+            message: "Proxy L1 fallback routing",
+            data: {
+              fallbackAgentId,
+              proxyDelegateAgentId: proxyDelegateAgentId ?? null,
+              level2AgentId: level2AgentId ?? null,
+              provider: entryAgent.provider,
+            },
+            timestamp: Date.now(),
+            hypothesisId: "H16",
+          }),
+        }).catch(() => {});
+        // #endregion
+        const providerFallbackL1 = await routeAgentChat({
+          tenantId,
+          agentId: fallbackAgentId,
+          message: request.message,
+          conversationId: request.conversationId,
+          channel: request.channel,
+          userId: request.userId,
+          metadata: {
+            ...baseMetadata,
+            tieredEscalationSource: "proxy_l1_provider_fallback",
+          },
+        });
+        return buildAnswerResponse(request, providerFallbackL1);
+      } catch (providerFallbackError) {
+        console.error(
+          "[TieredOrchestration] Proxy L1 provider fallback failed",
+          providerFallbackError
+        );
+      }
+    }
+
     // When L1 fails, still consider escalation from user message so strategic intents get L2
     const intentOnFailure = detectTieredIntent(request.message, "");
     if (
