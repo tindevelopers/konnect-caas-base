@@ -39,6 +39,33 @@ function clearSupabaseAuthCookies(request: NextRequest, response: NextResponse) 
 export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
   const requestHeaders = new Headers(request.headers);
+  const isTelnyxAssistantTransportRequest =
+    request.method !== "GET" &&
+    /^\/ai\/assistants\/assistant-[^/]+(?:\/chat)?$/.test(pathname);
+
+  if (isTelnyxAssistantTransportRequest) {
+    // #region agent log
+    fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        location: "proxy.ts:telnyx-transport-bypass",
+        message: "Bypassing middleware auth refresh for Telnyx assistant transport request",
+        data: {
+          method: request.method,
+          pathname,
+        },
+        timestamp: Date.now(),
+        hypothesisId: "H17",
+      }),
+    }).catch(() => {});
+    // #endregion
+    return NextResponse.next({
+      request: {
+        headers: requestHeaders,
+      },
+    });
+  }
 
   // Check if this is a Builder.io preview request
   const userAgent = request.headers.get("user-agent") || "";
@@ -96,6 +123,23 @@ export async function proxy(request: NextRequest) {
     try {
       await supabase.auth.getUser();
     } catch (e) {
+      // #region agent log
+      fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          location: "proxy.ts:auth-refresh-error",
+          message: "Middleware supabase.auth.getUser failed",
+          data: {
+            pathname,
+            method: request.method,
+            error: e instanceof Error ? e.message : String(e),
+          },
+          timestamp: Date.now(),
+          hypothesisId: "H18",
+        }),
+      }).catch(() => {});
+      // #endregion
       if (isRefreshTokenMissingError(e)) {
         clearSupabaseAuthCookies(request, response);
       }
