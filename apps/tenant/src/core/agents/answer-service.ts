@@ -631,10 +631,10 @@ export async function getAgentAnswer(
 
     // In transport-only proxy mode, always delegate processing to the configured agent.
     if (isProxyBrain && proxyDelegateAgentId) {
+      const fallbackStartedAt = Date.now();
       try {
         const fallbackAgentId = proxyDelegateAgentId;
         const proxyFallbackTimeoutMs = Math.min(l1TimeoutMs, 7000);
-        const fallbackStartedAt = Date.now();
         // #region agent log
         fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
           method: "POST",
