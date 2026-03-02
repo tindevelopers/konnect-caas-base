@@ -24,7 +24,7 @@ import { getTenantVoiceSettings } from "@/app/actions/voice-settings";
 import { STREAM_CODEC_OPTIONS } from "@/src/lib/stream-codec-options";
 import CallStatusModal from "./CallStatusModal";
 import WebcallModal from "./WebcallModal";
-import TestChatModal from "./TestChatModal";
+import TelnyxWidgetModal from "./TelnyxWidgetModal";
 import AudioStreamPlayer from "./AudioStreamPlayer";
 import EmbedPreviewSection from "./EmbedPreviewSection";
 
@@ -832,7 +832,7 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
       />
 
       {/* Test Chat Modal */}
-      <TestChatModal
+      <TelnyxWidgetModal
         isOpen={testChatModal.isOpen}
         onClose={testChatModal.closeModal}
         assistantId={assistantId}

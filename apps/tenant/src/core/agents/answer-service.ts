@@ -353,9 +353,10 @@ async function getDirectTelnyxL1Response(args: {
   const requestBodyBase: Record<string, unknown> = {
     content: args.message,
   };
-  const requestBodyWithConversation: Record<string, unknown> = providedConversationId
-    ? { ...requestBodyBase, conversation_id: providedConversationId }
-    : requestBodyBase;
+  const requestBodyWithConversation: Record<string, unknown> = {
+    ...requestBodyBase,
+    conversation_id: providerConversationId,
+  };
 
   let telnyxResponse: TelnyxDirectChatResponse;
   try {
@@ -375,20 +376,23 @@ async function getDirectTelnyxL1Response(args: {
     const isConversationNotFound =
       /10005|Resource not found|Error fetching conversation/i.test(message);
 
-    // If provider rejected a conversation_id, retry once without it.
-    if (providedConversationId && isConversationNotFound) {
+    // If provider rejected a conversation_id, retry once with a fresh one.
+    if (isConversationNotFound) {
+      providerConversationId = randomUUID();
       telnyxResponse = await withTimeout(
         transport.request<TelnyxDirectChatResponse>(
           `/ai/assistants/${args.assistantId}/chat`,
           {
             method: "POST",
-            body: requestBodyBase,
+            body: {
+              ...requestBodyBase,
+              conversation_id: providerConversationId,
+            },
           }
         ),
         args.timeoutMs,
-        "Telnyx L1 retry without conversation_id timed out"
+        "Telnyx L1 retry with fresh conversation_id timed out"
       );
-      providerConversationId = randomUUID();
     } else {
       throw error;
     }

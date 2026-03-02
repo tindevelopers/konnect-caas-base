@@ -124,6 +124,100 @@ function extractStringDeep(payload: Record<string, unknown>, keys: string[]): st
   return null;
 }
 
+function extractTextFromUnknown(value: unknown): string | null {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (!value) return null;
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const extracted = extractTextFromUnknown(item);
+      if (extracted) return extracted;
+    }
+    return null;
+  }
+
+  if (typeof value !== "object") return null;
+  const record = asRecord(value);
+  const commonTextKeys = [
+    "text",
+    "content",
+    "message",
+    "value",
+    "body",
+    "input",
+    "prompt",
+  ];
+
+  for (const key of commonTextKeys) {
+    const extracted = extractTextFromUnknown(record[key]);
+    if (extracted) return extracted;
+  }
+
+  const nestedContainers = ["arguments", "payload", "data", "parts", "content_parts"];
+  for (const key of nestedContainers) {
+    const extracted = extractTextFromUnknown(record[key]);
+    if (extracted) return extracted;
+  }
+
+  return null;
+}
+
+function extractMessageDeep(payload: Record<string, unknown>): string | null {
+  const messageKeys = [
+    "message",
+    "content",
+    "text",
+    "query",
+    "input",
+    "user_message",
+    "userMessage",
+    "prompt",
+    "body",
+    "user_input",
+  ];
+
+  const byStringSearch = extractStringDeep(payload, messageKeys);
+  if (byStringSearch) return byStringSearch;
+
+  const data = asRecord(payload.data);
+  const nested = asRecord(data.payload);
+  const containers: Record<string, unknown>[] = [
+    payload,
+    data,
+    nested,
+    asRecord(nested.arguments),
+    asRecord(data.arguments),
+    asRecord(payload.arguments),
+    asRecord(payload.input),
+  ];
+
+  for (const container of containers) {
+    for (const key of messageKeys) {
+      const extracted = extractTextFromUnknown(container[key]);
+      if (extracted) return extracted;
+    }
+  }
+
+  // messages[] — last user message (OpenAI-style tool context)
+  const messages = payload.messages ?? data.messages ?? nested.messages;
+  if (Array.isArray(messages) && messages.length > 0) {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i] as Record<string, unknown> | undefined;
+      if (!m || typeof m !== "object") continue;
+      const role = (m.role as string) ?? "";
+      if (role !== "user" && role !== "human") continue;
+      const extracted =
+        extractTextFromUnknown(m.content) ??
+        extractTextFromUnknown(m.text) ??
+        extractTextFromUnknown(m.parts) ??
+        extractTextFromUnknown(m.content_parts);
+      if (extracted) return extracted;
+    }
+  }
+
+  return null;
+}
+
 async function lookupInternalConversationId(args: {
   tenantId: string;
   providerConversationId: string;
@@ -283,18 +377,7 @@ async function handleProxyPost(request: NextRequest) {
     );
   }
 
-  const message = extractStringDeep(payload, [
-    "message",
-    "content",
-    "text",
-    "query",
-    "input",
-    "user_message",
-    "userMessage",
-    "prompt",
-    "body",
-    "user_input",
-  ]);
+  const message = extractMessageDeep(payload);
   // #region agent log
   const topKeys = Object.keys(payload ?? {}).join(", ");
   const dataKeys = payload?.data && typeof payload.data === "object"
