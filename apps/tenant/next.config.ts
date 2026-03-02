@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import path from "path";
 
 // Normalize NODE_ENV for Builder.io and other deployment platforms
 // Ensure it's set to a standard value if it's not already
@@ -11,7 +12,8 @@ if (process.env.NODE_ENV && !['development', 'production', 'test'].includes(proc
 }
 
 const nextConfig: NextConfig = {
-  // Server external packages (moved from experimental in Next.js 16)
+  output: "standalone",
+  outputFileTracingRoot: path.join(__dirname, "../.."),
   serverExternalPackages: ['openai'],
 
   experimental: {
