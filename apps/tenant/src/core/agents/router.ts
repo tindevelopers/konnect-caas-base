@@ -52,7 +52,7 @@ function buildHelpRequestMessage(args: {
   ].join("\n");
 }
 
-async function ensureConversation(args: {
+export async function ensureConversation(args: {
   tenantId: string;
   conversationId?: string;
   agent: AgentInstance;
@@ -83,7 +83,7 @@ async function ensureConversation(args: {
   return String(data.id);
 }
 
-async function persistConversationMessages(args: {
+export async function persistConversationMessages(args: {
   tenantId: string;
   conversationId: string;
   userMessage: string;

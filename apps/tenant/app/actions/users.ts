@@ -90,6 +90,12 @@ export async function getAllUsers(): Promise<User[]> {
     } else {
       // Regular user: Use regular client (RLS will filter by tenant)
       console.log("[getAllUsers] Regular user - fetching tenant-scoped users");
+      const currentTenantId = await getCurrentUserTenantId();
+      if (!currentTenantId) {
+        console.warn("[getAllUsers] No tenant context for non-platform user; returning empty list");
+        return [];
+      }
+
       const { data, error } = await supabase
         .from("users")
         .select(`
@@ -108,6 +114,7 @@ export async function getAllUsers(): Promise<User[]> {
             status
           )
         `)
+        .eq("tenant_id", currentTenantId)
         .order("created_at", { ascending: false });
       
       if (error) {

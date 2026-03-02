@@ -103,9 +103,47 @@ export async function getAllTenants(): Promise<Tenant[]> {
     } else {
       // Regular user: Use regular client (RLS will filter to their tenant)
       console.log("[getAllTenants] Regular user - fetching tenant-scoped tenants");
+      const allowedTenantIds = new Set<string>();
+
+      const currentUserResult: { data: { tenant_id: string | null } | null; error: any } = await supabase
+        .from("users")
+        .select("tenant_id")
+        .eq("id", authUser.id)
+        .single();
+
+      if (currentUserResult.error) {
+        console.error("[getAllTenants] Error fetching current user tenant:", currentUserResult.error);
+        throw currentUserResult.error;
+      }
+
+      if (currentUserResult.data?.tenant_id) {
+        allowedTenantIds.add(currentUserResult.data.tenant_id);
+      }
+
+      const tenantRolesResult: { data: { tenant_id: string }[] | null; error: any } = await supabase
+        .from("user_tenant_roles")
+        .select("tenant_id")
+        .eq("user_id", authUser.id);
+
+      if (tenantRolesResult.error) {
+        console.error("[getAllTenants] Error fetching explicit tenant roles:", tenantRolesResult.error);
+        throw tenantRolesResult.error;
+      }
+
+      for (const tenantRole of tenantRolesResult.data || []) {
+        if (tenantRole.tenant_id) {
+          allowedTenantIds.add(tenantRole.tenant_id);
+        }
+      }
+
+      if (allowedTenantIds.size === 0) {
+        return [];
+      }
+
       const result: { data: Tenant[] | null; error: any } = await supabase
         .from("tenants")
         .select("*")
+        .in("id", Array.from(allowedTenantIds))
         .order("created_at", { ascending: false });
       
       const data = result.data;
@@ -119,30 +157,50 @@ export async function getAllTenants(): Promise<Tenant[]> {
         throw result.error;
       }
       
-      // Get user count and workspace count for this tenant
-      let userCount = 0;
-      let workspaceCount = 0;
-      if (data && data.length > 0) {
-        const tenantId = data[0].id;
-        const usersResult: { data: { id: string }[] | null; error: any } = await supabase
-          .from("users")
-          .select("id")
-          .eq("tenant_id", tenantId);
-        
-        userCount = usersResult.data?.length || 0;
+      const tenantIds = (data || []).map((tenant) => tenant.id);
+      let userCounts: Record<string, number> = {};
+      let workspaceCounts: Record<string, number> = {};
 
-        const workspacesResult: { data: { id: string }[] | null; error: any } = await supabase
+      if (tenantIds.length > 0) {
+        const usersResult: { data: { tenant_id: string }[] | null; error: any } = await supabase
+          .from("users")
+          .select("tenant_id")
+          .in("tenant_id", tenantIds);
+
+        if (usersResult.error) {
+          console.error("[getAllTenants] Error fetching tenant user counts:", usersResult.error);
+          throw usersResult.error;
+        }
+
+        userCounts = (usersResult.data || []).reduce((acc: Record<string, number>, user) => {
+          if (user.tenant_id) {
+            acc[user.tenant_id] = (acc[user.tenant_id] || 0) + 1;
+          }
+          return acc;
+        }, {});
+
+        const workspacesResult: { data: { tenant_id: string }[] | null; error: any } = await supabase
           .from("workspaces")
-          .select("id")
-          .eq("tenant_id", tenantId);
-        
-        workspaceCount = workspacesResult.data?.length || 0;
+          .select("tenant_id")
+          .in("tenant_id", tenantIds);
+
+        if (workspacesResult.error) {
+          console.error("[getAllTenants] Error fetching tenant workspace counts:", workspacesResult.error);
+          throw workspacesResult.error;
+        }
+
+        workspaceCounts = (workspacesResult.data || []).reduce((acc: Record<string, number>, workspace) => {
+          if (workspace.tenant_id) {
+            acc[workspace.tenant_id] = (acc[workspace.tenant_id] || 0) + 1;
+          }
+          return acc;
+        }, {});
       }
-      
-      const tenantsWithCounts = (data || []).map(tenant => ({
+
+      const tenantsWithCounts = (data || []).map((tenant) => ({
         ...tenant,
-        userCount,
-        workspaceCount,
+        userCount: userCounts[tenant.id] || 0,
+        workspaceCount: workspaceCounts[tenant.id] || 0,
       }));
       
       console.log(`[getAllTenants] Fetched ${tenantsWithCounts.length} tenant(s) (tenant-scoped)`);

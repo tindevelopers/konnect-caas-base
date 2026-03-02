@@ -2,7 +2,7 @@
 
 import { TelnyxApiError } from "@tinadmin/telnyx-ai-platform/server";
 import { trackApiCall } from "@/src/core/telemetry";
-import { ensureTenantId } from "@/core/multi-tenancy/validation";
+import { ensureTenantId, getTenantIdOptional } from "@/core/multi-tenancy/validation";
 import { createClient } from "@/core/database/server";
 import { createAdminClient } from "@/core/database/admin-client";
 import { getTelnyxTransport } from "./client";
@@ -1294,8 +1294,8 @@ export async function setPhoneNumberVoiceAgentAction(
 export async function listPhoneNumbersAssignedToAssistantAction(
   assistantId: string
 ): Promise<{ data: Array<{ phone_number: string; status?: string }> }> {
-  const tenantId = await ensureTenantId();
-  if (!assistantId?.trim()) return { data: [] };
+  const tenantId = await getTenantIdOptional();
+  if (!tenantId || !assistantId?.trim()) return { data: [] };
   const supabase = await createClient();
   const { data: rows, error } = await (supabase as any)
     .from("tenant_phone_number_voice_agents")

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { routeAgentChat } from "@/src/core/agents/router";
+import { getAgentAnswer } from "@/src/core/agents/answer-service";
+import { getPrimaryListingAgent } from "@/src/core/agents/registry";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -69,21 +70,59 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const response = await routeAgentChat({
-      tenantId: body.tenantId ?? "",
-      publicKey: body.publicKey,
-      listingExternalId: body.listingExternalId,
-      message: body.message.trim(),
-      conversationId: body.conversationId,
-      channel: body.channel ?? "webchat",
-      metadata: {
-        ...(body.metadata ?? {}),
-        public_request: true,
-        source_ip: ip,
-      },
-    });
+    let answerRequest: Parameters<typeof getAgentAnswer>[0];
+    if (body.publicKey) {
+      answerRequest = {
+        publicKey: body.publicKey,
+        tenantId: body.tenantId,
+        channel: body.channel ?? "webchat",
+        message: body.message.trim(),
+        conversationId: body.conversationId,
+        metadata: {
+          ...(body.metadata ?? {}),
+          public_request: true,
+          source_ip: ip,
+        },
+      };
+    } else {
+      const tenantId = body.tenantId ?? "";
+      const listingAgent = await getPrimaryListingAgent(
+        tenantId,
+        body.listingExternalId!
+      );
+      if (!listingAgent) {
+        return NextResponse.json(
+          { error: "No agent bound to the listing." },
+          { status: 404 }
+        );
+      }
+      answerRequest = {
+        agentId: listingAgent.id,
+        tenantId: listingAgent.tenant_id,
+        channel: body.channel ?? "webchat",
+        message: body.message.trim(),
+        conversationId: body.conversationId,
+        metadata: {
+          ...(body.metadata ?? {}),
+          public_request: true,
+          source_ip: ip,
+        },
+      };
+    }
 
-    return NextResponse.json(response);
+    const response = await getAgentAnswer(answerRequest);
+
+    return NextResponse.json({
+      agentId: response.agentId,
+      provider: response.provider,
+      message: response.chat_markdown || response.voice_text,
+      conversationId: response.conversationId,
+      externalConversationId: response.externalConversationId,
+      handoffSuggested: response.handoffSuggested,
+      handoffReason: response.handoffReason,
+      tieredEscalationBanner: response.tieredEscalationBanner,
+      usage: response.usage,
+    });
   } catch (error) {
     return NextResponse.json(
       {

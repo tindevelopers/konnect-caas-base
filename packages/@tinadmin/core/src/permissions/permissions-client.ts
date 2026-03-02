@@ -44,7 +44,9 @@ export async function getUserPermissionsClient(
 
   const platformRole = user.roles as { id: string; name: string; permissions: string[] } | null;
   const platformRoleName = platformRole?.name || null;
-  const isPlatformAdmin = platformRoleName === "Platform Admin";
+  // Platform Admin = system-level only: role "Platform Admin" AND tenant_id IS NULL (matches RLS and API)
+  const isPlatformAdmin =
+    platformRoleName === "Platform Admin" && user.tenant_id === null;
 
   // Platform Admin always has all permissions
   if (isPlatformAdmin) {

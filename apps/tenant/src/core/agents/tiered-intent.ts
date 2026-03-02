@@ -1,21 +1,18 @@
 import "server-only";
 
-export type TierEscalationLevel = 2 | 3;
+export type TierEscalationLevel = 2;
 
 export type TieredIntentDecision =
   | { escalate: false; confidence: number }
   | { escalate: true; level: TierEscalationLevel; confidence: number };
 
-const LEVEL2_PHRASES = [
+const ESCALATION_PHRASES = [
   "book a room",
   "book room",
   "make a reservation",
   "reserve a room",
   "schedule an appointment",
   "book an appointment",
-];
-
-const LEVEL3_PHRASES = [
   "buy product",
   "buy this",
   "buy that",
@@ -41,14 +38,11 @@ const LEVEL3_PHRASES = [
   "50 agents",
 ];
 
-const LEVEL2_L1_HINTS = [
+const L1_ESCALATION_HINTS = [
   "i can't help with booking",
   "i can't help with reservations",
   "connect you to our booking",
   "booking team",
-];
-
-const LEVEL3_L1_HINTS = [
   "i can't help with purchases",
   "i can't process orders",
   "connect you to a specialist",
@@ -86,22 +80,38 @@ export function detectTieredIntent(
   const user = normalize(message);
   const l1 = normalize(l1Response);
 
-  let l2Confidence = includesAny(user, LEVEL2_PHRASES) ? 0.9 : 0;
-  let l3Confidence = includesAny(user, LEVEL3_PHRASES) ? 0.9 : 0;
+  let confidence = includesAny(user, ESCALATION_PHRASES) ? 0.9 : 0;
 
-  if (l1 && includesAny(l1, LEVEL2_L1_HINTS)) l2Confidence += 0.1;
-  if (l1 && includesAny(l1, LEVEL3_L1_HINTS)) l3Confidence += 0.1;
+  if (l1 && includesAny(l1, L1_ESCALATION_HINTS)) confidence += 0.1;
 
-  l2Confidence = Math.min(1, l2Confidence);
-  l3Confidence = Math.min(1, l3Confidence);
+  confidence = Math.min(1, confidence);
 
-  if (l2Confidence === 0 && l3Confidence === 0) {
-    return { escalate: false, confidence: 0 };
+  const result: TieredIntentDecision =
+    confidence === 0
+      ? { escalate: false, confidence: 0 }
+      : { escalate: true, level: 2, confidence };
+
+  // #region agent log
+  if (typeof fetch !== "undefined") {
+    fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        location: "tiered-intent.ts:detectTieredIntent",
+        message: "Intent result",
+        data: {
+          messageLen: message.length,
+          userSample: user.slice(0, 80),
+          l1Sample: l1?.slice(0, 80) ?? null,
+          escalate: result.escalate,
+          confidence: result.confidence,
+        },
+        timestamp: Date.now(),
+        hypothesisId: "H3",
+      }),
+    }).catch(() => {});
   }
+  // #endregion
 
-  if (l3Confidence > l2Confidence) {
-    return { escalate: true, level: 3, confidence: l3Confidence };
-  }
-
-  return { escalate: true, level: 2, confidence: l2Confidence };
+  return result;
 }

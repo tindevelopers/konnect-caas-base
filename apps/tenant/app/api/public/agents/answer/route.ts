@@ -96,6 +96,7 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    // Response includes conversationId; clients must send it on follow-up messages for L2 state to persist.
     return NextResponse.json(response, {
       headers: {
         "Access-Control-Allow-Origin": "*",
