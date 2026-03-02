@@ -201,6 +201,15 @@ async function handleProxyPost(request: NextRequest) {
   const publicKeyParam = url.searchParams.get("publicKey")?.trim() || "";
 
   const rawBody = await request.text();
+  // #region agent log
+  const _logStart = { location: "assistant-proxy:start", hasPublicKey: !!publicKeyParam, bodyLen: rawBody?.length ?? 0 };
+  fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ..._logStart, message: "Proxy request received", data: _logStart, timestamp: Date.now(), hypothesisId: "H0" }),
+  }).catch(() => {});
+  console.log("[TelnyxAssistantProxy:DEBUG]", JSON.stringify(_logStart));
+  // #endregion
 
   const ed25519Signature =
     request.headers.get("telnyx-signature-ed25519") ||
@@ -212,6 +221,15 @@ async function handleProxyPost(request: NextRequest) {
     telnyxWebhookConfig.isEd25519Configured();
 
   if (requireSignature && (!ed25519Signature || !ed25519Timestamp)) {
+    // #region agent log
+    const _logSig = { step: "signatureMissing", requireSignature, hasSig: !!ed25519Signature, hasTs: !!ed25519Timestamp };
+    fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ location: "assistant-proxy:signatureMissing", message: "Missing webhook signature", data: _logSig, timestamp: Date.now(), hypothesisId: "H4" }),
+    }).catch(() => {});
+    console.log("[TelnyxAssistantProxy:DEBUG]", JSON.stringify(_logSig));
+    // #endregion
     return NextResponse.json(
       { error: "Missing webhook signature headers" },
       { status: 401 }
@@ -226,6 +244,15 @@ async function handleProxyPost(request: NextRequest) {
       publicKey: telnyxWebhookConfig.publicKey,
     });
     if (!ok) {
+      // #region agent log
+      const _logInv = { step: "signatureInvalid" };
+      fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ location: "assistant-proxy:signatureInvalid", message: "Invalid webhook signature", data: _logInv, timestamp: Date.now(), hypothesisId: "H4" }),
+      }).catch(() => {});
+      console.log("[TelnyxAssistantProxy:DEBUG]", JSON.stringify(_logInv));
+      // #endregion
       return NextResponse.json({ error: "Invalid webhook signature" }, { status: 401 });
     }
   }
@@ -268,12 +295,20 @@ async function handleProxyPost(request: NextRequest) {
     "body",
     "user_input",
   ]);
+  // #region agent log
+  const topKeys = Object.keys(payload ?? {}).join(", ");
+  const dataKeys = payload?.data && typeof payload.data === "object"
+    ? Object.keys(payload.data as object).join(", ")
+    : "";
+  const _logExtract = { hasMessage: !!message, messageLen: message?.length ?? 0, assistantId: assistantId ?? null, topKeys, dataKeys };
+  fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ location: "assistant-proxy:extractMessage", message: "Message extraction", data: _logExtract, timestamp: Date.now(), hypothesisId: "H1" }),
+  }).catch(() => {});
+  console.log("[TelnyxAssistantProxy:DEBUG]", JSON.stringify({ step: "extractMessage", ..._logExtract }));
+  // #endregion
   if (!message) {
-    // Log payload keys for debugging (server-side only)
-    const topKeys = Object.keys(payload ?? {}).join(", ");
-    const dataKeys = payload?.data && typeof payload.data === "object"
-      ? Object.keys(payload.data as object).join(", ")
-      : "";
     console.warn("[TelnyxAssistantProxy] 400: message not found in payload", {
       topKeys,
       dataKeys,
@@ -300,17 +335,13 @@ async function handleProxyPost(request: NextRequest) {
       : await getAgentInstanceByExternalRef(assistantId ?? "");
     if (!entryAgent) {
       // #region agent log
+      const _logEntry = { step: "entryAgentNotFound", assistantId: assistantId ?? null, publicKeyParam: !!publicKeyParam };
       fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          location: "assistant-proxy/route.ts:entryAgent",
-          message: "Entry agent not found",
-          data: { assistantId: assistantId ?? null, publicKeyParam: !!publicKeyParam },
-          timestamp: Date.now(),
-          hypothesisId: "H1",
-        }),
+        body: JSON.stringify({ location: "assistant-proxy:entryAgent", message: "Entry agent not found", data: _logEntry, timestamp: Date.now(), hypothesisId: "H1" }),
       }).catch(() => {});
+      console.log("[TelnyxAssistantProxy:DEBUG]", JSON.stringify(_logEntry));
       // #endregion
       return NextResponse.json(
         {
@@ -325,17 +356,13 @@ async function handleProxyPost(request: NextRequest) {
     // #region agent log
     const tieredChat = Boolean((entryAgent as { routing?: { tieredChat?: unknown } }).routing?.tieredChat);
     const level2Id = (entryAgent as { routing?: { level2AgentId?: unknown } }).routing?.level2AgentId;
+    const _logResolved = { step: "entryResolved", entryAgentId: entryAgent.id, tieredChat, level2AgentId: level2Id ?? null };
     fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        location: "assistant-proxy/route.ts:entryResolved",
-        message: "Entry agent resolved",
-        data: { entryAgentId: entryAgent.id, tieredChat, level2AgentId: level2Id ?? null },
-        timestamp: Date.now(),
-        hypothesisId: "H2",
-      }),
+      body: JSON.stringify({ location: "assistant-proxy:entryResolved", message: "Entry agent resolved", data: _logResolved, timestamp: Date.now(), hypothesisId: "H2" }),
     }).catch(() => {});
+    console.log("[TelnyxAssistantProxy:DEBUG]", JSON.stringify(_logResolved));
     // #endregion
 
     if (assistantId && !publicKeyParam) {
@@ -371,6 +398,15 @@ async function handleProxyPost(request: NextRequest) {
           })
         : undefined;
 
+    // #region agent log
+    const _logBefore = { step: "beforeGetAgentAnswer", entryAgentId: entryAgent.id, messageLen: message.length, hasConversationId: !!internalConversationId };
+    fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ location: "assistant-proxy:beforeGetAgentAnswer", message: "Calling getAgentAnswer", data: _logBefore, timestamp: Date.now(), hypothesisId: "H3" }),
+    }).catch(() => {});
+    console.log("[TelnyxAssistantProxy:DEBUG]", JSON.stringify(_logBefore));
+    // #endregion
     const response = await getAgentAnswer({
       tenantId: entryAgent.tenant_id,
       publicKey: entryAgent.public_key,
@@ -392,19 +428,24 @@ async function handleProxyPost(request: NextRequest) {
     const finalText = banner ? `${banner}\n\n${content}` : content;
 
     // #region agent log
+    const _logAfter = { step: "afterGetAgentAnswer", hasBanner: !!banner, contentLen: content.length };
     fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        location: "assistant-proxy/route.ts:afterGetAgentAnswer",
-        message: "Response after getAgentAnswer",
-        data: { hasBanner: !!banner, contentLen: content.length },
-        timestamp: Date.now(),
-        hypothesisId: "H5",
-      }),
+      body: JSON.stringify({ location: "assistant-proxy:afterGetAgentAnswer", message: "Response after getAgentAnswer", data: _logAfter, timestamp: Date.now(), hypothesisId: "H5" }),
     }).catch(() => {});
+    console.log("[TelnyxAssistantProxy:DEBUG]", JSON.stringify(_logAfter));
     // #endregion
 
+    // #region agent log
+    const _logSuccess = { step: "success", contentLen: finalText.length, hasBanner: !!banner };
+    fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ location: "assistant-proxy:success", message: "Proxy response success", data: _logSuccess, timestamp: Date.now(), hypothesisId: "H0" }),
+    }).catch(() => {});
+    console.log("[TelnyxAssistantProxy:DEBUG]", JSON.stringify(_logSuccess));
+    // #endregion
     // Return multiple common fields so the Telnyx tool bridge can pick one up.
     return NextResponse.json(
       {
@@ -422,6 +463,16 @@ async function handleProxyPost(request: NextRequest) {
     const safeMessage =
       "Sorry — the assistant is temporarily unavailable. Please try again in a moment.";
     const errMsg = error instanceof Error ? error.message : String(error);
+    const errStack = error instanceof Error ? error.stack : undefined;
+    // #region agent log
+    const _logCatch = { step: "catch", errMsg, errStack: errStack?.slice(0, 500) };
+    fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ location: "assistant-proxy:catch", message: "handleProxyPost error", data: _logCatch, timestamp: Date.now(), hypothesisId: "H3" }),
+    }).catch(() => {});
+    console.log("[TelnyxAssistantProxy:DEBUG]", JSON.stringify(_logCatch));
+    // #endregion
     console.error("[TelnyxAssistantProxy] Tool request failed", errMsg);
     return NextResponse.json(
       {

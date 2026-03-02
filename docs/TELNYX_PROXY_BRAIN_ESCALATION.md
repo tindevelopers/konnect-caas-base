@@ -99,6 +99,20 @@ To see escalation in the **Test Chat** modal (the one that shows “Assistant: a
 
 **Requirements:** The webhook URL must be reachable from the internet (use **ngrok** for local: `ngrok http 3020`, then use the `https://...ngrok.io` URL in the webhook).
 
+### Testing from the deployed app (no ngrok)
+
+You can test directly from the deployed app (e.g. Vercel) by pointing the Telnyx webhook URL to your production domain:
+
+- **URL**: `https://<your-production-domain>/api/webhooks/telnyx/assistant-proxy?publicKey=<CUSTOMER_SUPPORT_PUBLIC_KEY>`
+
+When something goes wrong (e.g. "I'm sorry, something went wrong"), check **Vercel Logs**:
+
+1. Open **Vercel Dashboard** → your project → **Logs**
+2. Filter by the proxy route or search for `[TelnyxAssistantProxy:DEBUG]`
+3. Each request logs steps: `start` → `extractMessage` → `entryResolved` → `beforeGetAgentAnswer` → `afterGetAgentAnswer` → `success`, or `catch` with `errMsg` on error
+
+This lets you debug without running ngrok locally.
+
 ### Option A: Test Chat (in-app) — after webhook is set
 
 1. Go to **AI Assistants** → open your **proxy assistant** (the one with the webhook) → click **Test Chat**.

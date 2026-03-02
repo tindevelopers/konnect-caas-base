@@ -196,6 +196,16 @@ function extractAbacusContent(response: Record<string, unknown>): string {
     if (typeof r.message === "string" && r.message.trim()) return r.message.trim();
     if (typeof r.response === "string" && r.response.trim()) return r.response.trim();
     if (typeof r.output === "string" && r.output.trim()) return r.output.trim();
+    // Abacus Predictions API: result.messages = [{ is_user, text }, ...]; last assistant message has reply
+    const resultMessages = r.messages;
+    if (Array.isArray(resultMessages) && resultMessages.length > 0) {
+      for (let i = resultMessages.length - 1; i >= 0; i--) {
+        const m = resultMessages[i] as Record<string, unknown> | undefined;
+        if (m && m.is_user === false && typeof m.text === "string" && m.text.trim()) {
+          return m.text.trim();
+        }
+      }
+    }
     const choices = r.choices;
     if (Array.isArray(choices) && choices.length > 0) {
       const first = choices[0] as Record<string, unknown> | undefined;
@@ -216,6 +226,34 @@ function extractAbacusContent(response: Record<string, unknown>): string {
       if (typeof m.message === "string" && m.message.trim()) return m.message.trim();
     }
   }
+  // Predictions API / alternate shapes
+  const pred = response.Prediction ?? response.prediction;
+  if (typeof pred === "string" && pred.trim()) return pred.trim();
+  if (pred && typeof pred === "object" && !Array.isArray(pred)) {
+    const p = pred as Record<string, unknown>;
+    if (typeof p.content === "string" && p.content.trim()) return p.content.trim();
+    if (typeof p.text === "string" && p.text.trim()) return p.text.trim();
+    if (typeof p.response === "string" && p.response.trim()) return p.response.trim();
+  }
+  const outputs = response.outputs;
+  if (Array.isArray(outputs) && outputs.length > 0) {
+    const first = outputs[0];
+    if (typeof first === "string" && first.trim()) return first.trim();
+    if (first && typeof first === "object" && first !== null) {
+      const o = first as Record<string, unknown>;
+      if (typeof o.content === "string" && o.content.trim()) return o.content.trim();
+      if (typeof o.text === "string" && o.text.trim()) return o.text.trim();
+    }
+  }
+  const chatResp = response.chat_response ?? response.chatResponse;
+  if (typeof chatResp === "string" && chatResp.trim()) return chatResp.trim();
+  const genText = response.generated_text ?? response.generatedText;
+  if (typeof genText === "string" && genText.trim()) return genText.trim();
+
+  console.warn(
+    "[AbacusProvider] Could not extract content. Keys:",
+    Object.keys(response).join(", ")
+  );
   return "I was unable to generate a response from Abacus.";
 }
 
@@ -284,9 +322,7 @@ export class AbacusAgentProvider implements AgentProviderDriver {
         "Abacus API key or deployment token is not configured. Connect Abacus under Integrations first."
       );
     }
-
     // Predictions API (apps.abacus.ai): deploymentToken + deploymentId in query; body has messages only.
-    const useDeploymentApi = deploymentId && deploymentId.trim().length > 0;
     const systemPrompt = request.agent.model_profile?.systemPrompt as
       | string
       | undefined;
