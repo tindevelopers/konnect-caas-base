@@ -305,6 +305,20 @@ export async function updateAgentInstance(
   return mapAgentRow(data as UnknownRow);
 }
 
+export async function deleteAgentInstance(
+  tenantId: string,
+  agentId: string
+): Promise<void> {
+  const admin = createAdminClient();
+  const { error } = await (admin.from("agent_instances") as any)
+    .delete()
+    .eq("tenant_id", tenantId)
+    .eq("id", agentId);
+  if (error) {
+    throw new Error(`Failed to delete agent: ${error.message}`);
+  }
+}
+
 export async function promoteAgentInstance(
   tenantId: string,
   agentId: string,

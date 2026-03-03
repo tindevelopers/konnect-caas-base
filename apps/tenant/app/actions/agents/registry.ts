@@ -9,6 +9,7 @@ import {
   bindAgentToListing,
   createAgentInstance,
   createAgentKnowledgeSource,
+  deleteAgentInstance,
   getAgentInstanceById,
   getAgentUsageSummary,
   listAgentInstances,
@@ -134,6 +135,12 @@ export async function updateAgentAction(agentId: string, input: UpdateAgentInput
     externalRef: updated.external_ref,
   });
   return updated;
+}
+
+export async function deleteAgentAction(agentId: string) {
+  const { tenantId } = await getTenantAndUser();
+  await requirePermission("integrations.write", { tenantId });
+  await deleteAgentInstance(tenantId, agentId);
 }
 
 export async function promoteAgentAction(agentId: string, input: PromoteAgentInput) {

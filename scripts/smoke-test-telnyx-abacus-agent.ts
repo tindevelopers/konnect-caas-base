@@ -3,19 +3,38 @@
  * responses are generated from the Abacus backend end-to-end.
  *
  * Usage:
- *   BASE_URL=http://localhost:3010 pnpm exec tsx scripts/smoke-test-telnyx-abacus-agent.ts
- *   BASE_URL=https://your-app.example.com pnpm exec tsx scripts/smoke-test-telnyx-abacus-agent.ts [assistant_id]
+ *   pnpm exec tsx scripts/smoke-test-telnyx-abacus-agent.ts
+ *   pnpm exec tsx scripts/smoke-test-telnyx-abacus-agent.ts https://your-preview.vercel.app
+ *   pnpm exec tsx scripts/smoke-test-telnyx-abacus-agent.ts https://your-preview.vercel.app [assistant_id]
+ *   BASE_URL=https://... pnpm exec tsx scripts/smoke-test-telnyx-abacus-agent.ts [assistant_id]
  *
  * Default assistant_id: assistant-52bbbd69-427e-4906-bb8c-d3c3e5867c7e ("Telnyx new agent")
  */
 
 const DEFAULT_ASSISTANT_ID = "assistant-52bbbd69-427e-4906-bb8c-d3c3e5867c7e";
-const BASE_URL = process.env.BASE_URL ?? "http://localhost:3020";
 const TEST_MESSAGE = "Say hello in one short sentence.";
 
+function getBaseUrl(): string {
+  const arg1 = process.argv[2];
+  if (arg1 && (arg1.startsWith("http://") || arg1.startsWith("https://"))) {
+    return arg1.replace(/\/$/, "");
+  }
+  return process.env.BASE_URL ?? "http://localhost:3020";
+}
+
+function getAssistantId(): string {
+  const arg1 = process.argv[2];
+  const arg2 = process.argv[3];
+  if (arg1 && (arg1.startsWith("http://") || arg1.startsWith("https://"))) {
+    return arg2 ?? DEFAULT_ASSISTANT_ID;
+  }
+  return arg1 ?? DEFAULT_ASSISTANT_ID;
+}
+
 async function main() {
-  const assistantId = process.argv[2] ?? DEFAULT_ASSISTANT_ID;
-  const url = `${BASE_URL.replace(/\/$/, "")}/api/webhooks/telnyx/assistant-proxy`;
+  const BASE_URL = getBaseUrl();
+  const assistantId = getAssistantId();
+  const url = `${BASE_URL}/api/webhooks/telnyx/assistant-proxy`;
 
   console.log("Smoke test: Telnyx assistant → Abacus backend");
   console.log("  BASE_URL:", BASE_URL);

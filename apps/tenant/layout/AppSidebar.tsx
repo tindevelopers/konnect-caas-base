@@ -46,14 +46,14 @@ const AppSidebar: React.FC = () => {
       try {
         const response = await fetch("/api/admin/check-platform-admin");
         if (!response.ok) {
-          console.log("[AppSidebar] Platform Admin check failed:", response.status);
+          console.debug("[AppSidebar] Platform Admin check failed:", response.status);
           if (isMounted) {
             setIsPlatformAdmin(false);
           }
           return;
         }
         const data = await response.json();
-        console.log("[AppSidebar] Platform Admin check result:", data);
+        console.debug("[AppSidebar] Platform Admin check result:", data);
         if (isMounted) {
           setIsPlatformAdmin(Boolean(data?.isPlatformAdmin));
         }
@@ -71,13 +71,13 @@ const AppSidebar: React.FC = () => {
   }, []);
 
   const filteredNavItems = useMemo(() => {
-    console.log("[AppSidebar] Filtering nav items, isPlatformAdmin:", isPlatformAdmin);
+    console.debug("[AppSidebar] Filtering nav items, isPlatformAdmin:", isPlatformAdmin);
     const filterChildren = (items: NavItem[]): NavItem[] =>
       items
         .map((item) => {
           if (item.subItems) {
             if (!isPlatformAdmin && isPlatformOnlyPath(item.path)) {
-              console.log("[AppSidebar] Filtering out nav item (not Platform Admin):", item.name, item.path);
+              console.debug("[AppSidebar] Filtering out nav item (not Platform Admin):", item.name, item.path);
               return null;
             }
             const filtered = filterChildren(item.subItems ?? []);
@@ -88,7 +88,7 @@ const AppSidebar: React.FC = () => {
           }
 
           if (!isPlatformAdmin && isPlatformOnlyPath(item.path)) {
-            console.log("[AppSidebar] Filtering out leaf item (not Platform Admin):", item.name, item.path);
+            console.debug("[AppSidebar] Filtering out leaf item (not Platform Admin):", item.name, item.path);
             return null;
           }
           return item;

@@ -111,6 +111,11 @@ export const mainNavItems: NavItem[] = [
         path: "/ai/telemetry",
       },
       {
+        name: "Chatbot Embed",
+        path: "/ai/chatbot-embed",
+        new: true,
+      },
+      {
         name: "Webhook Events",
         path: "/ai/webhooks",
       },

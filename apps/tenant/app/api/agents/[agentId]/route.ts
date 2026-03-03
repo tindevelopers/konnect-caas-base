@@ -3,6 +3,7 @@ import { createClient } from "@/core/database/server";
 import {
   addAgentKnowledgeSourceAction,
   bindAgentListingAction,
+  deleteAgentAction,
   getAgentAction,
   ingestAgentKnowledgeTextAction,
   listAgentBindingsAction,
@@ -193,6 +194,30 @@ export async function PATCH(
       {
         error:
           error instanceof Error ? error.message : "Failed to update agent.",
+      },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(
+  _request: NextRequest,
+  context: { params: Promise<{ agentId: string }> }
+) {
+  const user = await ensureAuth();
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  try {
+    const { agentId } = await context.params;
+    await deleteAgentAction(agentId);
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error ? error.message : "Failed to delete agent.",
       },
       { status: 500 }
     );

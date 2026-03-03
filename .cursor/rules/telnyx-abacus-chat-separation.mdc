@@ -16,6 +16,10 @@ alwaysApply: false
 - Pass tenant-aware metadata for observability (for example `telnyx_proxy_brain`, `telnyx_conversation_id`) so events can be traced per tenant.
 - Keep transport concerns (Telnyx IDs/events) separate from LLM response concerns (Abacus content/usage).
 
+# Verification
+
+- To prove responses come from Abacus (not Telnyx native LLM): see `docs/TELNYX_ABACUS_VERIFICATION.md` (observability logs, fingerprint prefix `ABACUS_RESPONSE_PREFIX`, invalid-key test, checklist).
+
 # Security Requirements
 
 - Never expose `ABACUS_API_KEY` in client code, widget snippets, or browser-visible payloads.

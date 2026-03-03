@@ -29,6 +29,7 @@ import TestChatModal from "./TestChatModal";
 import TelnyxWidgetModal from "./TelnyxWidgetModal";
 import AudioStreamPlayer from "./AudioStreamPlayer";
 import EmbedPreviewSection from "./EmbedPreviewSection";
+import AbacusChatbotEmbed from "./AbacusChatbotEmbed";
 
 interface AssistantActionsProps {
   assistantId: string;
@@ -106,6 +107,7 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
 
   const webcallModal = useModal();
   const testChatModal = useModal();
+  const abacusChatbotModal = useModal();
   const isPetStoreDirectTenant =
     (tenant?.name ?? "").trim().toLowerCase() === "pet store direct";
 
@@ -381,6 +383,13 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
           onClick={() => router.push(`/ai/assistants/${assistantId}`)}
         >
           Edit Assistant
+        </Button>
+        <Button
+          variant="outline"
+          startIcon={<ChatIcon className="h-4 w-4" />}
+          onClick={abacusChatbotModal.openModal}
+        >
+          Abacus Chatbot
         </Button>
         <Button
           variant="outline"
@@ -850,6 +859,37 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
           assistantId={assistantId}
         />
       )}
+
+      {/* Abacus Chatbot Modal */}
+      <Modal
+        isOpen={abacusChatbotModal.isOpen}
+        onClose={abacusChatbotModal.closeModal}
+        className="relative m-5 sm:m-0 w-[min(100vw-2rem,480px)] min-w-[320px] rounded-2xl bg-white p-4 dark:bg-gray-900"
+        isFullscreen={false}
+      >
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <h4 className="text-sm font-semibold text-gray-900 dark:text-white">
+              Abacus AI Chatbot
+            </h4>
+            <button
+              type="button"
+              onClick={abacusChatbotModal.closeModal}
+              className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-300"
+              aria-label="Close"
+            >
+              <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+              </svg>
+            </button>
+          </div>
+          <AbacusChatbotEmbed
+            appId="d7dea936a"
+            height={560}
+            hideTopBar
+          />
+        </div>
+      </Modal>
 
       {/* Call Status Modal */}
       {callResult && (

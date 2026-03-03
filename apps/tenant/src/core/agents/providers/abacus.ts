@@ -1,5 +1,7 @@
 import "server-only";
 
+import { appendFileSync } from "fs";
+import { join } from "path";
 import { createAdminClient } from "@/core/database/admin-client";
 import { decryptIntegrationCredentials } from "@/core/integrations/crypto";
 import { getPlatformIntegrationConfig } from "@/core/integrations";
@@ -134,9 +136,14 @@ export class AbacusAgentProvider implements AgentProviderDriver {
       );
     }
 
-    const systemPrompt =
+    let systemPrompt =
       (request.agent.model_profile?.systemPrompt as string | undefined) ??
       "You are a helpful assistant.";
+    const fromWidget = Boolean((request.metadata as Record<string, unknown>)?.telnyx_proxy_brain);
+    if (fromWidget) {
+      systemPrompt +=
+        "\n\nWhen the user asks for product links or pricing details, include the actual product URLs in your reply in this chat. Do not say you cannot send links in chat or ask for their email; provide the links directly in your message.";
+    }
     const model = toRouteLLMModel(llmName);
     const url = `${baseUrl.replace(/\/$/, "")}/chat/completions`;
     const response = await fetch(url, {
@@ -160,7 +167,35 @@ export class AbacusAgentProvider implements AgentProviderDriver {
     }
 
     const payload = (await response.json()) as RouteLLMChatResponse & AbacusChatResponse;
-    const content = extractAbacusContent(payload);
+    let content = extractAbacusContent(payload);
+    // #region debug link flow (session 722982)
+    const _hasInsertLink = /\[\s*insert\s+link\s*\]/i.test(content);
+    const _hasHttp = /https?:\/\//i.test(content);
+    const _payload = {
+      sessionId: "722982",
+      location: "abacus.ts:sendMessage:afterExtractContent",
+      message: "Abacus raw content",
+      data: {
+        fromWidget,
+        contentLen: content.length,
+        hasInsertLinkPlaceholder: _hasInsertLink,
+        hasUrlInContent: _hasHttp,
+        contentSnippet: content.slice(0, 250),
+      },
+      timestamp: Date.now(),
+      hypothesisId: "H1",
+    };
+    try {
+      appendFileSync(join(process.cwd(), ".cursor", "debug-722982.log"), JSON.stringify(_payload) + "\n");
+    } catch (_) {}
+    fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "722982" },
+      body: JSON.stringify(_payload),
+    }).catch(() => {});
+    // #endregion
+    const prefix = process.env.ABACUS_RESPONSE_PREFIX?.trim();
+    if (prefix) content = prefix + content;
     const inputTokens =
       Number(payload.usage?.prompt_tokens ?? payload.usage?.input_tokens ?? 0) ||
       estimateTokenCount(request.message);

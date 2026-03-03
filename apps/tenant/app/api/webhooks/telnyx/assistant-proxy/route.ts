@@ -4,8 +4,10 @@ import { telnyxWebhookConfig } from "@/src/core/telnyx/config";
 import { getAgentAnswer } from "@/src/core/agents/answer-service";
 import { createAdminClient } from "@/core/database/admin-client";
 import {
+  getAgentInstanceById,
   getAgentInstanceByExternalRef,
   getAgentInstanceByPublicKey,
+  listAgentInstances,
 } from "@/src/core/agents/registry";
 
 export const runtime = "nodejs";
@@ -295,8 +297,15 @@ async function handleProxyPost(request: NextRequest) {
   const publicKeyParam = url.searchParams.get("publicKey")?.trim() || "";
 
   const rawBody = await request.text();
+  // Observability: grep for [TelnyxAssistantProxy] in Vercel/server logs to trace flow.
+  const _bodyLen = rawBody?.length ?? 0;
+  console.log(
+    "[TelnyxAssistantProxy] TELNYX_INBOUND",
+    "hasPublicKey=" + Boolean(publicKeyParam),
+    "bodyLen=" + _bodyLen,
+  );
   // #region agent log
-  const _logStart = { location: "assistant-proxy:start", hasPublicKey: !!publicKeyParam, bodyLen: rawBody?.length ?? 0 };
+  const _logStart = { location: "assistant-proxy:start", hasPublicKey: !!publicKeyParam, bodyLen: _bodyLen };
   fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -439,7 +448,8 @@ async function handleProxyPost(request: NextRequest) {
     // #region agent log
     const tieredChat = Boolean((entryAgent as { routing?: { tieredChat?: unknown } }).routing?.tieredChat);
     const level2Id = (entryAgent as { routing?: { level2AgentId?: unknown } }).routing?.level2AgentId;
-    const _logResolved = { step: "entryResolved", entryAgentId: entryAgent.id, tieredChat, level2AgentId: level2Id ?? null };
+    const entryProvider = (entryAgent as { provider?: string }).provider;
+    const _logResolved = { step: "entryResolved", entryAgentId: entryAgent.id, entryAgentProvider: entryProvider, tieredChat, level2AgentId: level2Id ?? null };
     fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -500,9 +510,27 @@ async function handleProxyPost(request: NextRequest) {
     }).catch(() => {});
     console.log("[TelnyxAssistantProxy:DEBUG]", JSON.stringify(_logBefore));
     // #endregion
+    const fromWidget = !publicKeyParam && !!assistantId;
+    // For widget path with tiered chat: call L2 directly to avoid L1 (Telnyx) failure + latency so response returns before Telnyx tool timeout and links show in Test Chat.
+    let agentToUse = entryAgent;
+    if (fromWidget && tieredChat && level2Id != null && typeof level2Id === "string") {
+      const level2Agent = await getAgentInstanceById(entryAgent.tenant_id, level2Id);
+      if (level2Agent) {
+        agentToUse = level2Agent;
+        console.log("[TelnyxAssistantProxy] WIDGET_TIERED_SKIP_L1", "level2AgentId=" + level2Id, "provider=" + (level2Agent as { provider?: string }).provider);
+      }
+    } else if (fromWidget && (entryAgent as { provider?: string }).provider === "telnyx") {
+      // Entry is Telnyx with no L2 (tieredChat false or no level2Id). Telnyx often fails in webhook context; use an Abacus agent so the widget gets link-capable replies instead of falling back to Telnyx native "I can't send links".
+      const abacusAgents = await listAgentInstances(entryAgent.tenant_id, { provider: "abacus", status: "active", limit: 1 });
+      if (abacusAgents.length > 0) {
+        agentToUse = abacusAgents[0];
+        console.log("[TelnyxAssistantProxy] WIDGET_FALLBACK_ABACUS", "abacusAgentId=" + agentToUse.id);
+      }
+    }
+    console.log("[TelnyxAssistantProxy] GET_AGENT_ANSWER_START", "entryAgentId=" + entryAgent.id, "agentToUse=" + agentToUse.id, "messageLen=" + message.length);
     const response = await getAgentAnswer({
-      tenantId: entryAgent.tenant_id,
-      publicKey: entryAgent.public_key,
+      tenantId: agentToUse.tenant_id,
+      publicKey: agentToUse.public_key,
       message,
       channel: "webchat",
       conversationId: internalConversationId,
@@ -514,13 +542,77 @@ async function handleProxyPost(request: NextRequest) {
       },
     });
 
+    // #region agent log — trace links from getAgentAnswer (widget vs direct)
+    const responseChatMarkdown = response.chat_markdown ?? "";
+    const hasUrlInChatMarkdown = /https?:\/\//i.test(responseChatMarkdown);
+    const _afterAnswer = {
+      sessionId: "722982",
+      location: "assistant-proxy:afterGetAgentAnswer:raw",
+      message: "Raw response from getAgentAnswer (link trace)",
+      data: {
+        fromWidget,
+        entryAgentProvider: (entryAgent as { provider?: string }).provider,
+        responseProvider: response.provider ?? null,
+        chatMarkdownLen: responseChatMarkdown.length,
+        hasUrlInChatMarkdown,
+        chatMarkdownSnippet: responseChatMarkdown.slice(0, 500),
+      },
+      timestamp: Date.now(),
+      hypothesisId: "H3",
+    };
+    fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "722982" },
+      body: JSON.stringify(_afterAnswer),
+    }).catch(() => {});
+    try {
+      const { appendFileSync } = await import("fs");
+      const { join } = await import("path");
+      appendFileSync(join(process.cwd(), ".cursor", "debug-722982.log"), JSON.stringify(_afterAnswer) + "\n");
+    } catch (_) {}
+    // #endregion
+
     const banner =
       typeof response.tieredEscalationBanner === "string"
         ? response.tieredEscalationBanner.trim()
         : "";
     const content = response.chat_markdown ?? response.voice_text ?? "";
-    const finalText = banner ? `${banner}\n\n${content}` : content;
+    let finalText = banner ? `${banner}\n\n${content}` : content;
 
+    // Append raw URLs whenever the response contains links, so the Telnyx widget shows them
+    // even if it does not render markdown [text](url) as clickable.
+    const urlMatches = finalText.match(/https?:\/\/[^\s)\]}\]]+/gi) ?? [];
+    const uniqueUrls = [...new Set(urlMatches.map((u) => u.replace(/[.,;:!?)]+$/, "").trim()))].filter(Boolean);
+    if (uniqueUrls.length > 0 && !finalText.includes("Product link(s):"))
+      finalText += "\n\nProduct link(s): " + uniqueUrls.join(" ");
+
+    // #region debug link flow (session 722982)
+    const _hasMarkdownLinkInFinal = /\]\s*\(\s*https?:\/\//i.test(finalText);
+    const _linkPayload = {
+      sessionId: "722982",
+      location: "assistant-proxy:beforeReturnToTelnyx",
+      message: "Payload sent to Telnyx",
+      data: {
+        fromWidget,
+        entryAgentProvider: (entryAgent as { provider?: string }).provider,
+        finalTextLen: finalText.length,
+        hasMarkdownLinkInPayload: _hasMarkdownLinkInFinal,
+        finalTextSnippet: finalText.slice(0, 600),
+      },
+      timestamp: Date.now(),
+      hypothesisId: "H3",
+    };
+    try {
+      const { appendFileSync } = await import("fs");
+      const { join } = await import("path");
+      appendFileSync(join(process.cwd(), ".cursor", "debug-722982.log"), JSON.stringify(_linkPayload) + "\n");
+    } catch (_) {}
+    fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "722982" },
+      body: JSON.stringify(_linkPayload),
+    }).catch(() => {});
+    // #endregion
     // #region agent log
     const _logAfter = { step: "afterGetAgentAnswer", hasBanner: !!banner, contentLen: content.length };
     fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
@@ -530,6 +622,12 @@ async function handleProxyPost(request: NextRequest) {
     }).catch(() => {});
     console.log("[TelnyxAssistantProxy:DEBUG]", JSON.stringify(_logAfter));
     // #endregion
+    console.log(
+      "[TelnyxAssistantProxy] GET_AGENT_ANSWER_OK",
+      "provider=" + (response.provider ?? ""),
+      "contentLen=" + finalText.length,
+    );
+    console.log("[TelnyxAssistantProxy] RESPONSE_TO_TELNYX", "contentLen=" + finalText.length);
 
     // #region agent log
     const _logSuccess = { step: "success", contentLen: finalText.length, hasBanner: !!banner };
@@ -571,6 +669,7 @@ async function handleProxyPost(request: NextRequest) {
     console.log("[TelnyxAssistantProxy:DEBUG]", JSON.stringify(_logCatch));
     // #endregion
     console.error("[TelnyxAssistantProxy] Tool request failed", errMsg);
+    console.log("[TelnyxAssistantProxy] GET_AGENT_ANSWER_FAIL", "error=" + errMsg.slice(0, 200));
     return NextResponse.json(
       {
         content: safeMessage,

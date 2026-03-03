@@ -5,6 +5,41 @@ import { TelnyxAIAgent } from "@telnyx/ai-agent-lib";
 import { Modal } from "@/components/ui/modal";
 import Button from "@/components/ui/button/Button";
 
+/** Renders inline markdown: [text](url), **bold**, and bare URLs as clickable links. */
+function renderInlineContent(text: string): React.ReactNode[] {
+  const parts: React.ReactNode[] = [];
+  const pattern = /(\[([^\]]+)\]\((https?:\/\/[^)]+)\))|(\*\*([^*]+)\*\*)|(https?:\/\/[^\s)<\]]+)/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  let key = 0;
+
+  while ((match = pattern.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index));
+    }
+    if (match[1]) {
+      parts.push(
+        <a key={`l-${key++}`} href={match[3]} target="_blank" rel="noopener noreferrer"
+          className="text-blue-600 underline hover:text-blue-800 dark:text-blue-400">
+          {match[2]}
+        </a>
+      );
+    } else if (match[4]) {
+      parts.push(<strong key={`b-${key++}`}>{match[5]}</strong>);
+    } else if (match[6]) {
+      parts.push(
+        <a key={`u-${key++}`} href={match[6]} target="_blank" rel="noopener noreferrer"
+          className="text-blue-600 underline hover:text-blue-800 dark:text-blue-400">
+          {match[6]}
+        </a>
+      );
+    }
+    lastIndex = match.index + match[0].length;
+  }
+  if (lastIndex < text.length) parts.push(text.slice(lastIndex));
+  return parts;
+}
+
 interface TestChatModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -248,7 +283,9 @@ export default function TestChatModal({ isOpen, onClose, assistantId }: TestChat
                       {new Date(item.timestamp).toLocaleTimeString()}
                     </span>
                   </div>
-                  <div className="mt-1 text-gray-700 dark:text-gray-300">{item.content}</div>
+                  <div className="mt-1 text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
+                    {item.role === "assistant" ? renderInlineContent(item.content) : item.content}
+                  </div>
                 </div>
               ))
             )}
