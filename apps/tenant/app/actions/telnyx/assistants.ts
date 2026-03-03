@@ -234,7 +234,10 @@ export async function listAssistantsAction() {
     console.error("[listAssistantsAction] caught:", errMsg);
     let userMessage =
       "Unable to load assistants. Please check your agent integration (API key and tenant) and try again.";
-    if (error instanceof Error) {
+    if (error instanceof TelnyxApiError && error.status >= 500) {
+      userMessage =
+        "Telnyx is temporarily unavailable (server error). Please try again in a few minutes.";
+    } else if (error instanceof Error) {
       if (error.message.includes("Permission denied") || error.message.includes("Insufficient tenant permissions")) {
         userMessage =
           "You don't have permission to view integrations. Contact your Organization Admin to get access to AI Assistants.";

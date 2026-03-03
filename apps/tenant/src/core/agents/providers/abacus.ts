@@ -6,6 +6,18 @@ import { getPlatformIntegrationConfig } from "@/core/integrations";
 import type { AgentProviderDriver } from "./base";
 import type { AgentProviderRequest, AgentProviderResponse } from "../types";
 
+/** RouteLLM OpenAI-compatible chat completion response. */
+type RouteLLMChatResponse = {
+  choices?: Array<{
+    message?: { content?: string | null };
+  }>;
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+  };
+};
+
+/** Legacy predict/getChatResponse response (kept for fallback). */
 type AbacusChatResponse = {
   content?: string;
   response?: string;
@@ -45,7 +57,7 @@ async function getAbacusCredentials(tenantId: string) {
       baseUrl:
         tenantSettings.baseUrl ??
         tenantSettings.apiBase ??
-        "https://api.abacus.ai",
+        "https://routellm.abacus.ai/v1",
       llmName: tenantSettings.llmName ?? "OPENAI_GPT4O",
     };
   }
@@ -68,7 +80,7 @@ async function getAbacusCredentials(tenantId: string) {
       platformSettings.baseUrl ??
       platformSettings.apiBase ??
       process.env.ABACUS_API_URL ??
-      "https://api.abacus.ai",
+      "https://routellm.abacus.ai/v1",
     llmName:
       platformSettings.llmName ??
       process.env.ABACUS_LLM_NAME ??
@@ -76,16 +88,30 @@ async function getAbacusCredentials(tenantId: string) {
   };
 }
 
-function extractAbacusContent(response: AbacusChatResponse) {
-  if (typeof response.content === "string" && response.content.trim()) {
-    return response.content;
+/** Map legacy llm_name to RouteLLM model id. */
+function toRouteLLMModel(llmName: string): string {
+  const normalized = (llmName ?? "").trim().toUpperCase();
+  const map: Record<string, string> = {
+    OPENAI_GPT4O: "gpt-4o",
+    OPENAI_GPT4O_MINI: "gpt-4o-mini",
+    ROUTE_LLM: "route-llm",
+  };
+  if (map[normalized]) return map[normalized];
+  if (normalized === "ROUTE-LLM" || normalized === "ROUTE_LLM") return "route-llm";
+  if (llmName && /^[a-z0-9.-]+$/i.test(llmName)) return llmName;
+  return "route-llm";
+}
+
+function extractAbacusContent(response: AbacusChatResponse | RouteLLMChatResponse) {
+  const r = response as RouteLLMChatResponse;
+  if (Array.isArray(r.choices) && r.choices[0]?.message?.content != null) {
+    const content = r.choices[0].message.content;
+    if (typeof content === "string" && content.trim()) return content;
   }
-  if (typeof response.response === "string" && response.response.trim()) {
-    return response.response;
-  }
-  if (typeof response.message === "string" && response.message.trim()) {
-    return response.message;
-  }
+  const legacy = response as AbacusChatResponse;
+  if (typeof legacy.content === "string" && legacy.content.trim()) return legacy.content;
+  if (typeof legacy.response === "string" && legacy.response.trim()) return legacy.response;
+  if (typeof legacy.message === "string" && legacy.message.trim()) return legacy.message;
   return "I was unable to generate a response from Abacus.";
 }
 
@@ -108,7 +134,11 @@ export class AbacusAgentProvider implements AgentProviderDriver {
       );
     }
 
-    const url = `${baseUrl.replace(/\/$/, "")}/predict/getChatResponse`;
+    const systemPrompt =
+      (request.agent.model_profile?.systemPrompt as string | undefined) ??
+      "You are a helpful assistant.";
+    const model = toRouteLLMModel(llmName);
+    const url = `${baseUrl.replace(/\/$/, "")}/chat/completions`;
     const response = await fetch(url, {
       method: "POST",
       headers: {
@@ -116,11 +146,11 @@ export class AbacusAgentProvider implements AgentProviderDriver {
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        prompt: request.message,
-        llm_name: llmName,
-        system_message:
-          (request.agent.model_profile?.systemPrompt as string | undefined) ??
-          "You are a helpful assistant.",
+        model,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: request.message },
+        ],
       }),
     });
 
@@ -129,12 +159,14 @@ export class AbacusAgentProvider implements AgentProviderDriver {
       throw new Error(`Abacus chat failed (${response.status}): ${text}`);
     }
 
-    const payload = (await response.json()) as AbacusChatResponse;
+    const payload = (await response.json()) as RouteLLMChatResponse & AbacusChatResponse;
     const content = extractAbacusContent(payload);
     const inputTokens =
-      Number(payload.usage?.input_tokens ?? 0) || estimateTokenCount(request.message);
+      Number(payload.usage?.prompt_tokens ?? payload.usage?.input_tokens ?? 0) ||
+      estimateTokenCount(request.message);
     const outputTokens =
-      Number(payload.usage?.output_tokens ?? 0) || estimateTokenCount(content);
+      Number(payload.usage?.completion_tokens ?? payload.usage?.output_tokens ?? 0) ||
+      estimateTokenCount(content);
     // Abacus routes to multiple models, use conservative blended estimate.
     const estimatedCost = inputTokens * 0.000002 + outputTokens * 0.000008;
     return {

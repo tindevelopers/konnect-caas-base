@@ -1,0 +1,22 @@
+---
+description: Telnyx transport and Abacus intelligence separation for tenant chat
+globs: {apps/tenant/**,packages/@tinadmin/core/src/chatbot/**}
+alwaysApply: false
+---
+
+# Telnyx-Abacus Chat Architecture
+
+- Use Telnyx as the communication layer for chat UI, session transport, and real-time delivery.
+- Use Abacus as the reasoning layer for text generation and conversational intelligence.
+- For Telnyx widget-driven chat that should use platform intelligence, route requests through `apps/tenant/app/api/webhooks/telnyx/assistant-proxy/route.ts`.
+
+# Session and Tenant Traceability
+
+- Preserve Telnyx `conversation_id` across requests and store it as `provider_conversation_id` for conversation continuity.
+- Pass tenant-aware metadata for observability (for example `telnyx_proxy_brain`, `telnyx_conversation_id`) so events can be traced per tenant.
+- Keep transport concerns (Telnyx IDs/events) separate from LLM response concerns (Abacus content/usage).
+
+# Security Requirements
+
+- Never expose `ABACUS_API_KEY` in client code, widget snippets, or browser-visible payloads.
+- Resolve provider credentials only on trusted server paths (provider drivers, webhook routes, server actions).

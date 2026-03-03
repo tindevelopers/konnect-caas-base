@@ -6,6 +6,7 @@ import Button from "@/components/ui/button/Button";
 import { Modal } from "@/components/ui/modal";
 import Alert from "@/components/ui/alert/Alert";
 import { useModal } from "@/hooks/useModal";
+import { useTenant } from "@/core/multi-tenancy";
 import { CallIcon, ChatIcon, CopyIcon, PencilIcon } from "@/icons";
 import { listContactDialTargetsAction } from "@/app/actions/crm/contacts";
 import {
@@ -25,6 +26,7 @@ import { STREAM_CODEC_OPTIONS } from "@/src/lib/stream-codec-options";
 import CallStatusModal from "./CallStatusModal";
 import WebcallModal from "./WebcallModal";
 import TestChatModal from "./TestChatModal";
+import TelnyxWidgetModal from "./TelnyxWidgetModal";
 import AudioStreamPlayer from "./AudioStreamPlayer";
 import EmbedPreviewSection from "./EmbedPreviewSection";
 
@@ -54,6 +56,7 @@ const inputClasses =
 
 export default function AssistantActions({ assistantId }: AssistantActionsProps) {
   const router = useRouter();
+  const { tenant } = useTenant();
   const callModal = useModal();
   const receiveModal = useModal();
   const cloneModal = useModal();
@@ -103,6 +106,8 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
 
   const webcallModal = useModal();
   const testChatModal = useModal();
+  const isPetStoreDirectTenant =
+    (tenant?.name ?? "").trim().toLowerCase() === "pet store direct";
 
   useEffect(() => {
     if (!assistantId) return;
@@ -832,11 +837,19 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
       />
 
       {/* Test Chat Modal */}
-      <TestChatModal
-        isOpen={testChatModal.isOpen}
-        onClose={testChatModal.closeModal}
-        assistantId={assistantId}
-      />
+      {isPetStoreDirectTenant ? (
+        <TelnyxWidgetModal
+          isOpen={testChatModal.isOpen}
+          onClose={testChatModal.closeModal}
+          assistantId={assistantId}
+        />
+      ) : (
+        <TestChatModal
+          isOpen={testChatModal.isOpen}
+          onClose={testChatModal.closeModal}
+          assistantId={assistantId}
+        />
+      )}
 
       {/* Call Status Modal */}
       {callResult && (

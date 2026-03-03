@@ -62,7 +62,8 @@ export async function processCampaignVoiceBatch(
     return { processed: 0, errors: [] };
   }
 
-  const DEFAULT_GREETING = "Hello, thanks for taking our call. How can I help you today?";
+  const DEFAULT_GREETING =
+    "Hi, this is calling from PetStore Direct. We work with professional grooming salons on wholesale supply pricing. Am I speaking with the person who handles grooming supply purchases?";
 
   for (const campaign of campaigns) {
     // Normalize settings (JSONB can sometimes be string from DB/driver)

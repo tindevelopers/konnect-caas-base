@@ -147,7 +147,7 @@ async function handleOutboundCallAnsweredAssistant(payload: Record<string, unkno
   const greeting =
     typeof decoded.g === "string" && decoded.g.trim()
       ? decoded.g.trim().slice(0, 3000)
-      : "Hello, thanks for taking our call. How can I help you today?";
+      : "Hi, this is calling from PetStore Direct. We work with professional grooming salons on wholesale supply pricing. Am I speaking with the person who handles grooming supply purchases?";
 
   // #region agent log
   console.log("[TelnyxWebhook:ai_assistant_start]", { callControlId, assistantId: decoded.a, greetingLength: greeting.length });

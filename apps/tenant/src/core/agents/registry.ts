@@ -219,6 +219,24 @@ export async function getAgentInstanceByPublicKey(
   return mapAgentRow(data as UnknownRow);
 }
 
+export async function getAgentInstanceByExternalRef(
+  externalRef: string
+): Promise<AgentInstance | null> {
+  const trimmed = externalRef?.trim();
+  if (!trimmed) return null;
+  const admin = createAdminClient();
+  const { data, error } = await (admin.from("agent_instances") as any)
+    .select("*")
+    .eq("external_ref", trimmed)
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    throw new Error(`Failed to fetch agent by external_ref: ${error.message}`);
+  }
+  if (!data) return null;
+  return mapAgentRow(data as UnknownRow);
+}
+
 export async function createAgentInstance(
   tenantId: string,
   createdBy: string | null,

@@ -176,12 +176,14 @@ export default function EmbedPreviewSection({
     }
   }, [chatInput, chatLoading, agentPublicKey, platformAgentId, assistantId, chatConversationId]);
 
+  const appOrigin = typeof window !== "undefined" ? window.location.origin : "";
+
   const chatWidgetSnippet = agentPublicKey
-    ? `<script src="${typeof window !== "undefined" ? window.location.origin : ""}/api/public/agents/widget?publicKey=${agentPublicKey}"></script>`
+    ? `<script src="${appOrigin}/api/public/agents/widget?publicKey=${agentPublicKey}"></script>`
     : "";
 
   const answerApiExample = agentPublicKey
-    ? `fetch("${typeof window !== "undefined" ? window.location.origin : ""}/api/public/agents/answer", {
+    ? `fetch("${appOrigin}/api/public/agents/answer", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({
@@ -190,6 +192,10 @@ export default function EmbedPreviewSection({
     channel: "webchat"
   })
 })`
+    : "";
+
+  const telnyxProxyWebhookToolUrl = agentPublicKey
+    ? `${appOrigin}/api/webhooks/telnyx/assistant-proxy?publicKey=${agentPublicKey}`
     : "";
 
   return (
@@ -292,6 +298,26 @@ export default function EmbedPreviewSection({
               configuration saved in Telnyx Mission Control — do not paste it as script. The widget
               above uses that config automatically when you set <code className="rounded bg-gray-100 px-1 dark:bg-gray-800">agent-id</code>.
             </p>
+            {agentPublicKey && (
+              <div className="mt-3 rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs text-sky-900 dark:border-sky-800 dark:bg-sky-950/30 dark:text-sky-100">
+                <p className="font-medium">Pet Store Direct: Telnyx transport + Abacus intelligence</p>
+                <p className="mt-1">
+                  In Telnyx Mission Control, add a webhook tool that calls this URL for each user message:
+                </p>
+                <pre className="mt-2 whitespace-pre-wrap break-all rounded bg-white/80 p-2 font-mono text-[11px] dark:bg-gray-900/70">
+                  {telnyxProxyWebhookToolUrl}
+                </pre>
+                <button
+                  type="button"
+                  onClick={() => handleCopy(telnyxProxyWebhookToolUrl, "telnyxProxyWebhookToolUrl")}
+                  className="mt-2 text-xs text-indigo-600 hover:text-indigo-800 dark:text-indigo-400"
+                >
+                  {copied === "telnyxProxyWebhookToolUrl"
+                    ? "Copied!"
+                    : "Copy webhook tool URL"}
+                </button>
+              </div>
+            )}
             {/* Optional: user can still paste a custom snippet if they have one */}
             <details className="mt-3">
               <summary className="cursor-pointer text-xs font-medium text-gray-600 dark:text-gray-400">
