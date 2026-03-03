@@ -56,10 +56,11 @@ export async function getAudioInputDevices(): Promise<AudioInputDevice[]> {
 
 /**
  * Build MediaTrackConstraints for getUserMedia from preferred deviceId.
+ * Pass as getUserMedia({ audio: getAudioConstraints(...) }).
  */
 export function getAudioConstraints(preferredDeviceId: string | null): MediaTrackConstraints {
   if (preferredDeviceId?.trim()) {
     return { deviceId: { exact: preferredDeviceId.trim() } };
   }
-  return { audio: true };
+  return {};
 }
