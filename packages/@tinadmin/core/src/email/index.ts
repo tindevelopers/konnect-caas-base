@@ -31,6 +31,13 @@ export {
   getFallbackProviderConfig,
 } from './config/provider-config';
 
+// Common templates
+export { default as ProductLinksEmail } from "./templates/product-links/product-links-email";
+export type {
+  ProductLinksEmailProps,
+  ProductLinkItem,
+} from "./templates/product-links/product-links-email";
+
 /**
  * Example Usage:
  * 

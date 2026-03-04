@@ -4,6 +4,14 @@ import { telnyxWebhookConfig } from "@/src/core/telnyx/config";
 import { getAgentAnswer } from "@/src/core/agents/answer-service";
 import { createAdminClient } from "@/core/database/admin-client";
 import {
+  consumePendingProductLinks,
+  storePendingProductLinks,
+} from "@/src/core/agents/conversation-links";
+import {
+  extractEmailFromMessage,
+  sendProductLinksEmail,
+} from "@/src/core/agents/product-link-emailer";
+import {
   getAgentInstanceById,
   getAgentInstanceByExternalRef,
   getAgentInstanceByPublicKey,
@@ -12,6 +20,8 @@ import {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+const EMAIL_PROMPT_TEXT =
+  "I can send these product links to your email so you can open them easily. Please share your email address.";
 
 function asRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
@@ -218,6 +228,11 @@ function extractMessageDeep(payload: Record<string, unknown>): string | null {
   }
 
   return null;
+}
+
+function extractUniqueUrls(text: string): string[] {
+  const urlMatches = text.match(/https?:\/\/[^\s)\]}\]]+/gi) ?? [];
+  return [...new Set(urlMatches.map((u) => u.replace(/[.,;:!?)]+$/, "").trim()))].filter(Boolean);
 }
 
 async function lookupInternalConversationId(args: {
@@ -493,6 +508,58 @@ async function handleProxyPost(request: NextRequest) {
     const resolvedProxyAssistantId =
       (assistantId && assistantId.trim()) ||
       ((entryAgent as { external_ref?: string }).external_ref?.trim() ?? null);
+    const messageEmail = extractEmailFromMessage(message);
+
+    if (internalConversationId && messageEmail) {
+      const pendingLinks = await consumePendingProductLinks(internalConversationId);
+      if (pendingLinks?.links?.length) {
+        const sendResult = await sendProductLinksEmail({
+          to: messageEmail,
+          tenantId: entryAgent.tenant_id,
+          tenantName: "PetStore Direct",
+          assistantName: "PetStore Direct AI",
+          introText: pendingLinks.snippet,
+          links: pendingLinks.links,
+        });
+
+        if (sendResult.success) {
+          const confirmation =
+            `Done. I have sent the product links to ${messageEmail}. ` +
+            "Please check your inbox.";
+          return NextResponse.json(
+            {
+              content: confirmation,
+              result: confirmation,
+              data: { content: confirmation },
+              conversation_id: providerConversationId ?? undefined,
+              provider: "proxy_email_delivery",
+              agentId: entryAgent.id,
+            },
+            { headers: { "Access-Control-Allow-Origin": "*" } }
+          );
+        }
+
+        // Restore pending links if send failed, so user can retry with the same email.
+        await storePendingProductLinks(
+          internalConversationId,
+          pendingLinks.links,
+          pendingLinks.snippet
+        );
+        const failMessage =
+          "I couldn't send the email right now. Please confirm your email address and I will try again.";
+        return NextResponse.json(
+          {
+            content: failMessage,
+            result: failMessage,
+            data: { content: failMessage },
+            conversation_id: providerConversationId ?? undefined,
+            provider: "proxy_email_delivery_failed",
+            agentId: entryAgent.id,
+          },
+          { headers: { "Access-Control-Allow-Origin": "*" } }
+        );
+      }
+    }
 
     // #region agent log
     const _logBefore = {
@@ -578,13 +645,20 @@ async function handleProxyPost(request: NextRequest) {
         : "";
     const content = response.chat_markdown ?? response.voice_text ?? "";
     let finalText = banner ? `${banner}\n\n${content}` : content;
-
-    // Append raw URLs whenever the response contains links, so the Telnyx widget shows them
-    // even if it does not render markdown [text](url) as clickable.
-    const urlMatches = finalText.match(/https?:\/\/[^\s)\]}\]]+/gi) ?? [];
-    const uniqueUrls = [...new Set(urlMatches.map((u) => u.replace(/[.,;:!?)]+$/, "").trim()))].filter(Boolean);
-    if (uniqueUrls.length > 0 && !finalText.includes("Product link(s):"))
-      finalText += "\n\nProduct link(s): " + uniqueUrls.join(" ");
+    const uniqueUrls = extractUniqueUrls(content);
+    if (uniqueUrls.length > 0) {
+      const conversationIdForLinks = response.conversationId || internalConversationId;
+      if (conversationIdForLinks) {
+        await storePendingProductLinks(
+          conversationIdForLinks,
+          uniqueUrls.map((url) => ({ url })),
+          content.slice(0, 500)
+        );
+      }
+      if (!finalText.includes(EMAIL_PROMPT_TEXT)) {
+        finalText += `\n\n${EMAIL_PROMPT_TEXT}`;
+      }
+    }
 
     // #region debug link flow (session 722982)
     const _hasMarkdownLinkInFinal = /\]\s*\(\s*https?:\/\//i.test(finalText);
