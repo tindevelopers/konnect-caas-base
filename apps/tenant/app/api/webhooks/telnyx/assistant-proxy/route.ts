@@ -510,8 +510,21 @@ async function handleProxyPost(request: NextRequest) {
       ((entryAgent as { external_ref?: string }).external_ref?.trim() ?? null);
     const messageEmail = extractEmailFromMessage(message);
 
+    // Diagnostic logging for product-links email flow (visible in Vercel logs)
+    console.log("[TelnyxAssistantProxy:EMAIL_FLOW]", JSON.stringify({
+      hasInternalConversationId: !!internalConversationId,
+      internalConversationId: internalConversationId ?? null,
+      providerConversationId: providerConversationId ?? null,
+      hasMessageEmail: !!messageEmail,
+      messageEmail: messageEmail ?? null,
+    }));
+
     if (internalConversationId && messageEmail) {
       const pendingLinks = await consumePendingProductLinks(internalConversationId);
+      console.log("[TelnyxAssistantProxy:EMAIL_FLOW]", JSON.stringify({
+        step: "pendingLinks",
+        pendingLinksCount: pendingLinks?.links?.length ?? 0,
+      }));
       if (pendingLinks?.links?.length) {
         const sendResult = await sendProductLinksEmail({
           to: messageEmail,
@@ -521,6 +534,13 @@ async function handleProxyPost(request: NextRequest) {
           introText: pendingLinks.snippet,
           links: pendingLinks.links,
         });
+
+        console.log("[TelnyxAssistantProxy:EMAIL_FLOW]", JSON.stringify({
+          step: "sendResult",
+          success: sendResult.success,
+          error: sendResult.error ?? null,
+          to: messageEmail,
+        }));
 
         if (sendResult.success) {
           const confirmation =
