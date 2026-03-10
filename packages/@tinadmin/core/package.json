@@ -57,7 +57,7 @@
     "database",
     "permissions"
   ],
-  "author": "Your Organization",
+  "author": "Developer <developer@tin.info>",
   "license": "MIT",
   "repository": {
     "type": "git",

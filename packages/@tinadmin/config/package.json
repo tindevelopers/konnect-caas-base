@@ -19,7 +19,7 @@
     "dev": "tsc --watch",
     "clean": "rm -rf dist"
   },
-  "author": "Your Organization",
+  "author": "Developer <developer@tin.info>",
   "license": "MIT",
   "repository": {
     "type": "git",

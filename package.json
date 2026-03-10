@@ -24,7 +24,7 @@
     "url": "https://github.com/your-org/your-saas-platform/issues"
   },
   "homepage": "https://github.com/your-org/your-saas-platform#readme",
-  "author": "Your Organization",
+  "author": "Developer <developer@tin.info>",
   "license": "MIT",
   "main": "./src/app/page.tsx",
   "files": [
