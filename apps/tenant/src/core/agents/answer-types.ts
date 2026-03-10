@@ -54,7 +54,6 @@ export interface AnswerResponse {
 
   handoffSuggested: boolean;
   handoffReason?: string;
-  tieredEscalationBanner?: string;
 
   /** Optional banner for tiered escalation (e.g. "Escalated to L2") shown in proxy/chat. */
   tieredEscalationBanner?: string;
