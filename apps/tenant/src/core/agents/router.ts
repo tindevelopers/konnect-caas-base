@@ -27,6 +27,19 @@ function extractString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return value as Record<string, unknown>;
+}
+
+function resolveProviderConversationId(input: AgentChatRequest, providerConversationId?: string) {
+  return (
+    extractString(input.metadata?.externalConversationId) ??
+    extractString(input.metadata?.telnyx_conversation_id) ??
+    extractString(providerConversationId)
+  );
+}
+
 function resolveCrossAgentMode(agent: AgentInstance): CrossAgentMode {
   const mode = extractString(agent.routing?.crossAgentMode);
   return mode === "help" ? "help" : "handoff";
@@ -126,10 +139,24 @@ export async function persistConversationMessages(args: {
     throw new Error(`Failed to persist chat messages: ${error.message}`);
   }
 
+  let metadataPatch: Record<string, unknown> | undefined;
+  if (args.providerConversationId) {
+    const { data: convoData } = await (admin.from("chatbot_conversations") as any)
+      .select("metadata")
+      .eq("id", args.conversationId)
+      .eq("tenant_id", args.tenantId)
+      .maybeSingle();
+    metadataPatch = {
+      ...asRecord(convoData?.metadata),
+      provider_conversation_id: args.providerConversationId,
+    };
+  }
+
   const { error: convoError } = await (admin.from("chatbot_conversations") as any)
     .update({
       title: buildConversationTitle(args.userMessage),
       updated_at: new Date().toISOString(),
+      ...(metadataPatch ? { metadata: metadataPatch } : {}),
     })
     .eq("id", args.conversationId)
     .eq("tenant_id", args.tenantId);
@@ -293,6 +320,10 @@ export async function routeAgentChat(
   });
 
   const derivedHandoffMode = providerResult.handoffMode ?? resolveCrossAgentMode(agent);
+  const providerConversationId = resolveProviderConversationId(
+    input,
+    providerResult.externalConversationId
+  );
 
   let conversationId =
     providerResult.conversationId ?? input.conversationId ?? undefined;
@@ -303,7 +334,7 @@ export async function routeAgentChat(
       agent,
       channel: input.channel,
       listingExternalId: input.listingExternalId,
-      providerConversationId: providerResult.externalConversationId,
+      providerConversationId,
     });
   }
 
@@ -316,7 +347,7 @@ export async function routeAgentChat(
       assistantMessage: providerResult.content,
       agent,
       channel: input.channel,
-      providerConversationId: providerResult.externalConversationId,
+      providerConversationId,
     });
   }
 
@@ -350,12 +381,14 @@ export async function routeAgentChat(
     provider: agent.provider,
     eventType: "agent.chat.completed",
     externalId:
-      providerResult.externalConversationId ?? agent.external_ref ?? undefined,
+      providerConversationId ?? agent.external_ref ?? undefined,
     payload: {
       trace_id: traceId,
       agent_id: agent.id,
       conversation_id: conversationId,
-      provider_conversation_id: providerResult.externalConversationId ?? null,
+      provider_conversation_id: providerConversationId ?? null,
+      telnyx_conversation_id:
+        extractString(input.metadata?.telnyx_conversation_id) ?? null,
       handoff_suggested: providerResult.handoffSuggested ?? false,
       handoff_reason: providerResult.handoffReason ?? null,
       handoff_target_agent_id: providerResult.handoffTargetAgentId ?? null,
@@ -467,7 +500,7 @@ export async function routeAgentChat(
     provider: agent.provider,
     message: providerResult.content,
     conversationId,
-    externalConversationId: providerResult.externalConversationId,
+    externalConversationId: providerConversationId,
     handoffSuggested: providerResult.handoffSuggested,
     handoffReason: providerResult.handoffReason,
     handoffTargetAgentId: providerResult.handoffTargetAgentId,

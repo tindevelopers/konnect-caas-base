@@ -1,7 +1,17 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Modal } from "@/components/ui/modal";
+import {
+  getPreferredMicrophoneId,
+  getAudioConstraints,
+} from "@/src/lib/microphone-settings";
+import {
+  voiceDiagnosticsClear,
+  voiceDiagnosticsGetCopyText,
+  voiceDiagnosticsLog,
+  installGetUserMediaLogger,
+} from "@/src/lib/voice-diagnostics";
 
 const TELNYX_WIDGET_SCRIPT_URL = "https://unpkg.com/@telnyx/ai-agent-widget@next";
 
@@ -294,10 +304,21 @@ export default function TelnyxWidgetModal({
   const containerRef = useRef<HTMLDivElement>(null);
   const widgetRef = useRef<HTMLElement | null>(null);
   const setShowFallbackCtaRef = useRef<(v: boolean) => void>(() => {});
+  const uninstallGetUserMediaRef = useRef<(() => void) | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [showFallbackCta, setShowFallbackCta] = useState(false);
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
   setShowFallbackCtaRef.current = setShowFallbackCta;
+
+  const copyDiagnostics = useCallback(() => {
+    const text = voiceDiagnosticsGetCopyText();
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(
+      () => voiceDiagnosticsLog("diagnostics", "Copied to clipboard"),
+      () => voiceDiagnosticsLog("diagnostics", "Clipboard copy failed")
+    );
+  }, []);
 
   const handleFallbackCtaClick = () => {
     const el = widgetRef.current;
@@ -318,6 +339,9 @@ export default function TelnyxWidgetModal({
     setError(null);
     setLoading(true);
     setShowFallbackCta(false);
+    voiceDiagnosticsClear();
+    voiceDiagnosticsLog("widget", "Modal opened", { assistantId });
+    uninstallGetUserMediaRef.current = installGetUserMediaLogger();
 
     ensureTelnyxWidgetScript()
       .then(() => {
@@ -342,6 +366,22 @@ export default function TelnyxWidgetModal({
         el.setAttribute("agent-id", assistantId);
         el.setAttribute("environment", "production");
         el.setAttribute("position", "embedded");
+        // Expose text chat channel; assistant must have web_chat enabled and webhook tool (Sync webhook in Embed section).
+        el.setAttribute("channels", "voice,web_chat");
+        const preferredMicId = getPreferredMicrophoneId();
+        const audioConstraints = getAudioConstraints(preferredMicId);
+        const callAudioValue =
+          preferredMicId?.trim()
+            ? JSON.stringify({ audio: audioConstraints })
+            : undefined;
+        if (callAudioValue) {
+          el.setAttribute("call-audio", callAudioValue);
+          voiceDiagnosticsLog("widget", "call-audio set (preferred microphone)", {
+            deviceId: preferredMicId,
+          });
+        } else {
+          voiceDiagnosticsLog("widget", "Using default microphone (no preferred device saved)");
+        }
         container.appendChild(el);
         widgetRef.current = el;
 
@@ -373,6 +413,8 @@ export default function TelnyxWidgetModal({
       if (centerTimeoutId != null) clearTimeout(centerTimeoutId);
       if (fallbackTimeoutId != null) clearTimeout(fallbackTimeoutId);
       mutationObserver?.disconnect();
+      uninstallGetUserMediaRef.current?.();
+      uninstallGetUserMediaRef.current = null;
       if (widgetRef.current?.parentNode) {
         widgetRef.current.remove();
         widgetRef.current = null;
@@ -417,6 +459,30 @@ export default function TelnyxWidgetModal({
               >
                 {LAUNCHER_BUTTON_LABEL}
               </button>
+            </div>
+          )}
+        </div>
+        <div className="flex-shrink-0 border-t border-gray-200 dark:border-gray-700 px-3 py-2">
+          <button
+            type="button"
+            onClick={() => setShowDiagnostics((v) => !v)}
+            className="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
+          >
+            {showDiagnostics ? "Hide" : "Show"} voice diagnostics
+          </button>
+          {showDiagnostics && (
+            <div className="mt-2 flex flex-col gap-1">
+              <button
+                type="button"
+                onClick={copyDiagnostics}
+                className="self-start rounded bg-gray-200 px-2 py-1 text-xs dark:bg-gray-700"
+              >
+                Copy diagnostics to clipboard
+              </button>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Use this after reproducing the issue (e.g. start voice, then copy). Paste in support
+                or check the browser console for [VoiceDiag] logs.
+              </p>
             </div>
           )}
         </div>

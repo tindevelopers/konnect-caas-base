@@ -234,7 +234,10 @@ export async function listAssistantsAction() {
     console.error("[listAssistantsAction] caught:", errMsg);
     let userMessage =
       "Unable to load assistants. Please check your agent integration (API key and tenant) and try again.";
-    if (error instanceof Error) {
+    if (error instanceof TelnyxApiError && error.status >= 500) {
+      userMessage =
+        "Telnyx is temporarily unavailable (server error). Please try again in a few minutes.";
+    } else if (error instanceof Error) {
       if (error.message.includes("Permission denied") || error.message.includes("Insufficient tenant permissions")) {
         userMessage =
           "You don't have permission to view integrations. Contact your Organization Admin to get access to AI Assistants.";
@@ -344,6 +347,69 @@ export async function updateAssistantAction(
       },
     }
   );
+}
+
+const PROXY_WEBHOOK_TOOL_NAME = "platform_brain";
+
+/**
+ * Ensures the Telnyx assistant has a webhook tool pointing to the given proxy URL
+ * and has web_chat enabled so widget text chat is routed to your backend (e.g. Abacus).
+ * Call this with the full proxy URL including ?publicKey=... so widget chat reaches your proxy.
+ */
+export async function ensureProxyWebhookToolOnAssistantAction(
+  assistantId: string,
+  proxyWebhookUrl: string
+): Promise<{ success: boolean; error?: string }> {
+  const { tenantId, userId } = await getTelemetryContext();
+  const url = proxyWebhookUrl?.trim();
+  if (!url || !assistantId?.trim()) {
+    return { success: false, error: "assistantId and proxyWebhookUrl are required." };
+  }
+
+  try {
+    const transport = await getTelnyxTransport("integrations.write");
+    const assistant = await getAssistant(transport, assistantId);
+    const existingTools = Array.isArray(assistant.tools) ? [...assistant.tools] : [];
+    const existingFeatures = Array.isArray(assistant.enabled_features) ? [...assistant.enabled_features] : [];
+
+    const webhookTool = {
+      type: "webhook",
+      name: PROXY_WEBHOOK_TOOL_NAME,
+      description: "Route chat to platform/Abacus backend",
+      url,
+      method: "POST",
+    } as Record<string, unknown>;
+
+    const otherTools = existingTools.filter(
+      (t) => (t as Record<string, unknown>)?.name !== PROXY_WEBHOOK_TOOL_NAME
+    );
+    const newTools = [...otherTools, webhookTool];
+
+    const hasWebChat = existingFeatures.some(
+      (f) => String(f).toLowerCase() === "web_chat"
+    );
+    const newFeatures = hasWebChat ? existingFeatures : [...existingFeatures, "web_chat"];
+
+    await trackApiCall(
+      "updateAssistant",
+      TELNYX_PROVIDER,
+      () =>
+        updateAssistant(transport, assistantId, {
+          tools: newTools,
+          enabled_features: newFeatures,
+        }),
+      {
+        tenantId,
+        userId,
+        requestData: { assistantId, step: "ensureProxyWebhookTool" },
+      }
+    );
+
+    return { success: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { success: false, error: msg };
+  }
 }
 
 export async function cloneAssistantAction(

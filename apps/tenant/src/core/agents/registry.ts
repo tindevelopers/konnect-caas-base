@@ -222,22 +222,20 @@ export async function getAgentInstanceByPublicKey(
 export async function getAgentInstanceByExternalRef(
   externalRef: string
 ): Promise<AgentInstance | null> {
-  const ref = externalRef.trim();
-  if (!ref) return null;
-
+  const trimmed = externalRef?.trim();
+  if (!trimmed) return null;
   const admin = createAdminClient();
   const { data, error } = await (admin.from("agent_instances") as any)
     .select("*")
-    .eq("external_ref", ref)
+    .eq("external_ref", trimmed)
     .order("updated_at", { ascending: false })
-    .limit(1);
-
+    .limit(1)
+    .maybeSingle();
   if (error) {
-    throw new Error(`Failed to fetch external_ref agent: ${error.message}`);
+    throw new Error(`Failed to fetch agent by external_ref: ${error.message}`);
   }
-  const row = Array.isArray(data) ? (data[0] as UnknownRow | undefined) : undefined;
-  if (!row) return null;
-  return mapAgentRow(row);
+  if (!data) return null;
+  return mapAgentRow(data as UnknownRow);
 }
 
 export async function createAgentInstance(

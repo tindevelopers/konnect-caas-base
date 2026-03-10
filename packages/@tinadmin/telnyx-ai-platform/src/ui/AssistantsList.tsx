@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { useAssistantsList, TelnyxAssistantsApi } from "../headless/useAssistants";
 import { TelnyxAssistant } from "../types/assistants";
 
@@ -16,6 +16,29 @@ export function AssistantsList({
   onSelectAssistant,
 }: AssistantsListProps) {
   const { data, isLoading, error, refresh } = useAssistantsList(api);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const handleDelete = async (assistant: TelnyxAssistant) => {
+    if (
+      !window.confirm(
+        `Delete "${assistant.name}"? This assistant will be removed and cannot be undone.`
+      )
+    ) {
+      return;
+    }
+    setDeleteError(null);
+    setDeletingId(assistant.id);
+    try {
+      await api.deleteAssistant(assistant.id);
+      await refresh();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to delete assistant.";
+      setDeleteError(message);
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -56,6 +79,15 @@ export function AssistantsList({
           </button>
         </div>
       </div>
+
+      {deleteError && (
+        <div
+          role="alert"
+          className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/50 dark:text-red-400"
+        >
+          {deleteError}
+        </div>
+      )}
 
       <div className="rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
         <div className="overflow-x-auto">
@@ -110,13 +142,23 @@ export function AssistantsList({
                       {new Date(assistant.created_at).toLocaleString()}
                     </td>
                     <td className="px-6 py-4">
-                      <button
-                        type="button"
-                        onClick={() => onSelectAssistant?.(assistant)}
-                        className="text-sm font-medium text-indigo-600 hover:text-indigo-700"
-                      >
-                        View settings
-                      </button>
+                      <div className="flex items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => onSelectAssistant?.(assistant)}
+                          className="text-sm font-medium text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300"
+                        >
+                          View settings
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(assistant)}
+                          disabled={deletingId === assistant.id}
+                          className="text-sm font-medium text-red-600 hover:text-red-700 disabled:opacity-50 dark:text-red-400 dark:hover:text-red-300"
+                        >
+                          {deletingId === assistant.id ? "Deleting…" : "Delete"}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
