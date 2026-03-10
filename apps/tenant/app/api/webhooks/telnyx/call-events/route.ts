@@ -129,11 +129,12 @@ async function handleOutboundCallAnsweredAssistant(payload: Record<string, unkno
 
   if (!clientStateRaw || typeof clientStateRaw !== "string") return;
 
-  let decoded: { t?: string; a?: string; tid?: string; g?: string };
+  // Decoded client_state from campaign executor may include: t, a, tid, g (greeting), pf (enableProductPurchaseFlow), rw (webhookUrl)
+  let decoded: { t?: string; a?: string; tid?: string; g?: string; pf?: boolean; rw?: string };
   try {
     decoded = JSON.parse(
       Buffer.from(clientStateRaw, "base64").toString("utf8")
-    ) as { t?: string; a?: string; tid?: string; g?: string };
+    ) as { t?: string; a?: string; tid?: string; g?: string; pf?: boolean; rw?: string };
   } catch {
     return;
   }

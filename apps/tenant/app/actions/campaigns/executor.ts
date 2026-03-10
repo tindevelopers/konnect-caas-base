@@ -35,6 +35,64 @@ export type ProcessResult = {
 };
 
 /**
+ * Returns true if the current moment is within the campaign's calling window
+ * when interpreted in the given IANA timezone. Also respects calling_days
+ * (0=Sunday, 1=Monday, ..., 6=Saturday).
+ */
+function isWithinCallingWindow(
+  timezone: string,
+  callingWindowStart: string,
+  callingWindowEnd: string,
+  callingDays: number[] | null
+): boolean {
+  try {
+    const now = new Date();
+    const formatter = new Intl.DateTimeFormat("en-CA", {
+      timeZone: timezone || "UTC",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+      weekday: "short",
+    });
+    const parts = formatter.formatToParts(now);
+    let hour = "0",
+      minute = "0",
+      weekday = "";
+    for (const p of parts) {
+      if (p.type === "hour") hour = p.value;
+      else if (p.type === "minute") minute = p.value;
+      else if (p.type === "weekday") weekday = p.value;
+    }
+    const currentMinutes = parseInt(hour, 10) * 60 + parseInt(minute, 10);
+    const [startH, startM] = (callingWindowStart || "09:00").split(":").map((s) => parseInt(s, 10) || 0);
+    const [endH, endM] = (callingWindowEnd || "20:00").split(":").map((s) => parseInt(s, 10) || 0);
+    const startMinutes = startH * 60 + startM;
+    const endMinutes = endH * 60 + endM;
+
+    const WEEKDAY_TO_NUM: Record<string, number> = {
+      Sun: 0,
+      Mon: 1,
+      Tue: 2,
+      Wed: 3,
+      Thu: 4,
+      Fri: 5,
+      Sat: 6,
+    };
+    const dayNum = WEEKDAY_TO_NUM[weekday] ?? 0;
+    const days = callingDays && callingDays.length > 0 ? callingDays : [1, 2, 3, 4, 5];
+    if (!days.includes(dayNum)) return false;
+
+    const inTime =
+      startMinutes <= endMinutes
+        ? currentMinutes >= startMinutes && currentMinutes < endMinutes
+        : currentMinutes >= startMinutes || currentMinutes < endMinutes;
+    return inTime;
+  } catch {
+    return true;
+  }
+}
+
+/**
  * Process due campaign recipients for voice calls.
  * Uses admin client for background/cron context.
  */
@@ -48,7 +106,9 @@ export async function processCampaignVoiceBatch(
   const now = new Date().toISOString();
 
   let campaignsQuery = (admin.from("campaigns") as any)
-    .select("id, tenant_id, assistant_id, from_number, settings, max_concurrent_calls")
+    .select(
+      "id, tenant_id, assistant_id, from_number, settings, max_concurrent_calls, calling_window_start, calling_window_end, calling_days, timezone"
+    )
     .eq("status", "running")
     .eq("campaign_type", "voice");
 
@@ -65,6 +125,14 @@ export async function processCampaignVoiceBatch(
   const DEFAULT_GREETING = "Hello, thanks for taking our call. How can I help you today?";
 
   for (const campaign of campaigns) {
+    const tz = campaign.timezone || "UTC";
+    const windowStart = campaign.calling_window_start ?? "09:00";
+    const windowEnd = campaign.calling_window_end ?? "20:00";
+    const callingDays = campaign.calling_days ?? [1, 2, 3, 4, 5];
+    if (!isWithinCallingWindow(tz, windowStart, windowEnd, callingDays)) {
+      continue;
+    }
+
     // Normalize settings (JSONB can sometimes be string from DB/driver)
     const settings =
       typeof campaign.settings === "string"
@@ -135,16 +203,27 @@ export async function processCampaignVoiceBatch(
         // Telnyx requires the call to be answered before ai_assistant_start. Set client_state
         // so the webhook can start the assistant on call.answered (same pattern as callAssistantAction).
         // Always include g (greeting) so the webhook has it; use campaign greeting or default.
+        // Include automation settings so purchase-flow backend can gate behavior (backward compat: missing = false).
         const customGreeting =
           typeof settings.greeting === "string" && settings.greeting.trim()
             ? settings.greeting.trim().slice(0, 3000)
             : "";
         const greeting = customGreeting || DEFAULT_GREETING;
+        const enableProductPurchaseFlow = settings.enableProductPurchaseFlow === true;
+        const webhookUrlRaw =
+          typeof settings.webhookUrl === "string"
+            ? settings.webhookUrl
+            : typeof settings.railwayWebhookUrl === "string"
+              ? settings.railwayWebhookUrl
+              : "";
+        const webhookUrl = webhookUrlRaw.trim();
         const statePayload = {
           t: "tinadmin_outbound_assistant",
           a: campaign.assistant_id,
           tid: campaign.tenant_id,
           g: greeting,
+          pf: enableProductPurchaseFlow,
+          rw: webhookUrl,
         };
         const clientState = Buffer.from(JSON.stringify(statePayload), "utf8").toString("base64");
         try {

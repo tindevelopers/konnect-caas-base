@@ -16,7 +16,7 @@ export async function scheduleCampaignRecipients(
     const supabase = await createClient();
 
     const { data: campaign } = await (supabase.from("campaigns") as any)
-      .select("id, calling_window_start, calling_window_end, calls_per_minute")
+      .select("id, calling_window_start, calling_window_end, calls_per_minute, timezone")
       .eq("id", campaignId)
       .eq("tenant_id", tenantId)
       .single();

@@ -56,6 +56,30 @@ const FIELD_TARGETS = [
   { key: "client_type", label: "Client Type", required: false },
 ];
 
+/** IANA time zone options for campaign calling window (value = IANA identifier). */
+const IANA_TIMEZONES: { value: string; label: string }[] = [
+  { value: "UTC", label: "UTC" },
+  { value: "America/New_York", label: "Eastern (America/New_York)" },
+  { value: "America/Chicago", label: "Central (America/Chicago)" },
+  { value: "America/Denver", label: "Mountain (America/Denver)" },
+  { value: "America/Los_Angeles", label: "Pacific (America/Los_Angeles)" },
+  { value: "America/Phoenix", label: "Arizona (America/Phoenix)" },
+  { value: "America/Anchorage", label: "Alaska (America/Anchorage)" },
+  { value: "Pacific/Honolulu", label: "Hawaii (Pacific/Honolulu)" },
+  { value: "America/Toronto", label: "Toronto (America/Toronto)" },
+  { value: "America/Vancouver", label: "Vancouver (America/Vancouver)" },
+  { value: "Europe/London", label: "London (Europe/London)" },
+  { value: "Europe/Paris", label: "Paris (Europe/Paris)" },
+  { value: "Europe/Berlin", label: "Berlin (Europe/Berlin)" },
+  { value: "Europe/Madrid", label: "Madrid (Europe/Madrid)" },
+  { value: "Asia/Tokyo", label: "Tokyo (Asia/Tokyo)" },
+  { value: "Asia/Shanghai", label: "Shanghai (Asia/Shanghai)" },
+  { value: "Asia/Singapore", label: "Singapore (Asia/Singapore)" },
+  { value: "Australia/Sydney", label: "Sydney (Australia/Sydney)" },
+  { value: "Australia/Melbourne", label: "Melbourne (Australia/Melbourne)" },
+  { value: "Pacific/Auckland", label: "Auckland (Pacific/Auckland)" },
+];
+
 type AudienceTab = "file" | "crm" | "google_sheets" | "airtable";
 
 export default function NewCampaignPage() {
@@ -132,12 +156,15 @@ export default function NewCampaignPage() {
   const [messageTemplate, setMessageTemplate] = useState("");
   const [connectionId, setConnectionId] = useState("");
   const [greeting, setGreeting] = useState("");
+  const [enableProductPurchaseFlow, setEnableProductPurchaseFlow] = useState(false);
+  const [webhookUrl, setWebhookUrl] = useState("");
   const [contentOptionsLoading, setContentOptionsLoading] = useState(false);
   const [contentOptionsError, setContentOptionsError] = useState<string | null>(null);
 
   // Step 4: Schedule
   const [callingWindowStart, setCallingWindowStart] = useState("09:00");
   const [callingWindowEnd, setCallingWindowEnd] = useState("20:00");
+  const [timezone, setTimezone] = useState("America/New_York");
   const [callingDays, setCallingDays] = useState([1, 2, 3, 4, 5]);
   const [maxAttempts, setMaxAttempts] = useState(3);
   const [retryDelayMinutes, setRetryDelayMinutes] = useState(60);
@@ -497,6 +524,19 @@ export default function NewCampaignPage() {
         setError("Please select a from number");
         return;
       }
+      if (campaignType === "voice" && enableProductPurchaseFlow) {
+        const url = webhookUrl.trim();
+        if (!url) {
+          setError("Please enter the Webhook URL when AI Product Purchase Flow is enabled.");
+          return;
+        }
+        try {
+          new URL(url);
+        } catch {
+          setError("Please enter a valid Webhook URL (e.g. https://your-app.com/api/create-draft-order).");
+          return;
+        }
+      }
       setStep(3);
     } else if (step === 3) {
       setLoading(true);
@@ -511,6 +551,7 @@ export default function NewCampaignPage() {
           message_template: campaignType !== "voice" ? messageTemplate : null,
           calling_window_start: callingWindowStart,
           calling_window_end: callingWindowEnd,
+          timezone,
           calling_days: callingDays,
           max_attempts: maxAttempts,
           retry_delay_minutes: retryDelayMinutes,
@@ -518,6 +559,8 @@ export default function NewCampaignPage() {
           settings: {
             ...(connectionId ? { connection_id: connectionId } : {}),
             ...(greeting.trim() ? { greeting: greeting.trim().slice(0, 3000) } : {}),
+            enableProductPurchaseFlow: !!enableProductPurchaseFlow,
+            webhookUrl: webhookUrl.trim() || undefined,
           },
         });
         if (!res.ok) {
@@ -1202,6 +1245,40 @@ export default function NewCampaignPage() {
                     First thing the AI says when the contact answers. Leave blank to use the default.
                   </p>
                 </div>
+                <div className="p-4 rounded-lg border border-gray-200 dark:border-gray-700 space-y-4">
+                  <h3 className="font-medium">Automation Settings</h3>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="enable-product-purchase-flow"
+                      checked={enableProductPurchaseFlow}
+                      onChange={(e) => setEnableProductPurchaseFlow(e.target.checked)}
+                      className="rounded border-gray-300 dark:border-gray-600 text-brand-600 focus:ring-brand-500"
+                      aria-describedby="automation-desc"
+                    />
+                    <label htmlFor="enable-product-purchase-flow" id="automation-desc" className="text-sm font-medium">
+                      Enable AI Product Purchase Flow
+                    </label>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1" htmlFor="webhook-url">
+                      Webhook URL
+                    </label>
+                    <input
+                      id="webhook-url"
+                      type="url"
+                      value={webhookUrl}
+                      onChange={(e) => setWebhookUrl(e.target.value)}
+                      placeholder="https://your-app.com/api/create-draft-order"
+                      className="w-full px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700"
+                      aria-required={enableProductPurchaseFlow}
+                      aria-invalid={enableProductPurchaseFlow && !webhookUrl.trim()}
+                    />
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      Endpoint that receives the product selection payload. Required when purchase flow is enabled. Can be left empty otherwise.
+                    </p>
+                  </div>
+                </div>
               </>
             )}
             {(campaignType === "sms" || campaignType === "whatsapp") && (
@@ -1237,6 +1314,24 @@ export default function NewCampaignPage() {
         {step === 3 && (
           <div className="space-y-6">
             <h2 className="text-xl font-semibold">Schedule</h2>
+            <div>
+              <label className="block text-sm font-medium mb-1">Timezone</label>
+              <select
+                value={timezone}
+                onChange={(e) => setTimezone(e.target.value)}
+                className="w-full px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700"
+                aria-describedby="timezone-help"
+              >
+                {IANA_TIMEZONES.map(({ value, label }) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+              <p id="timezone-help" className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                Calling window times are interpreted in this timezone.
+              </p>
+            </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium mb-1">Calling window start</label>

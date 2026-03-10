@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import PageBreadcrumb from "@/components/common/PageBreadCrumb";
 import Button from "@/components/ui/button/Button";
+import { getCampaignAutomationSettings } from "@/src/core/campaigns/automation-settings";
 import {
   getCampaign,
   getCampaignStats,
@@ -37,7 +38,10 @@ export default function CampaignDetailPage() {
   const [connectionIdEdit, setConnectionIdEdit] = useState("");
   const [greetingEdit, setGreetingEdit] = useState("");
   const [maxConcurrentCallsEdit, setMaxConcurrentCallsEdit] = useState<number>(1);
+  const [enableProductPurchaseFlowEdit, setEnableProductPurchaseFlowEdit] = useState(false);
+  const [webhookUrlEdit, setWebhookUrlEdit] = useState("");
   const [savingConnectionId, setSavingConnectionId] = useState(false);
+  const [automationSettingsError, setAutomationSettingsError] = useState<string | null>(null);
   const [telnyxApplications, setTelnyxApplications] = useState<
     { value: string; label: string }[]
   >([]);
@@ -115,6 +119,9 @@ export default function CampaignDetailPage() {
     setMaxConcurrentCallsEdit(
       typeof max === "number" && max >= 1 ? Math.min(100, max) : 1
     );
+    const automation = getCampaignAutomationSettings(s);
+    setEnableProductPurchaseFlowEdit(automation.enableProductPurchaseFlow ?? false);
+    setWebhookUrlEdit(automation.webhookUrl ?? "");
   }, [campaign?.id, campaign?.settings, campaign?.max_concurrent_calls]);
 
   // For voice campaigns, fetch assistant config to show outbound readiness (voice + telephony)
@@ -155,12 +162,33 @@ export default function CampaignDetailPage() {
     if (!campaign) return;
     setSavingConnectionId(true);
     setMessage(null);
+    setAutomationSettingsError(null);
     try {
+      const currentSettings = (campaign.settings || {}) as Record<string, unknown>;
+      // Drop legacy key on save (if present) and persist only the generic `webhookUrl`.
+      const { railwayWebhookUrl: _legacyRailwayWebhookUrl, ...settingsSansLegacy } =
+        currentSettings;
       const nextSettings = {
-        ...(campaign.settings || {}),
+        ...settingsSansLegacy,
         connection_id: connectionIdEdit.trim() || null,
         greeting: greetingEdit.trim().slice(0, 3000) || null,
+        enableProductPurchaseFlow: !!enableProductPurchaseFlowEdit,
+        webhookUrl: webhookUrlEdit.trim() || undefined,
       };
+      if (enableProductPurchaseFlowEdit && webhookUrlEdit.trim()) {
+        try {
+          new URL(webhookUrlEdit.trim());
+        } catch {
+          setAutomationSettingsError("Please enter a valid Webhook URL (e.g. https://your-app.com/api/create-draft-order).");
+          setSavingConnectionId(false);
+          return;
+        }
+      }
+      if (enableProductPurchaseFlowEdit && !webhookUrlEdit.trim()) {
+        setAutomationSettingsError("Webhook URL is required when AI Product Purchase Flow is enabled.");
+        setSavingConnectionId(false);
+        return;
+      }
       const maxConcurrent = Math.min(100, Math.max(1, Number(maxConcurrentCallsEdit) || 1));
       const res = await updateCampaign(id, {
         settings: nextSettings,
@@ -168,7 +196,7 @@ export default function CampaignDetailPage() {
       });
       if (res.ok) {
         setCampaign({ ...campaign, settings: nextSettings, max_concurrent_calls: maxConcurrent });
-        setMessage({ type: "success", text: "Voice settings (connection, greeting, max concurrent calls) saved. Use Process now to retry." });
+        setMessage({ type: "success", text: "Voice and automation settings saved. Use Process now to retry." });
       } else {
         setMessage({ type: "error", text: res.error });
       }
@@ -384,8 +412,17 @@ export default function CampaignDetailPage() {
                 <dt className="text-gray-500">Calling window</dt>
                 <dd>
                   {campaign.calling_window_start} - {campaign.calling_window_end}
+                  {campaign.timezone && campaign.timezone !== "UTC" && (
+                    <span className="text-gray-500 dark:text-gray-400"> ({campaign.timezone})</span>
+                  )}
                 </dd>
               </div>
+              {campaign.timezone && (
+                <div>
+                  <dt className="text-gray-500">Timezone</dt>
+                  <dd>{campaign.timezone}</dd>
+                </div>
+              )}
               <div>
                 <dt className="text-gray-500">Max attempts</dt>
                 <dd>{campaign.max_attempts}</dd>
@@ -446,6 +483,7 @@ export default function CampaignDetailPage() {
           )}
 
           {campaign.campaign_type === "voice" && (
+            <>
             <div className="p-4 rounded-lg border dark:border-gray-700">
               <h3 className="font-medium mb-2">Telnyx Call Control</h3>
               <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">
@@ -522,6 +560,45 @@ export default function CampaignDetailPage() {
                 </Button>
               </div>
             </div>
+
+            <div className="p-4 rounded-lg border dark:border-gray-700">
+              <h3 className="font-medium mb-2">Automation Settings</h3>
+              <div className="flex flex-wrap items-end gap-4">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="edit-enable-product-purchase-flow"
+                    checked={enableProductPurchaseFlowEdit}
+                    onChange={(e) => setEnableProductPurchaseFlowEdit(e.target.checked)}
+                    className="rounded border-gray-300 dark:border-gray-600 text-brand-600 focus:ring-brand-500"
+                    aria-describedby="edit-automation-desc"
+                  />
+                  <label htmlFor="edit-enable-product-purchase-flow" id="edit-automation-desc" className="text-sm font-medium">
+                    Enable AI Product Purchase Flow
+                  </label>
+                </div>
+                <div className="flex-1 min-w-[280px]">
+                  <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1" htmlFor="edit-webhook-url">
+                    Webhook URL
+                  </label>
+                  <input
+                    id="edit-webhook-url"
+                    type="url"
+                    className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm"
+                    placeholder="https://your-app.com/api/create-draft-order"
+                    value={webhookUrlEdit}
+                    onChange={(e) => setWebhookUrlEdit(e.target.value)}
+                    aria-required={enableProductPurchaseFlowEdit}
+                  />
+                </div>
+              </div>
+              {automationSettingsError && (
+                <p className="mt-2 text-sm text-amber-600 dark:text-amber-400" role="alert">
+                  {automationSettingsError}
+                </p>
+              )}
+            </div>
+            </>
           )}
         </div>
       </div>

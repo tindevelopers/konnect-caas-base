@@ -27,6 +27,7 @@ export type Campaign = {
   schedule_end: string | null;
   calling_window_start: string;
   calling_window_end: string;
+  timezone: string;
   calling_days: number[];
   max_attempts: number;
   retry_delay_minutes: number;
@@ -108,6 +109,7 @@ export async function createCampaign(
       schedule_end: input.schedule_end ?? null,
       calling_window_start: input.calling_window_start ?? "09:00",
       calling_window_end: input.calling_window_end ?? "20:00",
+      timezone: input.timezone ?? "UTC",
       calling_days: input.calling_days ?? [1, 2, 3, 4, 5],
       max_attempts: input.max_attempts ?? 3,
       retry_delay_minutes: input.retry_delay_minutes ?? 60,
