@@ -7,7 +7,8 @@
     "node": "20"
   },
   "scripts": {
-    "dev": "next dev --port 3020 --webpack",
+    "dev": "next dev --port 3020 --hostname 0.0.0.0 --webpack",
+    "dev:3000": "next dev --port 3000 --hostname 0.0.0.0 --webpack",
     "build": "next build --webpack",
     "start": "next start --port 3020",
     "lint": "next lint",

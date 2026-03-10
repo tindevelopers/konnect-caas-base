@@ -238,9 +238,14 @@ export async function listAssistantsAction() {
       if (error.message.includes("Permission denied") || error.message.includes("Insufficient tenant permissions")) {
         userMessage =
           "You don't have permission to view integrations. Contact your Organization Admin to get access to AI Assistants.";
-      } else if (error.message.includes("401") || error.message.includes("Unauthorized")) {
+      } else if (
+        error.message.includes("401") ||
+        error.message.includes("Unauthorized") ||
+        error.message.includes("Authentication failed") ||
+        error.message.includes("No key found matching")
+      ) {
         userMessage =
-          "Provider API authentication failed (401). Please verify your API key in System Admin → Integrations → Telephony.";
+          "Telnyx API key is invalid or was revoked. Create a new API key in Telnyx Portal (Portal → API Keys), then update Integration Secrets or .env.local (TELNYX_API_KEY) and restart the app.";
       } else if (error.message.includes("Tenant context missing")) {
         userMessage =
           "Tenant context missing. Please select a tenant or configure the platform default telephony integration.";
