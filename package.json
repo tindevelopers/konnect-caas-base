@@ -71,6 +71,8 @@
     "supabase:status": "supabase status",
     "supabase:reset": "supabase db reset",
     "sync:localities": "tsx scripts/sync-telnyx-localities.ts",
+    "update-telnyx-key": "node scripts/update-telnyx-key-all-tenants.mjs",
+    "clear-telnyx-configs": "node scripts/clear-telnyx-stored-configs.mjs",
     "docker:ps": "docker ps | grep supabase",
     "docker:logs": "supabase logs",
     "railway:login": "railway login",

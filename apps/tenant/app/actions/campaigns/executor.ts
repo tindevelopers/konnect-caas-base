@@ -1,7 +1,7 @@
 "use server";
 
 import { createAdminClient } from "@/core/database/admin-client";
-import { createTelnyxClient } from "@tinadmin/telnyx-ai-platform/server";
+import { createTelnyxClient, getAssistant } from "@tinadmin/telnyx-ai-platform/server";
 import {
   getTelnyxIntegrationForWebhook,
 } from "@/src/core/telnyx/webhook-transport";
@@ -92,13 +92,33 @@ export async function processCampaignVoiceBatch(
     }
 
     const { credentials } = await getTelnyxIntegrationForWebhook(campaign.tenant_id);
-    const apiKey = extractApiKey(credentials as Record<string, unknown> | null) ?? process.env.TELNYX_API_KEY;
+    // Prefer TELNYX_API_KEY when set so Vercel env overrides stale tenant credentials
+    const apiKey = process.env.TELNYX_API_KEY?.trim() ?? extractApiKey(credentials as Record<string, unknown> | null);
     if (!apiKey) {
       errors.push(`Campaign ${campaign.id}: Telnyx API key not configured`);
       continue;
     }
 
     const transport = createTelnyxClient({ apiKey });
+
+    // Re-fetch campaign to get latest settings (e.g. greeting) so updates take effect on the next batch.
+    const { data: freshCampaign } = await (admin.from("campaigns") as any)
+      .select("settings")
+      .eq("id", campaign.id)
+      .eq("tenant_id", campaign.tenant_id)
+      .single();
+    const freshSettings =
+      freshCampaign?.settings != null
+        ? (typeof freshCampaign.settings === "string"
+            ? (() => {
+                try {
+                  return JSON.parse(freshCampaign.settings) as Record<string, unknown>;
+                } catch {
+                  return settings;
+                }
+              })()
+            : (freshCampaign.settings as Record<string, unknown>)) ?? settings
+        : settings;
 
     // Cap batch size by campaign max_concurrent_calls to avoid Telnyx "connection channel limit exceeded" (90043)
     const batchSize = Math.min(10, Math.max(1, Number(campaign.max_concurrent_calls) || 10));
@@ -112,6 +132,27 @@ export async function processCampaignVoiceBatch(
       .limit(batchSize);
 
     if (!recipients?.length) continue;
+
+    // Resolve greeting once per campaign: campaign setting (from fresh fetch) > assistant greeting from Telnyx > default.
+    const customGreeting =
+      typeof freshSettings.greeting === "string" && (freshSettings.greeting as string).trim()
+        ? (freshSettings.greeting as string).trim().slice(0, 3000)
+        : "";
+    let resolvedGreeting: string;
+    if (customGreeting) {
+      resolvedGreeting = customGreeting;
+    } else {
+      try {
+        const assistant = await getAssistant(transport, campaign.assistant_id);
+        const assistantGreeting =
+          typeof assistant?.greeting === "string" && assistant.greeting.trim()
+            ? assistant.greeting.trim().slice(0, 3000)
+            : "";
+        resolvedGreeting = assistantGreeting || DEFAULT_GREETING;
+      } catch {
+        resolvedGreeting = DEFAULT_GREETING;
+      }
+    }
 
     for (const r of recipients) {
       try {
@@ -135,17 +176,11 @@ export async function processCampaignVoiceBatch(
 
         // Telnyx requires the call to be answered before ai_assistant_start. Set client_state
         // so the webhook can start the assistant on call.answered (same pattern as callAssistantAction).
-        // Always include g (greeting) so the webhook has it; use campaign greeting or default.
-        const customGreeting =
-          typeof settings.greeting === "string" && settings.greeting.trim()
-            ? settings.greeting.trim().slice(0, 3000)
-            : "";
-        const greeting = customGreeting || DEFAULT_GREETING;
         const statePayload = {
           t: "tinadmin_outbound_assistant",
           a: campaign.assistant_id,
           tid: campaign.tenant_id,
-          g: greeting,
+          g: resolvedGreeting,
         };
         const clientState = Buffer.from(JSON.stringify(statePayload), "utf8").toString("base64");
         try {
@@ -153,34 +188,7 @@ export async function processCampaignVoiceBatch(
             `/calls/${callControlId}/actions/client_state_update`,
             { method: "PUT", body: { client_state: clientState } }
           );
-          // #region agent log
-          fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              location: "executor.ts:client_state_update",
-              message: "client_state_update succeeded",
-              data: { campaignId: campaign.id, callControlId },
-              timestamp: Date.now(),
-              hypothesisId: "H5",
-            }),
-          }).catch(() => {});
-          // #endregion
         } catch (stateErr) {
-          // #region agent log
-          fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              location: "executor.ts:client_state_update-err",
-              message: "client_state_update failed",
-              data: { campaignId: campaign.id, error: stateErr instanceof Error ? stateErr.message : String(stateErr) },
-              timestamp: Date.now(),
-              hypothesisId: "H5",
-            }),
-          }).catch(() => {});
-          // #endregion
-          // Log but continue; webhook may still start assistant if state was set elsewhere
           console.warn("[CampaignExecutor] client_state_update failed:", stateErr);
         }
 
