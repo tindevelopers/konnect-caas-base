@@ -22,12 +22,33 @@ const PLATFORM_ONLY_PREFIXES = [
   "/saas/admin/entity/tenant-management",
   "/saas/subscriptions",
   "/saas/webhooks",
+  "/saas/white-label",
+  "/saas/usage-metering",
+  "/saas/security",
+  "/saas/email-notifications",
+  "/saas/feature-flags",
+  "/saas/analytics",
+  "/saas/integrations",
+  "/saas/data-management",
+  "/saas/custom-report-builder",
 ];
 
 const isPlatformOnlyPath = (path?: string) =>
   !!path && PLATFORM_ONLY_PREFIXES.some((prefix) => path.startsWith(prefix));
 
 const navigation = getNavigationItems();
+const ORG_ADMIN_ALLOWED_ROOT_MENUS = new Set([
+  "Dashboard",
+  "CRM",
+  "Support",
+  "AI Assistant",
+  "Campaigns",
+  "Integrations",
+  "Communications",
+  "Billing & Plans",
+  "Admin",
+  "User Profile",
+]);
 
 const AppSidebar: React.FC = () => {
   const { isExpanded, isMobileOpen, isHovered, setIsHovered } = useSidebar();
@@ -35,6 +56,8 @@ const AppSidebar: React.FC = () => {
   const { tenant, isLoading: isTenantLoading } = useTenant();
   const { branding } = useWhiteLabel();
   const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
+  const [roleName, setRoleName] = useState<string | null>(null);
+  const [permissionSet, setPermissionSet] = useState<Set<string>>(new Set());
   
   const logoUrl = branding.logo || "/images/logo/logo.svg";
   const logoDarkUrl = branding.logo || "/images/logo/logo-dark.svg";
@@ -44,9 +67,15 @@ const AppSidebar: React.FC = () => {
     let isMounted = true;
     const loadRole = async () => {
       try {
-        const response = await fetch("/api/admin/check-platform-admin");
+        const response = await fetch("/api/admin/check-platform-admin", {
+          cache: "no-store",
+          credentials: "same-origin",
+        });
         if (!response.ok) {
           console.log("[AppSidebar] Platform Admin check failed:", response.status);
+          // #region agent log
+          fetch('http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'AppSidebar.tsx:loadRole',message:'Role check fetch not ok',data:{status:response.status},timestamp:Date.now(),hypothesisId:'H4'})}).catch(()=>{});
+          // #endregion
           if (isMounted) {
             setIsPlatformAdmin(false);
           }
@@ -54,13 +83,31 @@ const AppSidebar: React.FC = () => {
         }
         const data = await response.json();
         console.log("[AppSidebar] Platform Admin check result:", data);
+        // #region agent log
+        fetch('http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'AppSidebar.tsx:loadRole',message:'API response',data:{isPlatformAdmin:Boolean(data?.isPlatformAdmin),role:data?.role,tenantId:data?.tenantId??'null',ok:response.ok},timestamp:Date.now(),hypothesisId:'H1,H4'})}).catch(()=>{});
+        // #endregion
         if (isMounted) {
           setIsPlatformAdmin(Boolean(data?.isPlatformAdmin));
+          const resolvedRole =
+            typeof data?.effectiveRole === "string"
+              ? data.effectiveRole
+              : typeof data?.role === "string"
+                ? data.role
+                : null;
+          setRoleName(resolvedRole);
+          const permissions = Array.isArray(data?.permissions)
+            ? data.permissions
+            : Array.isArray(data?.permissions?.allPermissions)
+              ? data.permissions.allPermissions
+              : [];
+          setPermissionSet(new Set(permissions.filter((p: unknown): p is string => typeof p === "string")));
         }
       } catch (error) {
         console.error("[AppSidebar] Error checking Platform Admin:", error);
         if (isMounted) {
           setIsPlatformAdmin(false);
+          setRoleName(null);
+          setPermissionSet(new Set());
         }
       }
     };
@@ -72,24 +119,40 @@ const AppSidebar: React.FC = () => {
 
   const filteredNavItems = useMemo(() => {
     console.log("[AppSidebar] Filtering nav items, isPlatformAdmin:", isPlatformAdmin);
+    const isAllowedByRoleAndPermission = (item: NavItem) => {
+      if (isPlatformAdmin) return true;
+      if (item.requiredRole?.length) {
+        const currentRole = roleName ?? "";
+        if (!item.requiredRole.includes(currentRole)) {
+          return false;
+        }
+      }
+      if (item.requiredPermission?.length) {
+        const hasPermission = item.requiredPermission.some((permission) =>
+          permissionSet.has(permission)
+        );
+        if (!hasPermission) {
+          return false;
+        }
+      }
+      if (isPlatformOnlyPath(item.path)) {
+        return false;
+      }
+      return true;
+    };
+
     const filterChildren = (items: NavItem[]): NavItem[] =>
       items
         .map((item) => {
+          if (!isAllowedByRoleAndPermission(item)) {
+            return null;
+          }
           if (item.subItems) {
-            if (!isPlatformAdmin && isPlatformOnlyPath(item.path)) {
-              console.log("[AppSidebar] Filtering out nav item (not Platform Admin):", item.name, item.path);
-              return null;
-            }
             const filtered = filterChildren(item.subItems ?? []);
             if (!item.path && filtered.length === 0) {
               return null;
             }
             return { ...item, subItems: filtered };
-          }
-
-          if (!isPlatformAdmin && isPlatformOnlyPath(item.path)) {
-            console.log("[AppSidebar] Filtering out leaf item (not Platform Admin):", item.name, item.path);
-            return null;
           }
           return item;
         })
@@ -98,7 +161,15 @@ const AppSidebar: React.FC = () => {
     const filterRoot = (items: NavItem[]) =>
       items
         .map((item) => {
-          if (!isPlatformAdmin && isPlatformOnlyPath(item.path)) {
+          // Organization Admin should only see the explicit core menu set.
+          if (
+            !isPlatformAdmin &&
+            (roleName === "Organization Admin" || roleName === "Workspace Admin") &&
+            !ORG_ADMIN_ALLOWED_ROOT_MENUS.has(item.name)
+          ) {
+            return null;
+          }
+          if (!isAllowedByRoleAndPermission(item)) {
             return null;
           }
           if (!item.subItems) {
@@ -112,12 +183,18 @@ const AppSidebar: React.FC = () => {
         })
         .filter(Boolean) as NavItem[];
 
+    const main = filterRoot(navigation.main);
+    const support = filterRoot(navigation.support);
+    const others = filterRoot(navigation.others);
+    // #region agent log
+    fetch('http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'AppSidebar.tsx:filteredNavItems',message:'Filter result',data:{isPlatformAdmin,mainCount:main.length,mainNames:main.map((i:NavItem)=>i.name)},timestamp:Date.now(),hypothesisId:'H2,H3,H5'})}).catch(()=>{});
+    // #endregion
     return {
-      main: filterRoot(navigation.main),
-      support: filterRoot(navigation.support),
-      others: filterRoot(navigation.others),
+      main,
+      support,
+      others,
     };
-  }, [isPlatformAdmin]);
+  }, [isPlatformAdmin, permissionSet, roleName]);
 
   const renderMenuItems = (
     navItems: NavItem[],
@@ -479,7 +556,7 @@ const AppSidebar: React.FC = () => {
             ) : !isTenantLoading && !tenant ? (
               <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-800 dark:bg-amber-900/20">
                 <p className="text-xs font-medium text-amber-600 dark:text-amber-400">
-                  Platform Admin
+                  System Admin
                 </p>
               </div>
             ) : null}

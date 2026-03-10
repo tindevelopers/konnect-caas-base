@@ -196,6 +196,16 @@ function extractAbacusContent(response: Record<string, unknown>): string {
     if (typeof r.message === "string" && r.message.trim()) return r.message.trim();
     if (typeof r.response === "string" && r.response.trim()) return r.response.trim();
     if (typeof r.output === "string" && r.output.trim()) return r.output.trim();
+    // Abacus Predictions API: result.messages = [{ is_user, text }, ...]; last assistant message has reply
+    const resultMessages = r.messages;
+    if (Array.isArray(resultMessages) && resultMessages.length > 0) {
+      for (let i = resultMessages.length - 1; i >= 0; i--) {
+        const m = resultMessages[i] as Record<string, unknown> | undefined;
+        if (m && m.is_user === false && typeof m.text === "string" && m.text.trim()) {
+          return m.text.trim();
+        }
+      }
+    }
     const choices = r.choices;
     if (Array.isArray(choices) && choices.length > 0) {
       const first = choices[0] as Record<string, unknown> | undefined;
@@ -216,11 +226,79 @@ function extractAbacusContent(response: Record<string, unknown>): string {
       if (typeof m.message === "string" && m.message.trim()) return m.message.trim();
     }
   }
+  // Predictions API / alternate shapes
+  const pred = response.Prediction ?? response.prediction;
+  if (typeof pred === "string" && pred.trim()) return pred.trim();
+  if (pred && typeof pred === "object" && !Array.isArray(pred)) {
+    const p = pred as Record<string, unknown>;
+    if (typeof p.content === "string" && p.content.trim()) return p.content.trim();
+    if (typeof p.text === "string" && p.text.trim()) return p.text.trim();
+    if (typeof p.response === "string" && p.response.trim()) return p.response.trim();
+  }
+  const outputs = response.outputs;
+  if (Array.isArray(outputs) && outputs.length > 0) {
+    const first = outputs[0];
+    if (typeof first === "string" && first.trim()) return first.trim();
+    if (first && typeof first === "object" && first !== null) {
+      const o = first as Record<string, unknown>;
+      if (typeof o.content === "string" && o.content.trim()) return o.content.trim();
+      if (typeof o.text === "string" && o.text.trim()) return o.text.trim();
+    }
+  }
+  const chatResp = response.chat_response ?? response.chatResponse;
+  if (typeof chatResp === "string" && chatResp.trim()) return chatResp.trim();
+  const genText = response.generated_text ?? response.generatedText;
+  if (typeof genText === "string" && genText.trim()) return genText.trim();
+
+  console.warn(
+    "[AbacusProvider] Could not extract content. Keys:",
+    Object.keys(response).join(", ")
+  );
   return "I was unable to generate a response from Abacus.";
 }
 
 function estimateTokenCount(text: string) {
   return Math.max(1, Math.ceil(text.length / 4));
+}
+
+function getAbacusTimeoutMs(request: AgentProviderRequest): number {
+  const routing = request.agent.routing ?? {};
+  const fromRouting = Number(
+    (routing as Record<string, unknown>).tieredAbacusTimeoutSeconds
+  );
+  if (Number.isFinite(fromRouting) && fromRouting > 0) {
+    return Math.floor(fromRouting * 1000);
+  }
+  const fromEnv = Number(process.env.ABACUS_TIMEOUT_SECONDS);
+  if (Number.isFinite(fromEnv) && fromEnv > 0) {
+    return Math.floor(fromEnv * 1000);
+  }
+  return 30000;
+}
+
+async function postWithTimeout(
+  url: string,
+  body: Record<string, unknown>,
+  headers: Record<string, string>,
+  timeoutMs: number
+) {
+  const controller = new AbortController();
+  const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if ((error as Error).name === "AbortError") {
+      throw new Error(`Abacus chat timed out after ${Math.floor(timeoutMs / 1000)}s`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutHandle);
+  }
 }
 
 export class AbacusAgentProvider implements AgentProviderDriver {
@@ -244,9 +322,8 @@ export class AbacusAgentProvider implements AgentProviderDriver {
         "Abacus API key or deployment token is not configured. Connect Abacus under Integrations first."
       );
     }
-
+    const useDeploymentApi = Boolean(deploymentId?.trim() && deploymentToken);
     // Predictions API (apps.abacus.ai): deploymentToken + deploymentId in query; body has messages only.
-    const useDeploymentApi = deploymentId && deploymentId.trim().length > 0;
     const systemPrompt = request.agent.model_profile?.systemPrompt as
       | string
       | undefined;
@@ -300,11 +377,8 @@ export class AbacusAgentProvider implements AgentProviderDriver {
       "Content-Type": "application/json",
       ...(useDeploymentApi ? {} : { Authorization: `Bearer ${apiKey || token}` }),
     };
-    let response = await fetch(url, {
-      method: "POST",
-      headers: requestHeaders,
-      body: JSON.stringify(body),
-    });
+    const timeoutMs = getAbacusTimeoutMs(request);
+    let response = await postWithTimeout(url, body, requestHeaders, timeoutMs);
 
     if (
       !response.ok &&
@@ -316,11 +390,7 @@ export class AbacusAgentProvider implements AgentProviderDriver {
         ...body,
         messages: singleContextMessage,
       };
-      response = await fetch(url, {
-        method: "POST",
-        headers: requestHeaders,
-        body: JSON.stringify(body),
-      });
+      response = await postWithTimeout(url, body, requestHeaders, timeoutMs);
     }
 
     if (!response.ok) {

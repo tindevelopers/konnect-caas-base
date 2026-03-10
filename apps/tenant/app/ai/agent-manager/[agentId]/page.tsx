@@ -29,16 +29,15 @@ export default function AgentManagerSettingsPage({
 }) {
   const [agentId, setAgentId] = useState<string | null>(null);
   const [agent, setAgent] = useState<AgentInstance | null>(null);
-  const [allAgents, setAllAgents] = useState<Array<{ id: string; display_name: string }>>([]);
+  const [allAgents, setAllAgents] = useState<Array<{ id: string; display_name: string; provider?: string }>>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
   const [tieredChat, setTieredChat] = useState(false);
-  const [level1AgentId, setLevel1AgentId] = useState("");
   const [level2AgentId, setLevel2AgentId] = useState("");
-  const [level3AgentId, setLevel3AgentId] = useState("");
+  const [proxyBrainDelegateAgentId, setProxyBrainDelegateAgentId] = useState("");
 
   useEffect(() => {
     params.then((p) => setAgentId(p.agentId));
@@ -61,11 +60,10 @@ export default function AgentManagerSettingsPage({
       setAgent(agentRes);
       const routing = asRecord(agentRes.routing);
       setTieredChat(routingBool(routing, "tieredChat"));
-      setLevel1AgentId(routingString(routing, "level1AgentId"));
       setLevel2AgentId(routingString(routing, "level2AgentId"));
-      setLevel3AgentId(routingString(routing, "level3AgentId"));
+      setProxyBrainDelegateAgentId(routingString(routing, "proxyBrainDelegateAgentId"));
 
-      const agents = (listRes.agents ?? []) as Array<{ id: string; display_name: string }>;
+      const agents = (listRes.agents ?? []) as Array<{ id: string; display_name: string; provider?: string }>;
       setAllAgents(agents);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load agent.");
@@ -89,9 +87,10 @@ export default function AgentManagerSettingsPage({
         routing: {
           ...currentRouting,
           tieredChat,
-          level1AgentId: level1AgentId || undefined,
           level2AgentId: level2AgentId || undefined,
-          level3AgentId: level3AgentId || undefined,
+          proxyBrainDelegateAgentId: proxyBrainDelegateAgentId || undefined,
+          level1AgentId: undefined,
+          level3AgentId: undefined,
         },
       });
       setSaved(true);
@@ -101,7 +100,7 @@ export default function AgentManagerSettingsPage({
     } finally {
       setSaving(false);
     }
-  }, [agentId, agent?.routing, tieredChat, level1AgentId, level2AgentId, level3AgentId]);
+  }, [agentId, agent?.routing, tieredChat, level2AgentId, proxyBrainDelegateAgentId]);
 
   if (!agentId) return null;
   if (loading) {
@@ -144,13 +143,39 @@ export default function AgentManagerSettingsPage({
 
       <section className="mt-8 rounded-xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-900">
         <h2 className="text-sm font-semibold text-gray-800 dark:text-gray-200">
-          Tiered chat (L1 → L2 → L3 escalation)
+          Tiered chat (L1 → L2 escalation)
         </h2>
         <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-          When enabled, the first reply is from Level 1; booking/action intents escalate to Level 2;
-          complex/strategic intents escalate to Level 3 (e.g. Abacus).
+          When enabled, L1 uses the same Telnyx assistant, and complex intents escalate to a
+          single L2 strategic agent (e.g. Abacus). Use <strong>Proxy brain delegate</strong> to
+          make Telnyx transport-only and send every proxy message to one agent (e.g. Abacus).
+        </p>
+        <p className="mt-2 text-xs text-gray-600 dark:text-gray-300">
+          <strong>Checklist:</strong> Enable tiered chat → set Level 2 agent to a chat-capable agent (e.g. provider &quot;abacus&quot;). Use the Answer API (proxy webhook, <code className="rounded bg-gray-100 px-1 dark:bg-gray-700">/api/public/agents/answer</code> or <code className="rounded bg-gray-100 px-1 dark:bg-gray-700">/api/agents/[id]/answer</code>) and send the same <code className="rounded bg-gray-100 px-1 dark:bg-gray-700">conversationId</code> on follow-up messages so the user stays on L2 after escalation.
         </p>
         <div className="mt-4 space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400">
+              Proxy brain delegate (transport-only → Abacus)
+            </label>
+            <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+              When the Telnyx proxy webhook is used, route every message to this agent. Telnyx handles only transport and delivery.
+            </p>
+            <select
+              value={proxyBrainDelegateAgentId}
+              onChange={(e) => setProxyBrainDelegateAgentId(e.target.value)}
+              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+            >
+              <option value="">— None (use tiered L1→L2) —</option>
+              {allAgents
+                .filter((a) => a.id !== agentId)
+                .map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.display_name} · {a.provider ?? "—"} ({a.id.slice(0, 8)}…)
+                  </option>
+                ))}
+            </select>
+          </div>
           <label className="flex items-center gap-2">
             <input
               type="checkbox"
@@ -158,36 +183,17 @@ export default function AgentManagerSettingsPage({
               onChange={(e) => setTieredChat(e.target.checked)}
               className="rounded border-gray-300 text-indigo-600 dark:border-gray-600 dark:bg-gray-800"
             />
-            <span className="text-sm text-gray-700 dark:text-gray-300">Enable tiered chat</span>
+            <span className="text-sm text-gray-700 dark:text-gray-300">Enable tiered chat (L1 → L2 escalation)</span>
           </label>
           {tieredChat && (
             <>
               <div>
                 <label className="block text-xs font-medium text-gray-600 dark:text-gray-400">
-                  Level 1 agent (basic, e.g. Telnyx)
+                  Level 2 agent (strategic escalation, e.g. Abacus)
                 </label>
-                <select
-                  value={level1AgentId}
-                  onChange={(e) => setLevel1AgentId(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-white"
-                >
-                  <option value="">— Same as this agent —</option>
-                  {allAgents
-                    .filter((a) => a.id !== agentId)
-                    .map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.display_name} ({a.id.slice(0, 8)}…)
-                      </option>
-                    ))}
-                </select>
-                <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
-                  For proxy-brain use: set to a non-proxy Telnyx agent instance.
+                <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                  Use a platform agent that can handle chat (e.g. provider &quot;abacus&quot;).
                 </p>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400">
-                  Level 2 agent (actions/booking, e.g. Enhanced)
-                </label>
                 <select
                   value={level2AgentId}
                   onChange={(e) => setLevel2AgentId(e.target.value)}
@@ -198,26 +204,7 @@ export default function AgentManagerSettingsPage({
                     .filter((a) => a.id !== agentId)
                     .map((a) => (
                       <option key={a.id} value={a.id}>
-                        {a.display_name} ({a.id.slice(0, 8)}…)
-                      </option>
-                    ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400">
-                  Level 3 agent (strategic, e.g. Abacus)
-                </label>
-                <select
-                  value={level3AgentId}
-                  onChange={(e) => setLevel3AgentId(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-white"
-                >
-                  <option value="">— None —</option>
-                  {allAgents
-                    .filter((a) => a.id !== agentId)
-                    .map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.display_name} ({a.id.slice(0, 8)}…)
+                        {a.display_name} · {a.provider ?? "—"} ({a.id.slice(0, 8)}…)
                       </option>
                     ))}
                 </select>

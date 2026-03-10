@@ -36,9 +36,8 @@ export type NavItem = {
   new?: boolean;
   pro?: boolean;
   subItems?: NavItem[];
-  // Future: Add permission/role requirements
-  // requiredRole?: string[];
-  // requiredPermission?: string[];
+  requiredRole?: string[];
+  requiredPermission?: string[];
 };
 
 // Helper function to create icon components
@@ -230,12 +229,29 @@ export const mainNavItems: NavItem[] = [
     name: "Admin",
     icon: createIcon(UserCircleIcon),
     subItems: [
-      { name: "User Management", path: "/saas/admin/entity/user-management" },
-      { name: "Tenant Management", path: "/saas/admin/entity/tenant-management" },
-      { name: "Organization Management", path: "/saas/admin/entity/organization-management" },
-      { name: "Role Management", path: "/saas/admin/entity/role-management" },
+      {
+        name: "User Management",
+        path: "/saas/admin/entity/user-management",
+        requiredPermission: ["users.read"],
+      },
+      {
+        name: "Tenant Management",
+        path: "/saas/admin/entity/tenant-management",
+        requiredRole: ["Platform Admin"],
+      },
+      {
+        name: "Organization Management",
+        path: "/saas/admin/entity/organization-management",
+        requiredPermission: ["tenants.read"],
+      },
+      {
+        name: "Role Management",
+        path: "/saas/admin/entity/role-management",
+        requiredPermission: ["roles.read"],
+      },
       {
         name: "Email & Notifications",
+        requiredPermission: ["settings.read"],
         subItems: [
           { name: "Templates", path: "/saas/email-notifications/templates" },
           { name: "Settings", path: "/saas/email-notifications/settings" },
@@ -248,6 +264,7 @@ export const mainNavItems: NavItem[] = [
   {
     name: "System Admin",
     icon: createIcon(LockIcon),
+    requiredRole: ["Platform Admin"],
     subItems: [
       { name: "Organization Admins", path: "/saas/admin/system-admin/organization-admins" },
       { name: "API Configuration", path: "/saas/admin/system-admin/api-configuration" },
@@ -292,6 +309,7 @@ export const mainNavItems: NavItem[] = [
     name: "SaaS",
     icon: createIcon(ShootingStarIcon),
     new: true,
+    requiredRole: ["Platform Admin"],
     subItems: [
       { name: "Dashboard", path: "/saas/dashboard" },
       {

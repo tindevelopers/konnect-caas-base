@@ -63,19 +63,81 @@ export class TelnyxAgentProvider implements AgentProviderDriver {
     }
 
     const { transport } = await getTelnyxTransportForWebhook(request.tenantId);
-    const conversationId =
-      request.externalConversationId || request.conversationId || randomUUID();
-
-    const response = await transport.request<TelnyxChatResponse>(
-      `/ai/assistants/${assistantId}/chat`,
-      {
-        method: "POST",
-        body: {
-          content: request.message,
-          conversation_id: conversationId,
+    const externalConversationId = request.externalConversationId?.trim();
+    let resolvedConversationId = externalConversationId || randomUUID();
+    const requestBodyBase: Record<string, unknown> = { content: request.message };
+    const requestBodyWithConversation: Record<string, unknown> = {
+      ...requestBodyBase,
+      conversation_id: resolvedConversationId,
+    };
+    // #region agent log
+    fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        location: "providers/telnyx.ts:sendMessage:beforeRequest",
+        message: "Sending Telnyx provider request",
+        data: {
+          hasExternalConversationId: Boolean(externalConversationId),
+          hasInternalConversationId: Boolean(request.conversationId),
+          sendWithConversationId: true,
+          sendingConversationId: resolvedConversationId.slice(0, 36),
+          messageLen: request.message.length,
         },
+        timestamp: Date.now(),
+        hypothesisId: "H15",
+      }),
+    }).catch(() => {});
+    // #endregion
+
+    let response: TelnyxChatResponse;
+    try {
+      response = await transport.request<TelnyxChatResponse>(
+        `/ai/assistants/${assistantId}/chat`,
+        {
+          method: "POST",
+          body: requestBodyWithConversation,
+        }
+      );
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const isConversationNotFound =
+        /10005|Resource not found|Error fetching conversation/i.test(errorMessage);
+      // #region agent log
+      fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          location: "providers/telnyx.ts:sendMessage:requestError",
+          message: "Telnyx provider request failed",
+          data: {
+            error: errorMessage,
+            sendWithConversationId: true,
+            sendingConversationId: resolvedConversationId.slice(0, 36),
+            willRetryWithFreshConversationId: isConversationNotFound,
+          },
+          timestamp: Date.now(),
+          hypothesisId: "H15",
+        }),
+      }).catch(() => {});
+      // #endregion
+      if (isConversationNotFound) {
+        resolvedConversationId = randomUUID();
+        response = await transport.request<TelnyxChatResponse>(
+          `/ai/assistants/${assistantId}/chat`,
+          {
+            method: "POST",
+            body: {
+              ...requestBodyBase,
+              conversation_id: resolvedConversationId,
+            },
+          }
+        );
+      } else {
+        throw error;
       }
-    );
+    }
+
     const content = extractContent(response);
     const inputTokens = estimateTokenCount(request.message);
     const outputTokens = estimateTokenCount(content);
@@ -83,7 +145,7 @@ export class TelnyxAgentProvider implements AgentProviderDriver {
 
     return {
       content,
-      externalConversationId: extractConversationId(response) ?? conversationId,
+      externalConversationId: extractConversationId(response) ?? resolvedConversationId,
       usage: {
         inputTokens,
         outputTokens,

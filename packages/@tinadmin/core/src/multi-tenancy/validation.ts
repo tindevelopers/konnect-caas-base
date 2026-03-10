@@ -180,6 +180,37 @@ export async function getCurrentUserTenantId(): Promise<string | null> {
 }
 
 /**
+ * Resolve tenant ID from context without throwing.
+ * Use when the operation can tolerate no tenant (e.g. return empty data).
+ */
+export async function getTenantIdOptional(
+  providedTenantId?: string | null
+): Promise<string | null> {
+  if (providedTenantId) {
+    const validation = await validateTenantAccess(providedTenantId, { requireTenant: true });
+    return validation.isValid ? providedTenantId : null;
+  }
+
+  try {
+    const { headers, cookies } = await import("next/headers");
+    const h = await headers();
+    const c = await cookies();
+    const fromHeader = h.get("x-tenant-id");
+    const fromCookie = c.get("current_tenant_id")?.value;
+    const contextualTenantId = fromHeader || fromCookie || null;
+
+    if (contextualTenantId) {
+      const validation = await validateTenantAccess(contextualTenantId, { requireTenant: true });
+      if (validation.isValid) return contextualTenantId;
+    }
+  } catch {
+    // Not in a request scope — ignore.
+  }
+
+  return await getCurrentUserTenantId();
+}
+
+/**
  * Ensure tenant_id is set for tenant-scoped operations
  */
 export async function ensureTenantId(
@@ -193,32 +224,10 @@ export async function ensureTenantId(
     return providedTenantId;
   }
 
-  // Try request-scoped context (middleware/header/cookie) before falling back to session user.
-  // This supports Platform Admin "selected tenant" flows and tenant-aware public portals.
-  try {
-    const { headers, cookies } = await import("next/headers");
-    const h = await headers();
-    const c = await cookies();
-    const fromHeader = h.get("x-tenant-id");
-    const fromCookie = c.get("current_tenant_id")?.value;
-    const contextualTenantId = fromHeader || fromCookie || null;
-
-    if (contextualTenantId) {
-      const validation = await validateTenantAccess(contextualTenantId, { requireTenant: true });
-      if (validation.isValid) {
-        return contextualTenantId;
-      }
-    }
-  } catch {
-    // Not in a request scope (or next/headers not available) — ignore.
-  }
-
-  // Get from current user
-  const tenantId = await getCurrentUserTenantId();
+  const tenantId = await getTenantIdOptional();
   if (!tenantId) {
     throw new Error("Tenant ID is required but not found in user context");
   }
-
   return tenantId;
 }
 

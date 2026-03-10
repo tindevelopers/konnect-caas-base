@@ -1,35 +1,10 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import Button from "@/components/ui/button/Button";
-import { CopyIcon } from "@/icons";
 
 interface EmbedPreviewSectionProps {
   assistantId: string;
-}
-
-interface ChatMessage {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-}
-
-interface AnswerApiResponse {
-  conversationId?: string;
-  voice_text?: string;
-  chat_markdown?: string;
-  tieredEscalationBanner?: string;
-  citations?: Array<{ title: string; source: string; url?: string }>;
-  product_recommendations?: Array<{
-    kind: string;
-    title: string;
-    why: string;
-    rep_script: string;
-    confidence: number;
-  }>;
-  handoffSuggested?: boolean;
-  handoffReason?: string;
-  error?: string;
 }
 
 function copyToClipboard(text: string) {
@@ -55,20 +30,7 @@ export default function EmbedPreviewSection({
   const [telnyxSnippet, setTelnyxSnippet] = useState("");
   const [snippetSaved, setSnippetSaved] = useState(false);
 
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const [chatInput, setChatInput] = useState("");
-  const [chatLoading, setChatLoading] = useState(false);
-  const [chatConversationId, setChatConversationId] = useState<string | null>(null);
-  const [chatError, setChatError] = useState<string | null>(null);
-  const [lastSuggestions, setLastSuggestions] = useState<AnswerApiResponse["product_recommendations"]>([]);
-  const [lastCitations, setLastCitations] = useState<AnswerApiResponse["citations"]>([]);
-
-  const messagesEndRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState<string | null>(null);
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [chatMessages]);
 
   const loadPublicKey = useCallback(async () => {
     setLoadingKey(true);
@@ -112,82 +74,6 @@ export default function EmbedPreviewSection({
     setCopied(label);
     setTimeout(() => setCopied(null), 2000);
   }, []);
-
-  const handleSendChat = useCallback(async () => {
-    const text = chatInput.trim();
-    if (!text || chatLoading) return;
-
-    setChatInput("");
-    setChatError(null);
-    const userMsg: ChatMessage = {
-      id: `u-${Date.now()}`,
-      role: "user",
-      content: text,
-    };
-    setChatMessages((prev) => [...prev, userMsg]);
-    setChatLoading(true);
-
-    try {
-      const usePublicApi = Boolean(agentPublicKey);
-      const internalId = platformAgentId ?? assistantId;
-      const endpoint = usePublicApi
-        ? "/api/public/agents/answer"
-        : `/api/agents/${internalId}/answer`;
-      const body = usePublicApi
-        ? {
-            publicKey: agentPublicKey,
-            message: text,
-            conversationId: chatConversationId ?? undefined,
-            channel: "webchat",
-          }
-        : {
-            message: text,
-            conversationId: chatConversationId ?? undefined,
-            channel: "webchat",
-          };
-
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const data: AnswerApiResponse = await res.json();
-
-      if (!res.ok) {
-        setChatError(data.error ?? "Request failed");
-        return;
-      }
-
-      if (data.conversationId) setChatConversationId(data.conversationId);
-      if (data.product_recommendations?.length) setLastSuggestions(data.product_recommendations);
-      if (data.citations?.length) setLastCitations(data.citations);
-
-      const banner = typeof data.tieredEscalationBanner === "string" ? data.tieredEscalationBanner.trim() : "";
-      if (banner) {
-        setChatMessages((prev) => [
-          ...prev,
-          {
-            id: `banner-${Date.now()}`,
-            role: "assistant",
-            content: banner,
-          },
-        ]);
-      }
-
-      const assistantMsg: ChatMessage = {
-        id: `a-${Date.now()}`,
-        role: "assistant",
-        content: data.chat_markdown ?? data.voice_text ?? "No response",
-      };
-      setChatMessages((prev) => [...prev, assistantMsg]);
-    } catch (err) {
-      setChatError(
-        err instanceof Error ? err.message : "Network error"
-      );
-    } finally {
-      setChatLoading(false);
-    }
-  }, [chatInput, chatLoading, agentPublicKey, platformAgentId, assistantId, chatConversationId]);
 
   const chatWidgetSnippet = agentPublicKey
     ? `<script src="${typeof window !== "undefined" ? window.location.origin : ""}/api/public/agents/widget?publicKey=${agentPublicKey}"></script>`
@@ -362,144 +248,6 @@ export default function EmbedPreviewSection({
                   {copied === "apiExample" ? "Copied!" : "Copy example"}
                 </button>
               </div>
-            </div>
-          )}
-
-          {/* Section 4: In-App Chat Preview */}
-          <div className="mt-6">
-            <h5 className="text-sm font-medium text-gray-800 dark:text-white/90">
-              Chat Preview (Unified Answer API)
-            </h5>
-            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              Test the unified Answer API in-app. Same knowledge source as voice.
-            </p>
-            <div className="mt-2 flex flex-col rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden" style={{ height: 360 }}>
-              <div className="flex-1 overflow-y-auto p-3 bg-gray-50 dark:bg-gray-900/40 space-y-2">
-                {chatMessages.length === 0 && (
-                  <p className="text-xs text-gray-400 dark:text-gray-500 text-center mt-8">
-                    Send a message to test the Answer API
-                  </p>
-                )}
-                {chatMessages.map((msg) => (
-                  <div
-                    key={msg.id}
-                    className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-                  >
-                    <div
-                      className={`max-w-[85%] rounded-xl px-3 py-2 text-sm ${
-                        msg.role === "user"
-                          ? "bg-indigo-600 text-white"
-                          : "bg-white border border-gray-200 text-gray-800 dark:bg-gray-800 dark:border-gray-700 dark:text-white/90"
-                      }`}
-                    >
-                      <p className="whitespace-pre-wrap text-xs">{msg.content}</p>
-                    </div>
-                  </div>
-                ))}
-                {chatLoading && (
-                  <div className="flex justify-start">
-                    <div className="rounded-xl bg-white border border-gray-200 px-3 py-2 dark:bg-gray-800 dark:border-gray-700">
-                      <div className="flex gap-1">
-                        <div className="h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400 [animation-delay:-0.3s]" />
-                        <div className="h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400 [animation-delay:-0.15s]" />
-                        <div className="h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400" />
-                      </div>
-                    </div>
-                  </div>
-                )}
-                {chatError && (
-                  <p className="text-xs text-red-500 text-center">{chatError}</p>
-                )}
-                <div ref={messagesEndRef} />
-              </div>
-              <div className="border-t border-gray-200 dark:border-gray-700 p-2 flex gap-2 bg-white dark:bg-gray-900">
-                <input
-                  type="text"
-                  className="flex-1 rounded-lg border border-gray-300 bg-transparent px-3 py-1.5 text-sm dark:border-gray-600 dark:text-white/90"
-                  placeholder="Ask a question..."
-                  value={chatInput}
-                  onChange={(e) => setChatInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      void handleSendChat();
-                    }
-                  }}
-                  disabled={chatLoading}
-                />
-                <Button
-                  size="sm"
-                  onClick={handleSendChat}
-                  disabled={!chatInput.trim() || chatLoading}
-                >
-                  Send
-                </Button>
-              </div>
-            </div>
-          </div>
-
-          {/* Section 5: Suggestions & Citations from last response */}
-          {(lastSuggestions && lastSuggestions.length > 0) && (
-            <div className="mt-4">
-              <h5 className="text-sm font-medium text-gray-800 dark:text-white/90">
-                Product Recommendations
-              </h5>
-              <div className="mt-2 space-y-2">
-                {lastSuggestions.map((rec, i) => (
-                  <div
-                    key={i}
-                    className="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/60"
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="rounded bg-indigo-100 px-1.5 py-0.5 text-xs font-medium text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300">
-                        {rec.kind}
-                      </span>
-                      <span className="text-sm font-medium text-gray-800 dark:text-white/90">
-                        {rec.title}
-                      </span>
-                    </div>
-                    <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">{rec.why}</p>
-                    {rec.rep_script && (
-                      <div className="mt-2 flex items-center gap-2">
-                        <span className="text-xs text-gray-500">Rep script:</span>
-                        <code className="flex-1 rounded bg-gray-100 px-2 py-1 text-xs dark:bg-gray-800">
-                          {rec.rep_script}
-                        </code>
-                        <button
-                          type="button"
-                          onClick={() => handleCopy(rec.rep_script, `rep-${i}`)}
-                          className="text-xs text-indigo-600 hover:text-indigo-800 dark:text-indigo-400"
-                        >
-                          <CopyIcon className="h-3 w-3" />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {(lastCitations && lastCitations.length > 0) && (
-            <div className="mt-4">
-              <h5 className="text-sm font-medium text-gray-800 dark:text-white/90">
-                Citations
-              </h5>
-              <ul className="mt-2 space-y-1 text-xs text-gray-600 dark:text-gray-400">
-                {lastCitations.map((c, i) => (
-                  <li key={i}>
-                    {i + 1}.{" "}
-                    {c.url ? (
-                      <a href={c.url} target="_blank" rel="noopener noreferrer" className="underline">
-                        {c.title}
-                      </a>
-                    ) : (
-                      c.title
-                    )}{" "}
-                    {c.source && <span className="text-gray-400">({c.source})</span>}
-                  </li>
-                ))}
-              </ul>
             </div>
           )}
         </div>

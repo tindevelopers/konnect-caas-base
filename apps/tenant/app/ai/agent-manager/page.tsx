@@ -175,17 +175,34 @@ export default function AgentManagerPage() {
       const agentsJson = await agentsRes.json();
       const usageJson = await usageRes.json();
 
+      const agentsError = !agentsRes.ok ? (agentsJson.error || "Failed to load agents.") : null;
+      const usageError = !usageRes.ok ? (usageJson.error || "Failed to load usage summary.") : null;
+
+      if (agentsError && typeof agentsError === "string" && agentsError.includes("Tenant ID is required")) {
+        setAgents([]);
+        setUsage(defaultUsage);
+        setError("Select a tenant to view and manage agents. Use the \"Select tenant\" dropdown in the top bar.");
+        return;
+      }
+
       if (!agentsRes.ok) {
-        throw new Error(agentsJson.error || "Failed to load agents.");
+        throw new Error(agentsError || "Failed to load agents.");
       }
       if (!usageRes.ok) {
-        throw new Error(usageJson.error || "Failed to load usage summary.");
+        throw new Error(usageError || "Failed to load usage summary.");
       }
 
       setAgents((agentsJson.agents ?? []) as Agent[]);
       setUsage((usageJson ?? defaultUsage) as UsageSummary);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load data.");
+      const msg = err instanceof Error ? err.message : "Failed to load data.";
+      if (msg.includes("Tenant ID is required")) {
+        setAgents([]);
+        setUsage(defaultUsage);
+        setError("Select a tenant to view and manage agents. Use the \"Select tenant\" dropdown in the top bar.");
+      } else {
+        setError(msg);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -283,6 +300,30 @@ export default function AgentManagerPage() {
       await loadData();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to promote agent.");
+    }
+  }
+
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  async function handleDelete(agent: Agent) {
+    if (
+      !window.confirm(
+        `Delete "${agent.display_name}"? This will remove the agent and its bindings. This cannot be undone.`
+      )
+    ) {
+      return;
+    }
+    setDeletingId(agent.id);
+    setError(null);
+    try {
+      const res = await fetch(`/api/agents/${agent.id}`, { method: "DELETE" });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed to delete agent.");
+      await loadData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete agent.");
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -589,6 +630,14 @@ export default function AgentManagerPage() {
                         className="rounded-lg border border-gray-300 px-2 py-1 text-xs hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
                       >
                         Bind Listing
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(agent)}
+                        disabled={deletingId === agent.id}
+                        className="rounded-lg border border-red-300 px-2 py-1 text-xs text-red-600 hover:bg-red-50 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-950/50 disabled:opacity-60"
+                      >
+                        {deletingId === agent.id ? "Deleting…" : "Delete"}
                       </button>
                     </div>
                     {bindingAgentId === agent.id && (

@@ -29,6 +29,87 @@ export default function TestChatModal({ isOpen, onClose, assistantId }: TestChat
 
   const agentRef = useRef<TelnyxAIAgent | null>(null);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
+  const debugRunIdRef = useRef<string>(`${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+
+  const safeJsonPreview = useCallback((value: unknown, maxLength: number = 280): string => {
+    try {
+      const seen = new WeakSet<object>();
+      const json = JSON.stringify(value, (_key, val) => {
+        if (typeof val === "object" && val !== null) {
+          if (seen.has(val)) return "[Circular]";
+          seen.add(val);
+        }
+        return val;
+      });
+      return json.slice(0, maxLength);
+    } catch (e) {
+      return `[[unserializable:${e instanceof Error ? e.message : String(e)}]]`;
+    }
+  }, []);
+
+  const debugLog = useCallback((hypothesisId: string, location: string, message: string, data: Record<string, unknown>) => {
+    // #region agent log
+    try {
+      const payload = {
+        runId: debugRunIdRef.current,
+        hypothesisId,
+        location,
+        message,
+        data,
+        timestamp: Date.now(),
+      };
+      fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }).catch(() => {});
+    } catch (e) {
+      fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          runId: debugRunIdRef.current,
+          hypothesisId: "H10",
+          location: "TestChatModal.tsx:debugLog",
+          message: "debugLog serialization failed",
+          data: {
+            error: e instanceof Error ? e.message : String(e),
+            originalLocation: location,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+    }
+    // #endregion
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const onWindowError = (event: ErrorEvent) => {
+      debugLog("H6", "TestChatModal.tsx:window.error", "Window error event", {
+        message: event.message?.slice(0, 240) ?? "",
+        filename: event.filename ?? "",
+        lineno: event.lineno ?? 0,
+      });
+    };
+    const onUnhandledRejection = (event: PromiseRejectionEvent) => {
+      const reason =
+        typeof event.reason?.message === "string"
+          ? event.reason.message
+          : String(event.reason ?? "").slice(0, 240);
+      debugLog("H7", "TestChatModal.tsx:window.unhandledrejection", "Unhandled rejection", {
+        reason: reason.slice(0, 240),
+      });
+    };
+
+    window.addEventListener("error", onWindowError);
+    window.addEventListener("unhandledrejection", onUnhandledRejection);
+    return () => {
+      window.removeEventListener("error", onWindowError);
+      window.removeEventListener("unhandledrejection", onUnhandledRejection);
+    };
+  }, [debugLog]);
 
   useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -36,6 +117,9 @@ export default function TestChatModal({ isOpen, onClose, assistantId }: TestChat
 
   useEffect(() => {
     if (!isOpen || !assistantId) return;
+    // #region agent log
+    debugLog("H1", "TestChatModal.tsx:open", "Test chat modal opened", { assistantId });
+    // #endregion
 
     const agent = new TelnyxAIAgent({
       agentId: assistantId,
@@ -44,11 +128,13 @@ export default function TestChatModal({ isOpen, onClose, assistantId }: TestChat
     agentRef.current = agent;
 
     agent.on("agent.connected", () => {
+      debugLog("H1", "TestChatModal.tsx:agent.connected", "Agent connected", {});
       setConnectionState("connected");
       setError(null);
     });
 
     agent.on("agent.disconnected", () => {
+      debugLog("H2", "TestChatModal.tsx:agent.disconnected", "Agent disconnected", {});
       setConnectionState("disconnected");
       setIsConversationActive(false);
     });
@@ -56,6 +142,10 @@ export default function TestChatModal({ isOpen, onClose, assistantId }: TestChat
     agent.on("agent.error", (err: any) => {
       const errCode = err?.error?.code;
       const errMsg = err?.error?.message || err?.message;
+      debugLog("H2", "TestChatModal.tsx:agent.error", "Agent emitted error", {
+        errCode: errCode ?? null,
+        errMsg: typeof errMsg === "string" ? errMsg.slice(0, 240) : null,
+      });
       if (errCode === -32001 || (typeof errMsg === "string" && errMsg.includes("Login Incorrect"))) {
         setError("WIDGET_NOT_CONFIGURED");
       } else {
@@ -71,11 +161,52 @@ export default function TestChatModal({ isOpen, onClose, assistantId }: TestChat
     });
 
     agent.on("transcript.item", (item: TranscriptItem) => {
+      if (item.role === "assistant") {
+        const contentPreview = String(item.content || "").slice(0, 120);
+        const isFallbackStyle =
+          /sorry|issue|try again|error/i.test(contentPreview) ||
+          /sorry|issue|try again|error/i.test(String(item.content || "").slice(0, 300));
+        // #region agent log
+        debugLog("H3", "TestChatModal.tsx:transcript.item", "Assistant transcript item", {
+          contentPreview,
+          isFallbackStyle,
+          itemId: typeof item.id === "string" ? item.id : null,
+          timestampType: typeof item.timestamp,
+        });
+        // #endregion
+      }
       setTranscript((prev) => [...prev, item]);
     });
 
     agent.on("conversation.update", (notification: any) => {
       const callState = notification?.call?.state;
+      const notificationErrorCode = notification?.error?.code;
+      const notificationErrorMessage = notification?.error?.message;
+      // #region agent log
+      debugLog("H1", "TestChatModal.tsx:conversation.update", "Conversation update", {
+        type: typeof notification?.type === "string" ? notification.type : null,
+        callState: typeof callState === "string" ? callState : null,
+        reason:
+          typeof notification?.call?.hangup_cause === "string"
+            ? notification.call.hangup_cause
+            : typeof notification?.error?.message === "string"
+              ? notification.error.message
+              : null,
+        code:
+          typeof notificationErrorCode === "number" || typeof notificationErrorCode === "string"
+            ? notificationErrorCode
+            : null,
+        errorMessage:
+          typeof notificationErrorMessage === "string"
+            ? notificationErrorMessage.slice(0, 220)
+            : null,
+        hasCall: !!notification?.call,
+        notificationPreview:
+          typeof notification === "object"
+            ? safeJsonPreview(notification, 280)
+            : String(notification).slice(0, 280),
+      });
+      // #endregion
       if (callState === "active") {
         setIsConversationActive(true);
       }
@@ -86,6 +217,9 @@ export default function TestChatModal({ isOpen, onClose, assistantId }: TestChat
 
     setConnectionState("connecting");
     agent.connect().catch((err: any) => {
+      debugLog("H2", "TestChatModal.tsx:connect.catch", "agent.connect rejected", {
+        error: typeof err?.message === "string" ? err.message.slice(0, 240) : String(err).slice(0, 240),
+      });
       let detail = "Failed to connect";
       try {
         detail = typeof err === "string" ? err : err?.message || JSON.stringify(err);
@@ -104,7 +238,7 @@ export default function TestChatModal({ isOpen, onClose, assistantId }: TestChat
       }
       agentRef.current = null;
     };
-  }, [isOpen, assistantId]);
+  }, [isOpen, assistantId, debugLog]);
 
   const handleStart = useCallback(async () => {
     if (!agentRef.current || connectionState !== "connected") {
@@ -113,11 +247,43 @@ export default function TestChatModal({ isOpen, onClose, assistantId }: TestChat
     }
     setError(null);
     try {
-      await agentRef.current.startConversation({ callerName: "Test Chat User" });
+      // #region agent log
+      if (typeof navigator !== "undefined" && navigator.permissions?.query) {
+        navigator.permissions
+          .query({ name: "microphone" as PermissionName })
+          .then((status) => {
+            debugLog("H9", "TestChatModal.tsx:handleStart:mic-permission", "Microphone permission status", {
+              state: status.state,
+            });
+          })
+          .catch(() => {
+            debugLog("H9", "TestChatModal.tsx:handleStart:mic-permission", "Microphone permission query failed", {});
+          });
+      }
+      // #endregion
+      const startId = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      debugLog("H1", "TestChatModal.tsx:handleStart", "Starting conversation", { startId });
+      const startPromise = agentRef.current.startConversation({ callerName: "Test Chat User" });
+      debugLog("H1", "TestChatModal.tsx:handleStart:promise-created", "startConversation promise created", { startId });
+      startPromise
+        .then(() => {
+          debugLog("H1", "TestChatModal.tsx:handleStart:promise-resolved", "startConversation promise resolved", { startId });
+        })
+        .catch((err: any) => {
+          debugLog("H2", "TestChatModal.tsx:handleStart:promise-rejected", "startConversation promise rejected", {
+            startId,
+            error: typeof err?.message === "string" ? err.message.slice(0, 240) : String(err).slice(0, 240),
+          });
+        });
+      await startPromise;
+      debugLog("H1", "TestChatModal.tsx:handleStart:await-returned", "startConversation await returned", { startId });
     } catch (err: any) {
+      debugLog("H2", "TestChatModal.tsx:handleStart.catch", "startConversation failed", {
+        error: typeof err?.message === "string" ? err.message.slice(0, 240) : String(err).slice(0, 240),
+      });
       setError(err?.message || "Failed to start conversation");
     }
-  }, [connectionState]);
+  }, [connectionState, debugLog, isConversationActive]);
 
   const handleEnd = useCallback(() => {
     try {
@@ -136,12 +302,28 @@ export default function TestChatModal({ isOpen, onClose, assistantId }: TestChat
       return;
     }
     try {
+      const sendId = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      // #region agent log
+      debugLog("H4", "TestChatModal.tsx:handleSend", "Sending conversation message", {
+        sendId,
+        length: trimmed.length,
+        preview: trimmed.slice(0, 80),
+      });
+      // #endregion
       agentRef.current.sendConversationMessage(trimmed);
+      // #region agent log
+      debugLog("H4", "TestChatModal.tsx:handleSend:sent", "sendConversationMessage invoked", {
+        sendId,
+      });
+      // #endregion
       setMessage("");
     } catch (err: any) {
+      debugLog("H4", "TestChatModal.tsx:handleSend.catch", "sendConversationMessage failed", {
+        error: typeof err?.message === "string" ? err.message.slice(0, 240) : String(err).slice(0, 240),
+      });
       setError(err?.message || "Failed to send message");
     }
-  }, [isConversationActive, message]);
+  }, [isConversationActive, message, debugLog]);
 
   const handleClose = useCallback(() => {
     handleEnd();
