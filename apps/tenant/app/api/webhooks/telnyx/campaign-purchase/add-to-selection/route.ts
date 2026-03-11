@@ -36,8 +36,14 @@ function getCallControlId(request: NextRequest, body: Record<string, unknown>): 
 function parseProduct(body: Record<string, unknown>): SelectedProduct | null {
   const variantIdRaw = body.variantId ?? body.variant_id ?? body.variantGid ?? body.variant_gid ?? body.shopifyVariantId;
   const quantity = body.quantity;
-  if (typeof variantIdRaw !== "string" || !variantIdRaw.trim()) return null;
-  const norm = normalizeShopifyVariantId(variantIdRaw);
+  const variantIdStr =
+    typeof variantIdRaw === "string"
+      ? variantIdRaw.trim()
+      : typeof variantIdRaw === "number"
+        ? String(variantIdRaw)
+        : "";
+  if (!variantIdStr) return null;
+  const norm = normalizeShopifyVariantId(variantIdStr);
   const normalized = norm.normalized?.trim();
   if (!normalized) return null;
   if (!isShopifyVariantGid(normalized)) return null;
@@ -47,7 +53,7 @@ function parseProduct(body: Record<string, unknown>): SelectedProduct | null {
     productTitle: typeof body.productTitle === "string" ? body.productTitle : typeof body.product_title === "string" ? body.product_title : "",
     productUrl: typeof body.productUrl === "string" ? body.productUrl : typeof body.product_url === "string" ? body.product_url : undefined,
     variantId: normalized,
-    variantIdRaw: variantIdRaw.trim(),
+    variantIdRaw: variantIdStr,
     variantIdSource: norm.source,
     quantity: Math.min(100, Math.max(1, q)),
     variantTitle: typeof body.variantTitle === "string" ? body.variantTitle : typeof body.variant_title === "string" ? body.variant_title : undefined,
