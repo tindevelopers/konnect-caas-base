@@ -9,8 +9,26 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+export async function GET() {
+  return NextResponse.json(
+    {
+      ok: true,
+      tool: "create_draft_order",
+      description:
+        "Telnyx AI assistant webhook tool. Use POST with { customerConfirmed: true } to trigger draft order creation.",
+    },
+    { status: 200, headers: { "Access-Control-Allow-Origin": "*" } }
+  );
+}
+
 function parseStrictBoolean(value: unknown): boolean {
-  return value === true || value === "true";
+  if (value === true) return true;
+  if (value === 1) return true;
+  if (typeof value === "string") {
+    const v = value.trim().toLowerCase();
+    return v === "true" || v === "1" || v === "yes" || v === "y" || v === "confirmed" || v === "confirm";
+  }
+  return false;
 }
 
 function getCallControlId(request: NextRequest, body: Record<string, unknown>): string | null {
@@ -114,26 +132,73 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const customerEmail = typeof body.customerEmail === "string" ? body.customerEmail : typeof body.customer_email === "string" ? body.customer_email : undefined;
+  const bodyEmail =
+    typeof body.customerEmail === "string"
+      ? body.customerEmail
+      : typeof body.customer_email === "string"
+        ? body.customer_email
+        : typeof body.email === "string"
+          ? body.email
+          : undefined;
+  const customerEmail =
+    (bodyEmail && bodyEmail.trim() ? bodyEmail.trim() : undefined) ||
+    (typeof ctx.recipientEmail === "string" && ctx.recipientEmail.trim()
+      ? ctx.recipientEmail.trim()
+      : undefined);
+
+  if (!customerEmail) {
+    return NextResponse.json(
+      {
+        content:
+          "I can send the checkout link by email, but I don't have an email address on file. What email should I send it to?",
+        error: "missing_customer_email",
+      },
+      { status: 200, headers: { "Access-Control-Allow-Origin": "*" } }
+    );
+  }
   const confirmedAt = new Date().toISOString();
 
   try {
+    console.info("[CampaignPurchase:create-draft-order] Confirmation received", {
+      callControlId,
+      recipientId: ctx.recipientId,
+      campaignId: ctx.campaignId,
+      selectedCount: state.selectedProducts?.length ?? 0,
+      selectedProducts: (state.selectedProducts ?? []).map((p) => ({
+        productTitle: p.productTitle,
+        variantId: p.variantId,
+        quantity: p.quantity,
+        sku: p.sku,
+      })),
+      hasCustomerEmail: true,
+      forceCreate,
+    });
     const result = await triggerDraftOrderAndSaveResult(
       ctx.recipientId,
       ctx.result,
       automation.webhookUrl,
       {
-        customerEmail: customerEmail ? customerEmail.trim() : undefined,
+        customerEmail,
         checkoutConfirmed: true,
         checkoutConfirmedAt: confirmedAt,
       }
     );
     if (!result.ok) {
+      console.warn("[CampaignPurchase:create-draft-order] Draft order failed", {
+        recipientId: ctx.recipientId,
+        campaignId: ctx.campaignId,
+        message: result.message,
+      });
       return NextResponse.json(
         { content: result.message, error: "draft_order_failed" },
         { status: 200, headers: { "Access-Control-Allow-Origin": "*" } }
       );
     }
+    console.info("[CampaignPurchase:create-draft-order] Success", {
+      recipientId: ctx.recipientId,
+      campaignId: ctx.campaignId,
+      invoiceUrl: result.invoiceUrl,
+    });
     return NextResponse.json(
       {
         content: result.message,

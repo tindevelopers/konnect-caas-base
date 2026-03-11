@@ -731,10 +731,12 @@ export function AssistantEditor({
       const slug = server.name.toLowerCase().replace(/\s+/g, "_");
       const tool = {
         type: "webhook",
-        name: `mcp_${slug}`,
-        description: server.description || `Call MCP server ${server.name}`,
-        url: server.server_url,
-        method: "POST",
+        webhook: {
+          name: `mcp_${slug}`,
+          description: server.description || `Call MCP server ${server.name}`,
+          url: server.server_url,
+          method: "POST",
+        },
       };
 
       setJsonFields((prev) => ({

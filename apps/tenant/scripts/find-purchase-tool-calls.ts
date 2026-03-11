@@ -31,6 +31,7 @@ if (!TELNYX_API_KEY) {
 
 const HOURS = Number(process.env.HOURS || "6") || 6;
 const LIMIT = Number(process.env.LIMIT || "25") || 25;
+const FULL = process.env.FULL === "1";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
@@ -166,12 +167,15 @@ async function main() {
       [
         `- updated_at=${r.updated_at}`,
         `recipient=${tail(r.id, 8)}`,
+        FULL ? `recipientId=${r.id}` : null,
         `campaign=${tail(r.campaign_id, 8)}`,
+        FULL ? `campaignId=${r.campaign_id}` : null,
         `callTail=${tail(callControlId, 8)}`,
+        FULL ? `callControlId=${callControlId}` : null,
         `dur=${duration ?? "?"}s`,
         `convoTail=${convoId ? tail(convoId, 8) : "(none)"}`,
         `tools=${toolNames.length ? toolNames.sort().join(",") : "(none)"}`,
-      ].join(" ")
+      ].filter(Boolean).join(" ")
     );
 
     if (hasPurchaseTools) {

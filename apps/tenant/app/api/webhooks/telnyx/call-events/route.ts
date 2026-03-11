@@ -162,16 +162,6 @@ async function handleOutboundCallAnsweredAssistant(payload: Record<string, unkno
         instructions = raw.trim().slice(0, 50000);
       }
 
-      // Debug: log prompt resolution for outbound campaign calls (remove after verification)
-      if (process.env.NODE_ENV !== "production" || process.env.DEBUG_CAMPAIGN_PROMPT === "1") {
-        const preview = instructions ? instructions.slice(0, 120).replace(/\n/g, " ") + (instructions.length > 120 ? "..." : "") : "(none)";
-        console.log("[TelnyxWebhook:ai_assistant_start] prompt resolution", {
-          assistantId: decoded.a,
-          credentialSource,
-          instructionsLen: instructions?.length ?? 0,
-          preview,
-        });
-      }
     } catch (fetchErr) {
       console.warn("[TelnyxWebhook] Could not fetch assistant for instructions:", fetchErr instanceof Error ? fetchErr.message : String(fetchErr));
     }

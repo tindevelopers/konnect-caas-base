@@ -374,14 +374,27 @@ export async function ensureProxyWebhookToolOnAssistantAction(
 
     const webhookTool = {
       type: "webhook",
-      name: PROXY_WEBHOOK_TOOL_NAME,
-      description: "Route chat to platform/Abacus backend",
-      url,
-      method: "POST",
+      webhook: {
+        name: PROXY_WEBHOOK_TOOL_NAME,
+        description: "Route chat to platform/Abacus backend",
+        url,
+        method: "POST",
+      },
     } as Record<string, unknown>;
 
     const otherTools = existingTools.filter(
-      (t) => (t as Record<string, unknown>)?.name !== PROXY_WEBHOOK_TOOL_NAME
+      (t) => {
+        const obj = t as Record<string, unknown>;
+        const directName = typeof obj?.name === "string" ? obj.name : "";
+        const webhookName =
+          typeof obj?.webhook === "object" && obj.webhook
+            ? typeof (obj.webhook as any)?.name === "string"
+              ? String((obj.webhook as any).name)
+              : ""
+            : "";
+        const name = directName || webhookName;
+        return name !== PROXY_WEBHOOK_TOOL_NAME;
+      }
     );
     const newTools = [...otherTools, webhookTool];
 

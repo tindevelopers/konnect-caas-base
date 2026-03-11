@@ -116,10 +116,14 @@ The two-stage purchase flow is correctly implemented across the stack. All gates
 # From repo root - run all campaign purchase flow tests:
 pnpm exec vitest run apps/tenant
 
-# Or run specific test files:
+# Core purchase-flow (getPurchaseState, addSelectedProduct, buildDraftOrderPayload, postDraftOrderToWebhook, triggerDraftOrderAndSaveResult):
 pnpm exec vitest run apps/tenant/src/core/campaigns/__tests__/purchase-flow.test.ts
+
+# Route + smoke tests (Phase 1, Phase 2, TEST 1–5):
 pnpm exec vitest run apps/tenant/app/api/webhooks/telnyx/campaign-purchase/__tests__/
 ```
+
+See **docs/campaign-purchase-flow-validation-report.md** for the full step-by-step validation report and smoke test matrix (TEST 1–5).
 
 ### Local manual harness
 ```bash

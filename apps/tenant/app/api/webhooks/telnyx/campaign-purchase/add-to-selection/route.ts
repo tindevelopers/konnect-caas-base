@@ -5,9 +5,22 @@ import {
   getCampaignAutomationSettings,
   type SelectedProduct,
 } from "@/src/core/campaigns/purchase-flow";
+import { normalizeShopifyVariantId, isShopifyVariantGid } from "@/src/core/campaigns/shopify-variant-id";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+export async function GET() {
+  return NextResponse.json(
+    {
+      ok: true,
+      tool: "add_to_selection",
+      description:
+        "Telnyx AI assistant webhook tool. Use POST with product + variantId + quantity to add a product to selection.",
+    },
+    { status: 200, headers: { "Access-Control-Allow-Origin": "*" } }
+  );
+}
 
 function getCallControlId(request: NextRequest, body: Record<string, unknown>): string | null {
   const header = request.headers.get("x-telnyx-call-control-id")?.trim();
@@ -21,15 +34,21 @@ function getCallControlId(request: NextRequest, body: Record<string, unknown>): 
 }
 
 function parseProduct(body: Record<string, unknown>): SelectedProduct | null {
-  const variantId = body.variantId ?? body.variant_id;
+  const variantIdRaw = body.variantId ?? body.variant_id ?? body.variantGid ?? body.variant_gid ?? body.shopifyVariantId;
   const quantity = body.quantity;
-  if (typeof variantId !== "string" || !variantId.trim()) return null;
+  if (typeof variantIdRaw !== "string" || !variantIdRaw.trim()) return null;
+  const norm = normalizeShopifyVariantId(variantIdRaw);
+  const normalized = norm.normalized?.trim();
+  if (!normalized) return null;
+  if (!isShopifyVariantGid(normalized)) return null;
   const q = typeof quantity === "number" ? quantity : typeof quantity === "string" ? parseInt(quantity, 10) : 1;
   if (!Number.isFinite(q) || q < 1) return null;
   return {
     productTitle: typeof body.productTitle === "string" ? body.productTitle : typeof body.product_title === "string" ? body.product_title : "",
     productUrl: typeof body.productUrl === "string" ? body.productUrl : typeof body.product_url === "string" ? body.product_url : undefined,
-    variantId: variantId.trim(),
+    variantId: normalized,
+    variantIdRaw: variantIdRaw.trim(),
+    variantIdSource: norm.source,
     quantity: Math.min(100, Math.max(1, q)),
     variantTitle: typeof body.variantTitle === "string" ? body.variantTitle : typeof body.variant_title === "string" ? body.variant_title : undefined,
     sku: typeof body.sku === "string" ? body.sku : undefined,
@@ -75,7 +94,11 @@ export async function POST(request: NextRequest) {
   const product = parseProduct(body);
   if (!product) {
     return NextResponse.json(
-      { content: "I need at least variantId and quantity to add a product.", error: "invalid_product" },
+      {
+        content:
+          "I need a valid Shopify variantId (gid://shopify/ProductVariant/...) and quantity to add a product. Please try again with the exact variant.",
+        error: "invalid_product",
+      },
       { status: 400, headers: { "Access-Control-Allow-Origin": "*" } }
     );
   }
@@ -97,6 +120,17 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    console.info("[CampaignPurchase:add-to-selection] Selection received", {
+      callControlId,
+      recipientId: ctx.recipientId,
+      campaignId: ctx.campaignId,
+      productTitle: product.productTitle,
+      variantId: product.variantId,
+      variantIdRaw: product.variantIdRaw,
+      variantIdSource: product.variantIdSource,
+      quantity: product.quantity,
+      sku: product.sku,
+    });
     const nextState = await addSelectedProduct(ctx.recipientId, ctx.result, product);
     const count = nextState.selectedProducts?.length ?? 0;
     const message =

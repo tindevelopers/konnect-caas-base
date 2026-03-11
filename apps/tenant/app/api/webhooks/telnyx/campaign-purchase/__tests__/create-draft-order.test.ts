@@ -97,7 +97,7 @@ describe("create-draft-order route", () => {
       recipientId: "r1",
       campaignId: "c1",
       tenantId: "t1",
-      result: { purchase: { selectedProducts: [{ variantId: "v1", quantity: 1 }] } },
+      result: { purchase: { selectedProducts: [{ variantId: "gid://shopify/ProductVariant/1", quantity: 1 }] } },
       campaignSettings: { enableProductPurchaseFlow: true, webhookUrl: "https://example.com" },
     });
     vi.mocked(getCampaignAutomationSettings).mockReturnValue({
@@ -105,7 +105,7 @@ describe("create-draft-order route", () => {
       webhookUrl: "https://example.com",
     });
     vi.mocked(getPurchaseState).mockReturnValue({
-      selectedProducts: [{ productTitle: "X", variantId: "v1", quantity: 1 }],
+      selectedProducts: [{ productTitle: "X", variantId: "gid://shopify/ProductVariant/1", quantity: 1 }],
       invoiceUrl: undefined,
     });
 
@@ -121,7 +121,7 @@ describe("create-draft-order route", () => {
       recipientId: "r1",
       campaignId: "c1",
       tenantId: "t1",
-      result: { purchase: { selectedProducts: [{ variantId: "v1", quantity: 1 }] } },
+      result: { purchase: { selectedProducts: [{ variantId: "gid://shopify/ProductVariant/1", quantity: 1 }] } },
       campaignSettings: { enableProductPurchaseFlow: true, webhookUrl: "https://example.com" },
     });
     vi.mocked(getCampaignAutomationSettings).mockReturnValue({
@@ -129,7 +129,7 @@ describe("create-draft-order route", () => {
       webhookUrl: "https://example.com",
     });
     vi.mocked(getPurchaseState).mockReturnValue({
-      selectedProducts: [{ productTitle: "X", variantId: "v1", quantity: 1 }],
+      selectedProducts: [{ productTitle: "X", variantId: "gid://shopify/ProductVariant/1", quantity: 1 }],
       invoiceUrl: undefined,
     });
 
@@ -153,7 +153,7 @@ describe("create-draft-order route", () => {
       webhookUrl: "https://example.com",
     });
     vi.mocked(getPurchaseState).mockReturnValue({
-      selectedProducts: [{ productTitle: "X", variantId: "v1", quantity: 1 }],
+      selectedProducts: [{ productTitle: "X", variantId: "gid://shopify/ProductVariant/1", quantity: 1 }],
       invoiceUrl: "https://checkout.example.com/inv",
     });
 
@@ -194,7 +194,7 @@ describe("create-draft-order route", () => {
       recipientId: "r1",
       campaignId: "c1",
       tenantId: "t1",
-      result: { purchase: { selectedProducts: [{ variantId: "v1", quantity: 1 }] } },
+      result: { purchase: { selectedProducts: [{ variantId: "gid://shopify/ProductVariant/1", quantity: 1 }] } },
       campaignSettings: { enableProductPurchaseFlow: true, webhookUrl: "https://example.com" },
     });
     vi.mocked(getCampaignAutomationSettings).mockReturnValue({
@@ -202,7 +202,7 @@ describe("create-draft-order route", () => {
       webhookUrl: "https://example.com",
     });
     vi.mocked(getPurchaseState).mockReturnValue({
-      selectedProducts: [{ productTitle: "X", variantId: "v1", quantity: 1 }],
+      selectedProducts: [{ productTitle: "X", variantId: "gid://shopify/ProductVariant/1", quantity: 1 }],
       invoiceUrl: undefined,
     });
     vi.mocked(triggerDraftOrderAndSaveResult).mockResolvedValue({
@@ -228,7 +228,7 @@ describe("create-draft-order route", () => {
       recipientId: "r1",
       campaignId: "c1",
       tenantId: "t1",
-      result: { purchase: { selectedProducts: [{ variantId: "v1", quantity: 1 }] } },
+      result: { purchase: { selectedProducts: [{ variantId: "gid://shopify/ProductVariant/1", quantity: 1 }] } },
       campaignSettings: { enableProductPurchaseFlow: true, webhookUrl: "https://example.com" },
     });
     vi.mocked(getCampaignAutomationSettings).mockReturnValue({
@@ -236,7 +236,7 @@ describe("create-draft-order route", () => {
       webhookUrl: "https://example.com",
     });
     vi.mocked(getPurchaseState).mockReturnValue({
-      selectedProducts: [{ productTitle: "X", variantId: "v1", quantity: 1 }],
+      selectedProducts: [{ productTitle: "X", variantId: "gid://shopify/ProductVariant/1", quantity: 1 }],
       invoiceUrl: undefined,
     });
     vi.mocked(triggerDraftOrderAndSaveResult).mockResolvedValue({
@@ -247,6 +247,71 @@ describe("create-draft-order route", () => {
 
     const res = await post({ call_control_id: mockCallControlId, customer_confirmed: true });
     expect(res.status).toBe(200);
+    expect(triggerDraftOrderAndSaveResult).toHaveBeenCalled();
+  });
+
+  it("treats string 'yes' as confirmed (common tool arg)", async () => {
+    vi.mocked(getRecipientAndCampaignByCallControlId).mockResolvedValue({
+      recipientId: "r1",
+      campaignId: "c1",
+      tenantId: "t1",
+      result: { purchase: { selectedProducts: [{ variantId: "gid://shopify/ProductVariant/1", quantity: 1 }] } },
+      campaignSettings: { enableProductPurchaseFlow: true, webhookUrl: "https://example.com" },
+    });
+    vi.mocked(getCampaignAutomationSettings).mockReturnValue({
+      enableProductPurchaseFlow: true,
+      webhookUrl: "https://example.com",
+    });
+    vi.mocked(getPurchaseState).mockReturnValue({
+      selectedProducts: [{ productTitle: "X", variantId: "gid://shopify/ProductVariant/1", quantity: 1 }],
+      invoiceUrl: undefined,
+    });
+    vi.mocked(triggerDraftOrderAndSaveResult).mockResolvedValue({
+      ok: true,
+      message: "Done.",
+      invoiceUrl: "https://checkout.example.com/inv",
+    });
+
+    const res = await post({ call_control_id: mockCallControlId, customerConfirmed: "yes" });
+    expect(res.status).toBe(200);
+    expect(triggerDraftOrderAndSaveResult).toHaveBeenCalled();
+  });
+
+  it("when force is true and invoiceUrl exists, calls triggerDraftOrderAndSaveResult (bypass duplicate guard)", async () => {
+    vi.mocked(getRecipientAndCampaignByCallControlId).mockResolvedValue({
+      recipientId: "r1",
+      campaignId: "c1",
+      tenantId: "t1",
+      result: {
+        purchase: {
+          selectedProducts: [{ variantId: "gid://shopify/ProductVariant/1", quantity: 1 }],
+          invoiceUrl: "https://checkout.example.com/existing",
+        },
+      },
+      campaignSettings: { enableProductPurchaseFlow: true, webhookUrl: "https://example.com" },
+    });
+    vi.mocked(getCampaignAutomationSettings).mockReturnValue({
+      enableProductPurchaseFlow: true,
+      webhookUrl: "https://example.com",
+    });
+    vi.mocked(getPurchaseState).mockReturnValue({
+      selectedProducts: [{ productTitle: "X", variantId: "gid://shopify/ProductVariant/1", quantity: 1 }],
+      invoiceUrl: "https://checkout.example.com/existing",
+    });
+    vi.mocked(triggerDraftOrderAndSaveResult).mockResolvedValue({
+      ok: true,
+      message: "I've sent the checkout link.",
+      invoiceUrl: "https://checkout.example.com/new",
+    });
+
+    const res = await post({
+      call_control_id: mockCallControlId,
+      customerConfirmed: true,
+      force: true,
+    });
+    expect(res.status).toBe(200);
+    const data = await jsonResponse<{ invoiceUrl: string }>(res);
+    expect(data.invoiceUrl).toBe("https://checkout.example.com/new");
     expect(triggerDraftOrderAndSaveResult).toHaveBeenCalled();
   });
 });
