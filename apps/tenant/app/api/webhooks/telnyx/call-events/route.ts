@@ -110,11 +110,11 @@ async function handleOutboundCallAnsweredAssistant(payload: Record<string, unkno
   if (!clientStateRaw || typeof clientStateRaw !== "string") return;
 
   // Decoded client_state from campaign executor may include: t, a, tid, g (greeting), pf (enableProductPurchaseFlow), rw (webhookUrl)
-  let decoded: { t?: string; a?: string; tid?: string; g?: string; pf?: boolean; rw?: string };
+  let decoded: { t?: string; a?: string; tid?: string; g?: string; cg?: boolean; pf?: boolean; rw?: string };
   try {
     decoded = JSON.parse(
       Buffer.from(clientStateRaw, "base64").toString("utf8")
-    ) as { t?: string; a?: string; tid?: string; g?: string; pf?: boolean; rw?: string };
+    ) as { t?: string; a?: string; tid?: string; g?: string; cg?: boolean; pf?: boolean; rw?: string };
   } catch {
     return;
   }
@@ -124,25 +124,44 @@ async function handleOutboundCallAnsweredAssistant(payload: Record<string, unkno
     (callPayload.call_control_id as string) || resolveExternalId(payload);
   if (!callControlId) return;
 
-  // Greeting: campaign-specific (settings.greeting) or default so the assistant speaks when the call is answered.
-  const greeting =
+  const DEFAULT_GREETING =
+    "Hi, this is calling from PetStore Direct. We work with professional grooming salons on wholesale supply pricing. Am I speaking with the person who handles grooming supply purchases?";
+  const campaignGreeting =
     typeof decoded.g === "string" && decoded.g.trim()
       ? decoded.g.trim().slice(0, 3000)
-      : "Hi, this is calling from PetStore Direct. We work with professional grooming salons on wholesale supply pricing. Am I speaking with the person who handles grooming supply purchases?";
+      : "";
 
   try {
     const { transport, credentialSource } = await getTelnyxTransportForWebhook(decoded.tid);
     // Fetch current assistant config from Telnyx so we pass the latest instructions.
-    // Passing instructions at ai_assistant_start overwrites any cached/stale assistant config,
-    // ensuring campaign calls use the current prompt (fixes "Luna using old prompt" issue).
-    // Telnyx API wraps single resources in { data: { id, instructions, ... } }.
+    // Passing instructions at ai_assistant_start overwrites any cached/stale assistant config.
+    // Telnyx API may return { data: { ... } } or direct { instructions, ... }.
     let instructions: string | undefined;
+    let assistantGreetingObserved = "";
     try {
       const response = await getAssistant(transport, decoded.a);
-      const assistant = (response as { data?: { instructions?: string }; instructions?: string })?.data ?? (response as { instructions?: string });
+      const res = response as Record<string, unknown>;
+      const assistant = (res?.data as Record<string, unknown> | undefined) ?? res;
       const raw = assistant?.instructions;
+      const assistantGreetingRaw = assistant?.greeting;
+      const assistantGreeting =
+        typeof assistantGreetingRaw === "string" && assistantGreetingRaw.trim()
+          ? assistantGreetingRaw.trim().slice(0, 3000)
+          : "";
+      assistantGreetingObserved = assistantGreeting;
       if (typeof raw === "string" && raw.trim()) {
         instructions = raw.trim().slice(0, 50000);
+      }
+
+      // Debug: log prompt resolution for outbound campaign calls (remove after verification)
+      if (process.env.NODE_ENV !== "production" || process.env.DEBUG_CAMPAIGN_PROMPT === "1") {
+        const preview = instructions ? instructions.slice(0, 120).replace(/\n/g, " ") + (instructions.length > 120 ? "..." : "") : "(none)";
+        console.log("[TelnyxWebhook:ai_assistant_start] prompt resolution", {
+          assistantId: decoded.a,
+          credentialSource,
+          instructionsLen: instructions?.length ?? 0,
+          preview,
+        });
       }
     } catch (fetchErr) {
       console.warn("[TelnyxWebhook] Could not fetch assistant for instructions:", fetchErr instanceof Error ? fetchErr.message : String(fetchErr));
@@ -151,16 +170,28 @@ async function handleOutboundCallAnsweredAssistant(payload: Record<string, unkno
       ? { id: decoded.a, instructions }
       : { id: decoded.a };
 
+    // Avoid double greeting:
+    // - If campaign explicitly set a greeting (cg=true), send it.
+    // - If cg is missing (older client_state), treat greeting as campaign greeting only when it differs from DEFAULT_GREETING.
+    // - Else, if assistant has its own configured greeting, omit greeting in start call so Telnyx plays only one.
+    // - Else, fall back to DEFAULT_GREETING.
+    const legacyLooksCustom = !!campaignGreeting && campaignGreeting !== DEFAULT_GREETING;
+    const hasCampaignGreeting =
+      (!!campaignGreeting && decoded.cg === true) ||
+      (!!campaignGreeting && decoded.cg == null && legacyLooksCustom);
+    const shouldSendGreeting = hasCampaignGreeting || !assistantGreetingObserved;
+    const greetingToSend = hasCampaignGreeting ? campaignGreeting : DEFAULT_GREETING;
+    const startBody: Record<string, unknown> = shouldSendGreeting
+      ? { assistant: assistantBody, greeting: greetingToSend }
+      : { assistant: assistantBody };
+
     let lastError: unknown = null;
     try {
-      await transport.request(
+      const startRes = await transport.request(
         `/calls/${callControlId}/actions/ai_assistant_start`,
         {
           method: "POST",
-          body: {
-            assistant: assistantBody,
-            greeting,
-          },
+          body: startBody,
         }
       );
     } catch (err) {
@@ -174,7 +205,7 @@ async function handleOutboundCallAnsweredAssistant(payload: Record<string, unkno
           const envTransport = createTelnyxClient({ apiKey: envKey });
           await envTransport.request(
             `/calls/${callControlId}/actions/ai_assistant_start`,
-            { method: "POST", body: { assistant: assistantBody, greeting } }
+            { method: "POST", body: startBody }
           );
           lastError = null;
           console.log("[TelnyxWebhook:ai_assistant_start] retry succeeded");
@@ -394,6 +425,7 @@ export async function POST(request: NextRequest) {
 
   const eventType = resolveEventType(payload);
   const externalId = resolveExternalId(payload);
+
   const adminClient = createAdminClient();
 
   const { error } = await (adminClient.from("telephony_events") as any).insert({

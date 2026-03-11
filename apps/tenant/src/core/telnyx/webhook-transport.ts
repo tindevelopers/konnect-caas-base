@@ -76,9 +76,11 @@ export async function getTelnyxTransportForWebhook(tenantId: string): Promise<{
   const { credentials, settings } = await getTelnyxIntegrationForWebhook(tenantId);
   const tenantKey = extractApiKey(credentials);
   const envKey = process.env.TELNYX_API_KEY?.trim() || null;
-  // Prefer TELNYX_API_KEY when set so Vercel env overrides stale tenant credentials
-  const apiKey = envKey ?? tenantKey ?? null;
-  const credentialSource: TelnyxCredentialSource = envKey ? "env" : "tenant";
+  // Match getTelnyxTransport order: tenant first when available, so we fetch assistants
+  // from the same Telnyx account where the user edits them (fixes stale prompt when
+  // tenant has own Telnyx and TELNYX_API_KEY points to a different account).
+  const apiKey = tenantKey ?? envKey ?? null;
+  const credentialSource: TelnyxCredentialSource = tenantKey ? "tenant" : "env";
 
   if (!apiKey) {
     throw new Error(

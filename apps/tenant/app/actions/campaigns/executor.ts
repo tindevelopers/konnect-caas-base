@@ -1,7 +1,7 @@
 "use server";
 
 import { createAdminClient } from "@/core/database/admin-client";
-import { createTelnyxClient, getAssistant } from "@tinadmin/telnyx-ai-platform/server";
+import { createTelnyxClient } from "@tinadmin/telnyx-ai-platform/server";
 import {
   getTelnyxIntegrationForWebhook,
 } from "@/src/core/telnyx/webhook-transport";
@@ -128,9 +128,6 @@ export async function processCampaignVoiceBatch(
     return { processed: 0, errors: [] };
   }
 
-  const DEFAULT_GREETING =
-    "Hi, this is calling from PetStore Direct. We work with professional grooming salons on wholesale supply pricing. Am I speaking with the person who handles grooming supply purchases?";
-
   const bypassCallingWindow = options?.bypassCallingWindow === true;
 
   for (const campaign of campaigns) {
@@ -168,8 +165,9 @@ export async function processCampaignVoiceBatch(
     }
 
     const { credentials } = await getTelnyxIntegrationForWebhook(campaign.tenant_id);
-    // Prefer TELNYX_API_KEY when set so Vercel env overrides stale tenant credentials
-    const apiKey = process.env.TELNYX_API_KEY?.trim() ?? extractApiKey(credentials as Record<string, unknown> | null);
+    // Match webhook/editor: tenant credentials first so we use same Telnyx account
+    // where the assistant was updated (fixes stale prompt when tenant has own Telnyx).
+    const apiKey = extractApiKey(credentials as Record<string, unknown> | null) ?? process.env.TELNYX_API_KEY?.trim();
     if (!apiKey) {
       errors.push(`Campaign ${campaign.id}: Telnyx API key not configured`);
       continue;
@@ -209,27 +207,6 @@ export async function processCampaignVoiceBatch(
 
     if (!recipients?.length) continue;
 
-    // Resolve greeting once per campaign: campaign setting (from fresh fetch) > assistant greeting from Telnyx > default.
-    const customGreeting =
-      typeof freshSettings.greeting === "string" && (freshSettings.greeting as string).trim()
-        ? (freshSettings.greeting as string).trim().slice(0, 3000)
-        : "";
-    let resolvedGreeting: string;
-    if (customGreeting) {
-      resolvedGreeting = customGreeting;
-    } else {
-      try {
-        const assistant = await getAssistant(transport, campaign.assistant_id);
-        const assistantGreeting =
-          typeof assistant?.greeting === "string" && assistant.greeting.trim()
-            ? assistant.greeting.trim().slice(0, 3000)
-            : "";
-        resolvedGreeting = assistantGreeting || DEFAULT_GREETING;
-      } catch {
-        resolvedGreeting = DEFAULT_GREETING;
-      }
-    }
-
     for (const r of recipients) {
       try {
         await (admin.from("campaign_recipients") as any)
@@ -252,13 +229,14 @@ export async function processCampaignVoiceBatch(
 
         // Telnyx requires the call to be answered before ai_assistant_start. Set client_state
         // so the webhook can start the assistant on call.answered (same pattern as callAssistantAction).
-        // Always include g (greeting) so the webhook has it; use campaign greeting or default.
+        // Include campaign greeting only when explicitly set, to avoid double-greeting
+        // (assistant configured greeting + per-call greeting).
         // Include automation settings so purchase-flow backend can gate behavior (backward compat: missing = false).
         const customGreeting =
-          typeof settings.greeting === "string" && settings.greeting.trim()
-            ? settings.greeting.trim().slice(0, 3000)
+          typeof freshSettings.greeting === "string" && freshSettings.greeting.trim()
+            ? freshSettings.greeting.trim().slice(0, 3000)
             : "";
-        const greeting = customGreeting || DEFAULT_GREETING;
+        const hasCampaignGreeting = Boolean(customGreeting);
         const enableProductPurchaseFlow = settings.enableProductPurchaseFlow === true;
         const webhookUrlRaw =
           typeof settings.webhookUrl === "string"
@@ -271,7 +249,9 @@ export async function processCampaignVoiceBatch(
           t: "tinadmin_outbound_assistant",
           a: campaign.assistant_id,
           tid: campaign.tenant_id,
-          g: greeting,
+          // g: campaign greeting only (omit when not set; webhook will default)
+          g: hasCampaignGreeting ? customGreeting : "",
+          cg: hasCampaignGreeting,
           pf: enableProductPurchaseFlow,
           rw: webhookUrl,
         };
