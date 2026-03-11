@@ -73,6 +73,59 @@ function keywordHitsFromObj(obj: any) {
   };
 }
 
+async function getConversationIdForCall(callControlId: string): Promise<string | null> {
+  const urls = [
+    `https://api.telnyx.com/v2/ai/conversations?filter[call_control_id]=${encodeURIComponent(callControlId)}&page[size]=20`,
+    `https://api.telnyx.com/v2/ai/conversations?page[size]=50`,
+  ];
+  for (const url of urls) {
+    const res = await telnyxGetJson(url);
+    if (!res.ok) continue;
+    const arr: any[] = Array.isArray(res.data) ? res.data : [];
+    if (!arr.length) continue;
+    // Prefer an exact match when possible; else just take first item.
+    const hit =
+      arr.find((c) => (c as any)?.call_control_id === callControlId || (c as any)?.metadata?.call_control_id === callControlId) ??
+      arr.find((c) => {
+        try {
+          return JSON.stringify(c).includes(callControlId);
+        } catch {
+          return false;
+        }
+      }) ??
+      null;
+    const id = hit?.id ?? arr[0]?.id;
+    if (typeof id === "string" && id.trim()) return id;
+  }
+  return null;
+}
+
+async function getToolNameCounts(conversationId: string): Promise<Map<string, number> | null> {
+  const res = await fetch(`https://api.telnyx.com/v2/ai/conversations/${encodeURIComponent(conversationId)}/messages`, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${TELNYX_API_KEY}`, "Content-Type": "application/json" },
+  });
+  const text = await res.text();
+  if (!res.ok) return null;
+  let parsed: any = null;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  const messages: any[] = Array.isArray(parsed?.data) ? parsed.data : [];
+  const counts = new Map<string, number>();
+  for (const msg of messages) {
+    const toolCalls = Array.isArray(msg?.tool_calls) ? msg.tool_calls : [];
+    for (const tc of toolCalls) {
+      const name = typeof tc?.function?.name === "string" ? tc.function.name : null;
+      if (!name) continue;
+      counts.set(name, (counts.get(name) ?? 0) + 1);
+    }
+  }
+  return counts;
+}
+
 async function main() {
   const sinceIso = new Date(Date.now() - HOURS * 60 * 60 * 1000).toISOString();
   const { data: recs, error } = await (supabase.from("campaign_recipients") as any)
@@ -96,24 +149,18 @@ async function main() {
     const callObj = callRes.ok ? callRes.data : null;
     const duration = callObj && typeof callObj.call_duration === "number" ? callObj.call_duration : null;
 
-    // Find matching conversation via list filter (best-effort).
-    const listRes = await telnyxGetJson(
-      `https://api.telnyx.com/v2/ai/conversations?filter[call_control_id]=${encodeURIComponent(callControlId)}&page[size]=5`
-    );
-    let convoObj: any = null;
-    let convoId: string | null = null;
-    if (listRes.ok && Array.isArray(listRes.data) && listRes.data.length) {
-      convoObj = listRes.data[0];
-      convoId = typeof convoObj?.id === "string" ? convoObj.id : null;
-    }
-    // Fetch conversation details if we got an id.
-    if (convoId) {
-      const convoRes = await telnyxGetJson(`https://api.telnyx.com/v2/ai/conversations/${encodeURIComponent(convoId)}`);
-      if (convoRes.ok) convoObj = convoRes.data;
-    }
+    const convoId = await getConversationIdForCall(callControlId);
+    const toolCounts = convoId ? await getToolNameCounts(convoId) : null;
+    const toolNames = toolCounts ? [...toolCounts.keys()] : [];
 
-    const hits = keywordHitsFromObj(convoObj);
-    const hasAny = hits.addToSelection || hits.createDraftOrder || hits.invoiceUrl;
+    const hasPurchaseTools =
+      toolCounts?.has("add_to_selection") ||
+      toolCounts?.has("add-to-selection") ||
+      toolCounts?.has("create_draft_order") ||
+      toolCounts?.has("create-draft-order") ||
+      toolCounts?.has("send_checkout_email") ||
+      toolCounts?.has("send-checkout-email") ||
+      false;
 
     console.log(
       [
@@ -122,11 +169,12 @@ async function main() {
         `campaign=${tail(r.campaign_id, 8)}`,
         `callTail=${tail(callControlId, 8)}`,
         `dur=${duration ?? "?"}s`,
-        `hits=${JSON.stringify(hits)}`,
+        `convoTail=${convoId ? tail(convoId, 8) : "(none)"}`,
+        `tools=${toolNames.length ? toolNames.sort().join(",") : "(none)"}`,
       ].join(" ")
     );
 
-    if (hasAny) {
+    if (hasPurchaseTools) {
       console.log("  ^^^ candidate with purchase-tool keywords detected");
     }
   }
