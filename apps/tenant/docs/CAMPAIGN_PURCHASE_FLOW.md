@@ -80,6 +80,8 @@ When **create_draft_order** runs, the app POSTs to the campaign’s Webhook URL 
 
 If `customerEmail` is sent by the tool, it is included in the body. The Railway endpoint should create the Shopify Draft Order and return `invoiceUrl` (or `invoice_url`) in the JSON response.
 
+When the Webhook URL is the shared Railway endpoint (`/functions/shopify_send_draft_invoice`), the app also sends a **Retell-compatible envelope** (`name`, `args`, `call`) and the header **`X-Source-App: tinadmin-telnyx-campaign`** so the same function can support both Retell and this app. See **`docs/RAILWAY_WEBHOOK_AUDIT.md`** for request-shape comparison and Railway implementation notes.
+
 ## State storage
 
 - **Location:** `campaign_recipients.result.purchase`

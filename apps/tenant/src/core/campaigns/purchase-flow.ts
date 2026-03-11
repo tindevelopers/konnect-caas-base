@@ -164,56 +164,123 @@ export function buildDraftOrderPayload(selectedProducts: SelectedProduct[]): {
   return { lineItems };
 }
 
+/** Header sent so Railway (and other endpoints) can detect this app and optionally skip Retell-only auth. */
+export const DRAFT_WEBHOOK_SOURCE_HEADER = "X-Source-App";
+/** Value for X-Source-App when sending from Telnyx campaign purchase flow. */
+export const DRAFT_WEBHOOK_SOURCE_VALUE = "tinadmin-telnyx-campaign";
+
+/** Railway endpoint path that expects Retell-shaped body (name/args/call). When URL contains this, we send dual format. */
+const RETELL_STYLE_WEBHOOK_PATH = "/functions/shopify_send_draft_invoice";
+
+function isRetellStyleWebhookUrl(url: string): boolean {
+  try {
+    const u = new URL(url.trim());
+    return u.pathname.includes(RETELL_STYLE_WEBHOOK_PATH);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Build a body that supports both our flat format and Retell's envelope so the same Railway function can handle both.
+ * - Top-level: lineItems, items, line_items, variant_ids, quantities, customerEmail/customer_email/email (unchanged).
+ * - Retell envelope: name, args (lineItems + customerEmail), call.metadata.source for detection.
+ */
+function buildWebhookBody(
+  payload: { lineItems: PurchaseLineItem[] },
+  customerEmail?: string,
+  useRetellEnvelope: boolean
+): Record<string, unknown> {
+  const variantIds = payload.lineItems.map((l) => l.variantId);
+  const quantities = payload.lineItems.map((l) => l.quantity);
+  const base = {
+    lineItems: payload.lineItems,
+    items: payload.lineItems,
+    line_items: payload.lineItems,
+    variant_ids: variantIds,
+    quantities,
+  };
+  const withEmail = customerEmail
+    ? { ...base, customerEmail, customer_email: customerEmail, email: customerEmail }
+    : base;
+
+  if (!useRetellEnvelope) return withEmail as Record<string, unknown>;
+
+  // Retell custom-function shape so Railway can normalize from body.args (see docs/RAILWAY_WEBHOOK_AUDIT.md)
+  const args: Record<string, unknown> = {
+    lineItems: payload.lineItems,
+  };
+  if (customerEmail) args.customerEmail = customerEmail;
+
+  return {
+    ...withEmail,
+    name: "shopify_send_draft_invoice",
+    args,
+    call: {
+      metadata: { source: DRAFT_WEBHOOK_SOURCE_VALUE },
+    },
+  } as Record<string, unknown>;
+}
+
 /**
  * POST to campaign webhook URL and return { success, invoiceUrl?, error? }.
+ * When the URL is the shared Railway Retell endpoint, sends a dual-format body (flat + Retell envelope) and
+ * X-Source-App so the endpoint can support both Retell and this app.
  */
 export async function postDraftOrderToWebhook(
   webhookUrl: string,
   payload: { lineItems: PurchaseLineItem[] },
   options?: { customerEmail?: string }
 ): Promise<{ success: true; invoiceUrl: string } | { success: false; error: string }> {
-  // Keep the existing contract (`lineItems`) but also include aliases for common webhook formats.
-  const variantIds = payload.lineItems.map((l) => l.variantId);
-  const quantities = payload.lineItems.map((l) => l.quantity);
-  const base = {
-    ...payload,
-    items: payload.lineItems,
-    line_items: payload.lineItems,
-    variant_ids: variantIds,
-    quantities,
-  };
-  const body = options?.customerEmail
-    ? {
-        ...base,
-        customerEmail: options.customerEmail,
-        customer_email: options.customerEmail,
-        email: options.customerEmail,
-      }
-    : base;
   const url = webhookUrl.trim();
-  console.info("[CampaignPurchase:webhook] Sending POST", { webhookUrl: url, payload: body });
+  const useRetellEnvelope = isRetellStyleWebhookUrl(url);
+  const body = buildWebhookBody(payload, options?.customerEmail, useRetellEnvelope);
+
+  const requestId = `draft-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    [DRAFT_WEBHOOK_SOURCE_HEADER]: DRAFT_WEBHOOK_SOURCE_VALUE,
+    "X-Request-Id": requestId,
+  };
+
+  console.info("[CampaignPurchase:webhook] Sending POST", {
+    requestId,
+    webhookUrl: url,
+    bodyKeys: Object.keys(body),
+    useRetellEnvelope,
+    lineItemsCount: payload.lineItems?.length ?? 0,
+    hasCustomerEmail: Boolean(options?.customerEmail),
+  });
+
   try {
     const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify(body),
     });
     const text = await res.text();
     const responsePreview = text.length > 500 ? `${text.slice(0, 500)}...` : text;
+
     console.info("[CampaignPurchase:webhook] Response", {
+      requestId,
       status: res.status,
       statusText: res.statusText,
       bodyPreview: responsePreview,
     });
+
     if (!res.ok) {
       return { success: false, error: `Webhook returned ${res.status}: ${text.slice(0, 200)}` };
     }
+
     let data: Record<string, unknown> = {};
     try {
       data = JSON.parse(text) as Record<string, unknown>;
-    } catch {
+    } catch (parseErr) {
+      const msg = parseErr instanceof Error ? parseErr.message : String(parseErr);
+      console.warn("[CampaignPurchase:webhook] Response was not JSON", { requestId, error: msg });
       return { success: false, error: "Webhook response was not JSON" };
     }
+
     const draftOrder = data.draftOrder as Record<string, unknown> | undefined;
     const invoiceUrl =
       typeof data.invoiceUrl === "string"
@@ -225,13 +292,19 @@ export async function postDraftOrderToWebhook(
             : typeof (draftOrder as { invoice_url?: string } | undefined)?.invoice_url === "string"
               ? ((draftOrder as { invoice_url: string }).invoice_url as string)
               : "";
+
     if (!invoiceUrl) {
+      console.warn("[CampaignPurchase:webhook] Response missing invoiceUrl", {
+        requestId,
+        responseKeys: Object.keys(data),
+      });
       return { success: false, error: "Webhook response did not include invoiceUrl" };
     }
+
     return { success: true, invoiceUrl };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error("[CampaignPurchase:webhook] Request failed", { webhookUrl: url, error: msg });
+    console.error("[CampaignPurchase:webhook] Request failed", { requestId, webhookUrl: url, error: msg });
     return { success: false, error: msg };
   }
 }

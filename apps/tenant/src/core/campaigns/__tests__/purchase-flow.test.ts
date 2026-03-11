@@ -202,16 +202,18 @@ describe("purchase-flow", () => {
         "https://webhook.example.com",
         expect.objectContaining({
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            lineItems: [{ variantId: "gid://shopify/ProductVariant/1", quantity: 1 }],
-            items: [{ variantId: "gid://shopify/ProductVariant/1", quantity: 1 }],
-            line_items: [{ variantId: "gid://shopify/ProductVariant/1", quantity: 1 }],
-            variant_ids: ["gid://shopify/ProductVariant/1"],
-            quantities: [1],
+          headers: expect.objectContaining({
+            "Content-Type": "application/json",
+            "X-Source-App": "tinadmin-telnyx-campaign",
+            "X-Request-Id": expect.any(String),
           }),
         })
       );
+      const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+      expect(body.lineItems).toEqual([{ variantId: "gid://shopify/ProductVariant/1", quantity: 1 }]);
+      expect(body.items).toEqual(body.lineItems);
+      expect(body).not.toHaveProperty("name");
+      expect(body).not.toHaveProperty("args");
       vi.unstubAllGlobals();
     });
 
@@ -241,6 +243,34 @@ describe("purchase-flow", () => {
         lineItems: [{ variantId: "gid://shopify/ProductVariant/1", quantity: 1 }],
       });
       expect(result).toEqual({ success: true, invoiceUrl: "https://checkout.shopify.com/order/abc123" });
+      vi.unstubAllGlobals();
+    });
+
+    it("sends Retell-compatible envelope (name, args, call) when URL is Railway shopify_send_draft_invoice", async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify({ invoiceUrl: "https://checkout.example.com/inv" })),
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      const railwayUrl =
+        "https://shopify-mcp-retell-integration-production-0355.up.railway.app/functions/shopify_send_draft_invoice";
+      const result = await postDraftOrderToWebhook(railwayUrl, {
+        lineItems: [
+          { variantId: "gid://shopify/ProductVariant/1", quantity: 1 },
+          { variantId: "gid://shopify/ProductVariant/2", quantity: 2 },
+        ],
+      });
+      expect(result).toEqual({ success: true, invoiceUrl: "https://checkout.example.com/inv" });
+      const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+      expect(body.name).toBe("shopify_send_draft_invoice");
+      expect(body.args).toEqual({
+        lineItems: [
+          { variantId: "gid://shopify/ProductVariant/1", quantity: 1 },
+          { variantId: "gid://shopify/ProductVariant/2", quantity: 2 },
+        ],
+      });
+      expect(body.call).toEqual({ metadata: { source: "tinadmin-telnyx-campaign" } });
+      expect(body.lineItems).toEqual(body.args.lineItems);
       vi.unstubAllGlobals();
     });
 
@@ -293,15 +323,14 @@ describe("purchase-flow", () => {
         "https://railway.example.com/draft",
         expect.objectContaining({
           method: "POST",
-          body: JSON.stringify({
-            lineItems: [{ variantId: "gid://shopify/ProductVariant/1", quantity: 1 }],
-            items: [{ variantId: "gid://shopify/ProductVariant/1", quantity: 1 }],
-            line_items: [{ variantId: "gid://shopify/ProductVariant/1", quantity: 1 }],
-            variant_ids: ["gid://shopify/ProductVariant/1"],
-            quantities: [1],
+          headers: expect.objectContaining({
+            "Content-Type": "application/json",
+            "X-Source-App": "tinadmin-telnyx-campaign",
           }),
         })
       );
+      const sentBody = JSON.parse(fetchMock.mock.calls[0][1].body);
+      expect(sentBody.lineItems).toEqual([{ variantId: "gid://shopify/ProductVariant/1", quantity: 1 }]);
       expect(mockUpdate).toHaveBeenCalledTimes(1);
       const updatePayload = mockUpdate.mock.calls[0][0];
       expect(updatePayload.result.purchase.invoiceUrl).toBe("https://checkout.example.com/inv/xyz");

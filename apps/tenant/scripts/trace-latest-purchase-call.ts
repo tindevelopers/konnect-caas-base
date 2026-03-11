@@ -156,6 +156,20 @@ async function main() {
   const picked = candidates[0] as any;
   const purchase = extractPurchase(picked.result);
 
+  // Campaign settings (for breakpoint: purchase_flow_disabled)
+  let campaignSettings: any = {};
+  try {
+    const { data: camp } = await (supabase.from("campaigns") as any)
+      .select("settings")
+      .eq("id", picked.campaign_id)
+      .maybeSingle();
+    campaignSettings = (camp?.settings ?? {}) as Record<string, unknown>;
+  } catch {
+    // ignore
+  }
+  const enablePurchase = campaignSettings?.enableProductPurchaseFlow === true;
+  const webhookUrl = typeof campaignSettings?.webhookUrl === "string" && campaignSettings.webhookUrl.trim();
+
   console.log(`Picked candidate (most recent, last ${HOURS}h):`);
   console.log(`- recipientId: ${picked.id}`);
   console.log(`- tenantId: ${picked.tenant_id}`);
@@ -166,6 +180,8 @@ async function main() {
   console.log(`- selectedProductsCount: ${Array.isArray(purchase.selectedProducts) ? purchase.selectedProducts.length : 0}`);
   console.log(`- checkoutConfirmed: ${purchase.checkoutConfirmed ? "true" : "false"}`);
   console.log(`- invoiceHost: ${safeUrlHost(purchase.invoiceUrl) || "(none)"}`);
+  console.log(`- campaign enableProductPurchaseFlow: ${enablePurchase}`);
+  console.log(`- campaign webhookUrl set: ${webhookUrl ? "yes" : "no"}`);
   console.log("");
 
   const callControlId = typeof picked.call_control_id === "string" ? picked.call_control_id : "";
@@ -284,6 +300,23 @@ async function main() {
   console.log(`- invoiceHost: ${safeUrlHost(p2.invoiceUrl) || "(none)"}`);
   console.log(`- invoiceUrl persisted: ${p2.invoiceUrl ? "yes" : "no"}`);
   console.log(`- updated_at: ${r2?.updated_at || "(unknown)"}`);
+  console.log("");
+
+  // Suggest breakpoint for "why was email not sent?"
+  const breakpoints: string[] = [];
+  if (!enablePurchase || !webhookUrl)
+    breakpoints.push("Phase 0/7: Campaign purchase flow disabled or webhookUrl missing (create-draft-order returns 403 purchase_flow_disabled)");
+  if (!callControlId) breakpoints.push("Phase 1.11: call_control_id not stored (executor or DB)");
+  else if (!Array.isArray(p2.selectedProducts) || p2.selectedProducts.length === 0)
+    breakpoints.push("Phase 4/5: No selectedProducts (Luna add-to-selection not called or not persisted)");
+  else if (!p2.checkoutConfirmed)
+    breakpoints.push("Phase 6: checkoutConfirmed false (customer did not confirm; create-draft-order returned needs_final_confirmation)");
+  else if (!p2.invoiceUrl)
+    breakpoints.push("Phase 8: invoiceUrl not persisted (webhook not called, failed, or did not return invoiceUrl; check [CampaignPurchase:webhook] logs)");
+  else breakpoints.push("invoiceUrl present: email is sent by external webhook; if customer did not receive it, check that service's logs and email config.");
+
+  console.log("Suggested breakpoint (why email might not have been sent):");
+  for (const b of breakpoints) console.log(`- ${b}`);
 }
 
 main().catch((e) => {

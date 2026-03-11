@@ -178,6 +178,23 @@ This document describes the full end-to-end flow of an outbound campaign voice c
 
 ---
 
+## Why was the checkout email not sent?
+
+The **checkout link email** is sent by your **external webhook** (e.g. Railway), not by this app. This app only POSTs to `campaign.settings.webhookUrl` with `lineItems` and `customerEmail`; the webhook creates the draft order and sends the email. Use the table below to find the breakpoint.
+
+| Check | If this is true → breakpoint / cause |
+|-------|--------------------------------------|
+| **Recent call log** | Run `pnpm exec tsx apps/tenant/scripts/trace-latest-purchase-call.ts` (set `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`). It prints the latest purchase-flow recipient and suggests a breakpoint. |
+| **`campaign_recipients.call_control_id`** | Empty or null → **Phase 1.11**. Executor never stored it; create-draft-order would return 404 "not_campaign_call". |
+| **`campaign_recipients.result.purchase.selectedProducts`** | Empty or missing → **Phase 4/5**. Luna never called add-to-selection, or it wasn't persisted. Customer may not have selected products. |
+| **`campaign_recipients.result.purchase.checkoutConfirmed`** | Not true → **Phase 6**. Luna called create-draft-order without `customerConfirmed: true` (customer didn't confirm "send link by email"). Response: 200 "needs_final_confirmation". |
+| **Recipient/customer email** | No email on recipient and not in tool body → **missing_customer_email**. create-draft-order returns 200 asking for email; Luna should ask and retry with `customer_email`. |
+| **`campaigns.settings.enableProductPurchaseFlow`** or **`webhookUrl`** | Disabled or missing → **Phase 0 / 7**. create-draft-order returns 403 "purchase_flow_disabled". |
+| **`campaign_recipients.result.purchase.invoiceUrl`** | Missing after "success" → **Phase 8**. Our app called the webhook but it returned non-200 or JSON without `invoiceUrl`. Check app logs for `[CampaignPurchase:webhook]` and `[CampaignPurchase:create-draft-order]`. |
+| **invoiceUrl present** but customer says no email | **External webhook.** Our app got `invoiceUrl` and persisted it; the service at `webhookUrl` is responsible for sending the email. Check that service's logs and email config. |
+
+---
+
 ## Quick Reference: Breakpoint Checklist
 
 | Breakpoint | Symptom | Verify |

@@ -1,12 +1,19 @@
 #!/usr/bin/env tsx
 /**
- * Update campaign webhookUrl to a new URL.
+ * Update campaign webhookUrl to a new URL (Phase 2 draft-order webhook).
  *
- * Usage (repo root):
+ * Storage: campaigns.settings.webhookUrl (per campaign). Legacy railwayWebhookUrl is removed on save.
+ *
+ * Usage (repo root, with .env.local or env vars set):
  *   pnpm exec tsx apps/tenant/scripts/update-campaign-webhook-url.ts
  *
  * Or with custom URL:
  *   WEBHOOK_URL=https://example.com/draft pnpm exec tsx apps/tenant/scripts/update-campaign-webhook-url.ts
+ *
+ * After running, verify:
+ *   1. Campaign edit UI shows the new URL under Webhook URL.
+ *   2. Next create-draft-order call: check logs for [CampaignPurchase:webhook] Sending POST with webhookUrl pointing to the new endpoint.
+ *   3. External webhook receives POST with body: { lineItems: [...], customerEmail?, ... } and returns { invoiceUrl }.
  */
 import * as dotenv from "dotenv";
 import * as path from "path";
@@ -20,7 +27,7 @@ if (fs.existsSync(rootEnv)) dotenv.config({ path: rootEnv, override: false });
 
 const NEW_URL =
   process.env.WEBHOOK_URL?.trim() ||
-  "https://shopify-mcp-retell-integration-production-0355.up.railway.app/functions/shopify_send_draft_invoice";
+  "https://shopify-mcp-retell-integration-staging.up.railway.app/draft-orders-konnect";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
