@@ -140,8 +140,17 @@ async function handleOutboundCallAnsweredAssistant(payload: Record<string, unkno
     let assistantGreetingObserved = "";
     try {
       const response = await getAssistant(transport, decoded.a);
-      const res = response as Record<string, unknown>;
-      const assistant = (res?.data as Record<string, unknown> | undefined) ?? res;
+      const rawResponse: unknown = response;
+      const assistant = (() => {
+        if (!rawResponse || typeof rawResponse !== "object") return null;
+        if ("data" in rawResponse) {
+          const data = (rawResponse as { data?: unknown }).data;
+          if (data && typeof data === "object") {
+            return data as Record<string, unknown>;
+          }
+        }
+        return rawResponse as Record<string, unknown>;
+      })();
       const raw = assistant?.instructions;
       const assistantGreetingRaw = assistant?.greeting;
       const assistantGreeting =

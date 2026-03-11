@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import { NextRequest } from "next/server";
 
 vi.mock("@/src/core/campaigns/purchase-flow", () => ({
   getRecipientAndCampaignByCallControlId: vi.fn(),

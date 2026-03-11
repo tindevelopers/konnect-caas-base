@@ -1,11 +1,12 @@
 #!/usr/bin/env tsx
 /**
- * Telnyx-side call debug for an outbound campaign recipient.
+ * Telnyx-side call debug for an outbound campaign call.
  *
  * Usage (repo root):
  *   pnpm exec tsx apps/tenant/scripts/telnyx-call-debug.ts --recipientId <uuid>
+ *   pnpm exec tsx apps/tenant/scripts/telnyx-call-debug.ts --callControlId <v3:...>
  *
- * Prints non-sensitive call metadata (no phone numbers, no tokens).
+ * Prints non-sensitive call metadata (no phone numbers, no emails, no tokens).
  */
 import * as dotenv from "dotenv";
 import * as path from "path";
@@ -25,8 +26,9 @@ function arg(name: string): string | null {
 }
 
 const recipientId = arg("recipientId");
-if (!recipientId) {
-  console.error("Missing --recipientId");
+const callControlIdArg = arg("callControlId");
+if (!recipientId && !callControlIdArg) {
+  console.error("Missing --recipientId (or --callControlId)");
   process.exit(1);
 }
 
@@ -53,26 +55,32 @@ function tail(s: unknown, n: number) {
 }
 
 async function main() {
-  const { data: r, error: rErr } = await (supabase.from("campaign_recipients") as any)
-    .select("id, tenant_id, campaign_id, status, call_control_id, updated_at")
-    .eq("id", recipientId)
-    .maybeSingle();
-  if (rErr) throw rErr;
-  if (!r) {
-    console.error("No campaign_recipient found for id:", recipientId);
-    process.exit(1);
+  let callControlId = callControlIdArg ? callControlIdArg.trim() : "";
+  if (!callControlId && recipientId) {
+    const { data: r, error: rErr } = await (supabase.from("campaign_recipients") as any)
+      .select("id, tenant_id, campaign_id, status, call_control_id, updated_at")
+      .eq("id", recipientId)
+      .maybeSingle();
+    if (rErr) throw rErr;
+    if (!r) {
+      console.error("No campaign_recipient found for id:", recipientId);
+      process.exit(1);
+    }
+    callControlId = typeof r.call_control_id === "string" ? r.call_control_id : "";
+    if (!callControlId) {
+      console.error("Recipient has no call_control_id; nothing to query on Telnyx.");
+      process.exit(1);
+    }
+    console.log("Recipient:", r.id);
+    console.log("Tenant:", r.tenant_id);
+    console.log("Campaign:", r.campaign_id);
+    console.log("Status:", r.status);
+    console.log("Updated:", r.updated_at);
   }
-  const callControlId = typeof r.call_control_id === "string" ? r.call_control_id : "";
   if (!callControlId) {
-    console.error("Recipient has no call_control_id; nothing to query on Telnyx.");
+    console.error("Missing call_control_id");
     process.exit(1);
   }
-
-  console.log("Recipient:", r.id);
-  console.log("Tenant:", r.tenant_id);
-  console.log("Campaign:", r.campaign_id);
-  console.log("Status:", r.status);
-  console.log("Updated:", r.updated_at);
   console.log("CallControlId tail:", tail(callControlId, 8));
   console.log("");
 
@@ -176,7 +184,7 @@ async function main() {
     conversationId,
     typeof obj.call_session_id === "string" ? (obj.call_session_id as string) : undefined,
     typeof obj.call_leg_id === "string" ? (obj.call_leg_id as string) : undefined,
-  ].filter((x): x is string => typeof x === "string" && x.trim());
+  ].filter((x): x is string => typeof x === "string" && x.trim().length > 0);
 
   let convoData: any = null;
   let convoIdUsed: string | null = null;
@@ -298,11 +306,19 @@ async function main() {
     typeof (convoObj as any)?.id === "string" ? String((convoObj as any).id) : convoIdUsed;
   if (!convoIdForMessages) return;
 
-  const mRes = await fetch(`https://api.telnyx.com/v2/ai/conversations/${encodeURIComponent(convoIdForMessages)}/messages?page[size]=200`, {
+  let mRes = await fetch(`https://api.telnyx.com/v2/ai/conversations/${encodeURIComponent(convoIdForMessages)}/messages`, {
     method: "GET",
     headers: { Authorization: `Bearer ${TELNYX_API_KEY}`, "Content-Type": "application/json" },
   });
-  const mText = await mRes.text();
+  let mText = await mRes.text();
+  if (!mRes.ok) {
+    // Some Telnyx deployments reject pagination params; try once with page[size]=200.
+    mRes = await fetch(`https://api.telnyx.com/v2/ai/conversations/${encodeURIComponent(convoIdForMessages)}/messages?page[size]=200`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${TELNYX_API_KEY}`, "Content-Type": "application/json" },
+    });
+    mText = await mRes.text();
+  }
   if (!mRes.ok) {
     console.log("");
     console.log("Conversation messages endpoint returned non-200:", mRes.status, mText.slice(0, 400));
