@@ -188,8 +188,8 @@ function isRetellStyleWebhookUrl(url: string): boolean {
  */
 function buildWebhookBody(
   payload: { lineItems: PurchaseLineItem[] },
-  customerEmail?: string,
-  useRetellEnvelope: boolean
+  useRetellEnvelope: boolean,
+  customerEmail?: string
 ): Record<string, unknown> {
   const variantIds = payload.lineItems.map((l) => l.variantId);
   const quantities = payload.lineItems.map((l) => l.quantity);
@@ -234,7 +234,7 @@ export async function postDraftOrderToWebhook(
 ): Promise<{ success: true; invoiceUrl: string } | { success: false; error: string }> {
   const url = webhookUrl.trim();
   const useRetellEnvelope = isRetellStyleWebhookUrl(url);
-  const body = buildWebhookBody(payload, options?.customerEmail, useRetellEnvelope);
+  const body = buildWebhookBody(payload, useRetellEnvelope, options?.customerEmail);
 
   const requestId = `draft-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
   const headers: Record<string, string> = {
