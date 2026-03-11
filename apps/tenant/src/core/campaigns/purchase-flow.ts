@@ -16,8 +16,16 @@ export type SelectedProduct = {
   price?: number;
 };
 
+export type PurchaseLineItem = {
+  variantId: string;
+  quantity: number;
+};
+
 export type CampaignPurchaseState = {
   selectedProducts?: SelectedProduct[];
+  lineItemsSent?: PurchaseLineItem[];
+  checkoutConfirmed?: boolean;
+  checkoutConfirmedAt?: string;
   invoiceUrl?: string;
 };
 
@@ -47,8 +55,24 @@ function getPurchaseState(result: Record<string, unknown> | null | undefined): C
       sku: typeof p.sku === "string" ? p.sku : undefined,
       price: typeof p.price === "number" ? p.price : undefined,
     }));
+  const lineItemsSentRaw = Array.isArray(obj.lineItemsSent) ? obj.lineItemsSent : [];
+  const lineItemsSent: PurchaseLineItem[] = lineItemsSentRaw
+    .filter(
+      (p): p is Record<string, unknown> =>
+        p != null &&
+        typeof p === "object" &&
+        typeof (p as Record<string, unknown>).variantId === "string" &&
+        typeof (p as Record<string, unknown>).quantity === "number"
+    )
+    .map((p) => ({
+      variantId: String(p.variantId),
+      quantity: Math.max(1, Math.floor(Number(p.quantity) || 1)),
+    }));
   return {
     selectedProducts: valid,
+    lineItemsSent: lineItemsSent.length ? lineItemsSent : undefined,
+    checkoutConfirmed: obj.checkoutConfirmed === true ? true : undefined,
+    checkoutConfirmedAt: typeof obj.checkoutConfirmedAt === "string" ? obj.checkoutConfirmedAt : undefined,
     invoiceUrl: typeof obj.invoiceUrl === "string" ? obj.invoiceUrl : undefined,
   };
 }
@@ -121,7 +145,7 @@ export async function addSelectedProduct(
  * Build Railway payload from selectedProducts (lineItems only).
  */
 export function buildDraftOrderPayload(selectedProducts: SelectedProduct[]): {
-  lineItems: Array<{ variantId: string; quantity: number }>;
+  lineItems: PurchaseLineItem[];
 } {
   const lineItems = selectedProducts.map((p) => ({
     variantId: p.variantId,
@@ -135,7 +159,7 @@ export function buildDraftOrderPayload(selectedProducts: SelectedProduct[]): {
  */
 export async function postDraftOrderToWebhook(
   webhookUrl: string,
-  payload: { lineItems: Array<{ variantId: string; quantity: number }> },
+  payload: { lineItems: PurchaseLineItem[] },
   options?: { customerEmail?: string }
 ): Promise<{ success: true; invoiceUrl: string } | { success: false; error: string }> {
   const body = options?.customerEmail
@@ -181,7 +205,11 @@ export async function triggerDraftOrderAndSaveResult(
   recipientId: string,
   currentResult: Record<string, unknown>,
   webhookUrl: string,
-  options?: { customerEmail?: string }
+  options?: {
+    customerEmail?: string;
+    checkoutConfirmed?: boolean;
+    checkoutConfirmedAt?: string;
+  }
 ): Promise<{ ok: true; message: string; invoiceUrl: string } | { ok: false; message: string }> {
   const state = getPurchaseState(currentResult);
   const list = state.selectedProducts ?? [];
@@ -196,6 +224,9 @@ export async function triggerDraftOrderAndSaveResult(
   const admin = createAdminClient();
   const nextPurchase: CampaignPurchaseState = {
     ...state,
+    checkoutConfirmed: options?.checkoutConfirmed ?? state.checkoutConfirmed,
+    checkoutConfirmedAt: options?.checkoutConfirmedAt ?? state.checkoutConfirmedAt,
+    lineItemsSent: payload.lineItems,
     invoiceUrl: postResult.invoiceUrl,
   };
   await (admin.from("campaign_recipients") as any)

@@ -238,11 +238,14 @@ export default function CampaignDetailPage() {
   };
 
   const handleProcessNow = async () => {
+    if (!campaign) return;
     setProcessing(true);
     setMessage(null);
     try {
+      // Schedule any pending recipients first (e.g. added after campaign was started)
+      await scheduleCampaignRecipients(id);
       // Pass campaign tenant_id so we skip getTenantForCrm() and avoid Supabase session/502 issues
-      const res = await processCampaignBatchNow(campaign?.tenant_id);
+      const res = await processCampaignBatchNow(campaign.tenant_id, { bypassCallingWindow: true });
       if (res.ok) {
         const [c, s] = await Promise.all([getCampaign(id), getCampaignStats(id)]);
         setCampaign(c ?? campaign);

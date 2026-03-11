@@ -4,7 +4,7 @@ import { createAdminClient } from "@/core/database/admin-client";
 import { telnyxWebhookConfig } from "@/src/core/telnyx/config";
 import { handleTelnyxInboundVoiceEvent } from "@/src/core/telnyx/voice-router";
 import { getTelnyxTransportForWebhook } from "@/src/core/telnyx/webhook-transport";
-import { createTelnyxClient } from "@tinadmin/telnyx-ai-platform/server";
+import { createTelnyxClient, getAssistant } from "@tinadmin/telnyx-ai-platform/server";
 
 function resolveTenantId(request: NextRequest, payload: Record<string, unknown>) {
   const headerTenant = request.headers.get("x-tenant-id");
@@ -132,6 +132,25 @@ async function handleOutboundCallAnsweredAssistant(payload: Record<string, unkno
 
   try {
     const { transport, credentialSource } = await getTelnyxTransportForWebhook(decoded.tid);
+    // Fetch current assistant config from Telnyx so we pass the latest instructions.
+    // Passing instructions at ai_assistant_start overwrites any cached/stale assistant config,
+    // ensuring campaign calls use the current prompt (fixes "Luna using old prompt" issue).
+    // Telnyx API wraps single resources in { data: { id, instructions, ... } }.
+    let instructions: string | undefined;
+    try {
+      const response = await getAssistant(transport, decoded.a);
+      const assistant = (response as { data?: { instructions?: string }; instructions?: string })?.data ?? (response as { instructions?: string });
+      const raw = assistant?.instructions;
+      if (typeof raw === "string" && raw.trim()) {
+        instructions = raw.trim().slice(0, 50000);
+      }
+    } catch (fetchErr) {
+      console.warn("[TelnyxWebhook] Could not fetch assistant for instructions:", fetchErr instanceof Error ? fetchErr.message : String(fetchErr));
+    }
+    const assistantBody = instructions
+      ? { id: decoded.a, instructions }
+      : { id: decoded.a };
+
     let lastError: unknown = null;
     try {
       await transport.request(
@@ -139,7 +158,7 @@ async function handleOutboundCallAnsweredAssistant(payload: Record<string, unkno
         {
           method: "POST",
           body: {
-            assistant: { id: decoded.a },
+            assistant: assistantBody,
             greeting,
           },
         }
@@ -155,7 +174,7 @@ async function handleOutboundCallAnsweredAssistant(payload: Record<string, unkno
           const envTransport = createTelnyxClient({ apiKey: envKey });
           await envTransport.request(
             `/calls/${callControlId}/actions/ai_assistant_start`,
-            { method: "POST", body: { assistant: { id: decoded.a }, greeting } }
+            { method: "POST", body: { assistant: assistantBody, greeting } }
           );
           lastError = null;
           console.log("[TelnyxWebhook:ai_assistant_start] retry succeeded");

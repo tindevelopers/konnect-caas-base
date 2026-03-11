@@ -2,7 +2,7 @@
 
 import { createClient } from "@/core/database/server";
 import { getTenantForCrm } from "../crm/tenant-helper";
-import { processCampaignVoiceBatch } from "./executor";
+import { processCampaignVoiceBatch, type ProcessCampaignOptions } from "./executor";
 
 export type CampaignType = "voice" | "sms" | "whatsapp" | "multi_channel";
 export type CampaignStatus =
@@ -279,13 +279,18 @@ export async function getRecipientTimezoneStats(
  * In production, the cron job at /api/campaigns/process runs every 2 minutes.
  * @param tenantId - Optional. When provided (e.g. from campaign page), skips getTenantForCrm()
  *   so we only use the admin client in the executor, avoiding 502 from Supabase session/RLS.
+ * @param options - bypassCallingWindow: when true, skips the calling window check so calls
+ *   can be placed immediately for testing (used by "Process now" button).
  */
-export async function processCampaignBatchNow(tenantId?: string): Promise<
+export async function processCampaignBatchNow(
+  tenantId?: string,
+  options?: ProcessCampaignOptions
+): Promise<
   { ok: true; processed: number; errors: string[] } | { ok: false; error: string }
 > {
   try {
     const resolvedTenantId = tenantId ?? (await getTenantForCrm());
-    const result = await processCampaignVoiceBatch(resolvedTenantId);
+    const result = await processCampaignVoiceBatch(resolvedTenantId, options);
     return { ok: true, processed: result.processed, errors: result.errors };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);

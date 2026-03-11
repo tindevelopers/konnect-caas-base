@@ -22,9 +22,11 @@ Outbound campaign calls can use a **two-stage** purchase flow: product selection
 The purchase webhook is triggered only when **all** of the following are true:
 
 - `selectedProducts.length > 0`
-- Customer has confirmed they want the checkout link (Luna only calls the tool after confirmation)
+- Customer has confirmed they want the checkout link (tool receives `customerConfirmed: true`)
 - `campaign.settings.enableProductPurchaseFlow === true`
 - `campaign.settings.webhookUrl` is set
+
+If a checkout `invoiceUrl` already exists for the call/session, the tool will return the existing link and **will not** trigger the webhook again (unless a force override is explicitly used).
 
 ## Telnyx assistant tools
 
@@ -49,8 +51,10 @@ Configure Luna in Telnyx with **two webhook tools**.
 - **Name:** `create_draft_order` or `send_checkout_email`
 - **URL:** `https://<your-app>/api/webhooks/telnyx/campaign-purchase/create-draft-order`
 - **When to call:** **Only** after the customer has explicitly confirmed they want the checkout link by email (e.g. "Yes, send it", "Please send the link").
-- **Body parameters (optional):**
+- **Body parameters:**
+  - `customerConfirmed` (boolean, **required**) — must be `true` to trigger the webhook
   - `customerEmail` (string, optional) — if your Railway flow needs it
+  - `force` (boolean, optional) — bypass duplicate protection if an `invoiceUrl` already exists (use sparingly)
 
 ## Assistant instructions (Luna)
 
@@ -81,6 +85,9 @@ If `customerEmail` is sent by the tool, it is included in the body. The Railway 
 - **Location:** `campaign_recipients.result.purchase`
 - **Shape:**
   - `selectedProducts`: array of `{ productTitle, productUrl?, variantId, quantity, variantTitle?, sku?, price? }`
+  - `lineItemsSent`: array of `{ variantId, quantity }` sent to the webhook
+  - `checkoutConfirmed`: boolean
+  - `checkoutConfirmedAt`: ISO timestamp
   - `invoiceUrl`: set after a successful create_draft_order call
 
 Existing campaign behavior (e.g. Groom’D attendance logic) is unchanged. Purchase flow runs only when the campaign has **Enable AI Product Purchase Flow** on and a **Webhook URL** set.

@@ -92,12 +92,18 @@ function isWithinCallingWindow(
   }
 }
 
+export type ProcessCampaignOptions = {
+  /** When true (e.g. from "Process now" button), skip calling window check so calls can be placed immediately for testing. */
+  bypassCallingWindow?: boolean;
+};
+
 /**
  * Process due campaign recipients for voice calls.
  * Uses admin client for background/cron context.
  */
 export async function processCampaignVoiceBatch(
-  tenantId?: string
+  tenantId?: string,
+  options?: ProcessCampaignOptions
 ): Promise<ProcessResult> {
   const admin = createAdminClient();
   const errors: string[] = [];
@@ -125,12 +131,14 @@ export async function processCampaignVoiceBatch(
   const DEFAULT_GREETING =
     "Hi, this is calling from PetStore Direct. We work with professional grooming salons on wholesale supply pricing. Am I speaking with the person who handles grooming supply purchases?";
 
+  const bypassCallingWindow = options?.bypassCallingWindow === true;
+
   for (const campaign of campaigns) {
     const tz = campaign.timezone || "UTC";
     const windowStart = campaign.calling_window_start ?? "09:00";
     const windowEnd = campaign.calling_window_end ?? "20:00";
     const callingDays = campaign.calling_days ?? [1, 2, 3, 4, 5];
-    if (!isWithinCallingWindow(tz, windowStart, windowEnd, callingDays)) {
+    if (!bypassCallingWindow && !isWithinCallingWindow(tz, windowStart, windowEnd, callingDays)) {
       continue;
     }
 

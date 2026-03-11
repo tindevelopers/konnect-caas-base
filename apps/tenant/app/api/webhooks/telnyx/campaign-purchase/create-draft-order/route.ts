@@ -9,6 +9,10 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+function parseStrictBoolean(value: unknown): boolean {
+  return value === true || value === "true";
+}
+
 function getCallControlId(request: NextRequest, body: Record<string, unknown>): string | null {
   const header = request.headers.get("x-telnyx-call-control-id")?.trim();
   if (header) return header;
@@ -71,7 +75,34 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const confirmedRaw = body.customerConfirmed ?? body.customer_confirmed ?? body.confirmed;
+  const customerConfirmed = parseStrictBoolean(confirmedRaw);
+  const forceRaw = body.force ?? body.forceCreate ?? body.force_create;
+  const forceCreate = parseStrictBoolean(forceRaw);
+
   const state = getPurchaseState(ctx.result);
+  if (state.invoiceUrl && !forceCreate) {
+    return NextResponse.json(
+      {
+        content: "I've already generated your checkout link. Would you like me to resend it?",
+        result: "I've already generated your checkout link. Would you like me to resend it?",
+        invoiceUrl: state.invoiceUrl,
+        error: "invoice_already_exists",
+      },
+      { status: 200, headers: { "Access-Control-Allow-Origin": "*" } }
+    );
+  }
+
+  if (!customerConfirmed) {
+    return NextResponse.json(
+      {
+        content: "Are you happy with those products? I can send the checkout link to your email.",
+        error: "needs_final_confirmation",
+      },
+      { status: 200, headers: { "Access-Control-Allow-Origin": "*" } }
+    );
+  }
+
   if (!state.selectedProducts?.length) {
     return NextResponse.json(
       {
@@ -84,13 +115,18 @@ export async function POST(request: NextRequest) {
   }
 
   const customerEmail = typeof body.customerEmail === "string" ? body.customerEmail : typeof body.customer_email === "string" ? body.customer_email : undefined;
+  const confirmedAt = new Date().toISOString();
 
   try {
     const result = await triggerDraftOrderAndSaveResult(
       ctx.recipientId,
       ctx.result,
       automation.webhookUrl,
-      customerEmail ? { customerEmail: customerEmail.trim() } : undefined
+      {
+        customerEmail: customerEmail ? customerEmail.trim() : undefined,
+        checkoutConfirmed: true,
+        checkoutConfirmedAt: confirmedAt,
+      }
     );
     if (!result.ok) {
       return NextResponse.json(

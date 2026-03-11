@@ -14,6 +14,7 @@ import {
   type Campaign,
   type CampaignStats,
 } from "@/app/actions/campaigns/campaigns";
+import { scheduleCampaignRecipients } from "@/app/actions/campaigns/scheduler";
 
 function downloadCsv(rows: Record<string, unknown>[], filename: string) {
   if (rows.length === 0) return;
@@ -86,10 +87,12 @@ export default function CampaignAnalyticsPage() {
   };
 
   const handleProcessNow = async () => {
+    if (!campaign) return;
     setMessage(null);
     setProcessing(true);
     try {
-      const res = await processCampaignBatchNow(campaign?.tenant_id);
+      await scheduleCampaignRecipients(id);
+      const res = await processCampaignBatchNow(campaign.tenant_id, { bypassCallingWindow: true });
       if (res.ok) {
         const errs = res.errors.filter(Boolean);
         if (errs.length) {
