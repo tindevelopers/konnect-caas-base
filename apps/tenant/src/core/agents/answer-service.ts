@@ -277,16 +277,46 @@ function toVoiceText(content: string): string {
   return text;
 }
 
+/** Match common "[Insert Link]" placeholders (case-insensitive, optional spaces). */
+const INSERT_LINK_PATTERN = /\[\s*insert\s+link\s*\]/i;
+
+/** Find first URL in text (http or https). */
+function findFirstUrl(text: string): string | null {
+  const match = text.match(/https?:\/\/[^\s)\]}\]]+/i);
+  return match ? match[0].replace(/[.,;:!?)]+$/, "") : null;
+}
+
+/**
+ * Replace the first "[Insert Link]" placeholder with an actual markdown link.
+ * Uses the first citation URL if available, otherwise the first URL found in the content.
+ */
+function replaceInsertLinkPlaceholder(
+  content: string,
+  citations: AnswerCitation[]
+): string {
+  if (!INSERT_LINK_PATTERN.test(content)) return content;
+  const citationUrl = citations.find((c) => c.url?.trim())?.url?.trim();
+  const urlInContent = findFirstUrl(content);
+  const url = citationUrl ?? urlInContent;
+  if (!url) return content;
+  const linkLabel = citationUrl
+    ? (citations.find((c) => c.url === citationUrl)?.title ?? "Link")
+    : "Link";
+  const markdownLink = `[${linkLabel}](${url})`;
+  return content.replace(INSERT_LINK_PATTERN, markdownLink);
+}
+
 /**
  * Enrich a plain answer into chat-friendly markdown.
  * If the provider already returns markdown, pass through.
+ * Replaces "[Insert Link]" with actual links when a URL is available (citation or in content).
  * Add citation footnotes when available.
  */
 function toChatMarkdown(
   content: string,
   citations: AnswerCitation[]
 ): string {
-  let md = content;
+  let md = replaceInsertLinkPlaceholder(content, citations);
 
   if (citations.length > 0) {
     md += "\n\n---\n**Sources:**\n";

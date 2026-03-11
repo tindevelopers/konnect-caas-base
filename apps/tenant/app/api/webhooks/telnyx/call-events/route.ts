@@ -4,6 +4,7 @@ import { createAdminClient } from "@/core/database/admin-client";
 import { telnyxWebhookConfig } from "@/src/core/telnyx/config";
 import { handleTelnyxInboundVoiceEvent } from "@/src/core/telnyx/voice-router";
 import { getTelnyxTransportForWebhook } from "@/src/core/telnyx/webhook-transport";
+import { createTelnyxClient } from "@tinadmin/telnyx-ai-platform/server";
 
 function resolveTenantId(request: NextRequest, payload: Record<string, unknown>) {
   const headerTenant = request.headers.get("x-tenant-id");
@@ -93,27 +94,6 @@ async function handleOutboundCallAnsweredAssistant(payload: Record<string, unkno
     (callPayload.client_state as string | undefined) ||
     ((payload.data as Record<string, unknown> | undefined)?.client_state as string | undefined);
 
-  // #region agent log
-  const hasClientState = !!(clientStateRaw && typeof clientStateRaw === "string");
-  console.log("[TelnyxWebhook:outbound-entry]", {
-    eventType,
-    normalizedEventType,
-    direction,
-    hasClientState,
-  });
-  fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      location: "call-events/route.ts:handleOutbound-entry",
-      message: "handleOutboundCallAnsweredAssistant entry",
-      data: { eventType, normalizedEventType, direction, hasClientState },
-      timestamp: Date.now(),
-      hypothesisId: "H3",
-    }),
-  }).catch(() => {});
-  // #endregion
-
   // Some Telnyx setups emit `call.conversation.started` without a `call.answered` webhook.
   // Treat both as “answered-equivalent” triggers for starting the outbound assistant.
   if (
@@ -148,65 +128,46 @@ async function handleOutboundCallAnsweredAssistant(payload: Record<string, unkno
   const greeting =
     typeof decoded.g === "string" && decoded.g.trim()
       ? decoded.g.trim().slice(0, 3000)
-      : "Hello, thanks for taking our call. How can I help you today?";
-
-  // #region agent log
-  console.log("[TelnyxWebhook:ai_assistant_start]", { callControlId, assistantId: decoded.a, greetingLength: greeting.length });
-  fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      location: "call-events/route.ts:before-ai_assistant_start",
-      message: "Calling ai_assistant_start",
-      data: { callControlId, assistantId: decoded.a, greetingLength: greeting.length },
-      timestamp: Date.now(),
-      hypothesisId: "H3-H5",
-    }),
-  }).catch(() => {});
-  // #endregion
+      : "Hi, this is calling from PetStore Direct. We work with professional grooming salons on wholesale supply pricing. Am I speaking with the person who handles grooming supply purchases?";
 
   try {
-    const { transport } = await getTelnyxTransportForWebhook(decoded.tid);
-    await transport.request(
-      `/calls/${callControlId}/actions/ai_assistant_start`,
-      {
-        method: "POST",
-        body: {
-          assistant: { id: decoded.a },
-          greeting,
-        },
+    const { transport, credentialSource } = await getTelnyxTransportForWebhook(decoded.tid);
+    let lastError: unknown = null;
+    try {
+      await transport.request(
+        `/calls/${callControlId}/actions/ai_assistant_start`,
+        {
+          method: "POST",
+          body: {
+            assistant: { id: decoded.a },
+            greeting,
+          },
+        }
+      );
+    } catch (err) {
+      lastError = err;
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const is401 = /401|Authentication failed|No key found matching/i.test(errMsg);
+      const envKey = process.env.TELNYX_API_KEY?.trim();
+      if (is401 && credentialSource === "tenant" && envKey) {
+        console.log("[TelnyxWebhook:ai_assistant_start] 401 with tenant credentials, retrying with TELNYX_API_KEY env");
+        try {
+          const envTransport = createTelnyxClient({ apiKey: envKey });
+          await envTransport.request(
+            `/calls/${callControlId}/actions/ai_assistant_start`,
+            { method: "POST", body: { assistant: { id: decoded.a }, greeting } }
+          );
+          lastError = null;
+          console.log("[TelnyxWebhook:ai_assistant_start] retry succeeded");
+        } catch (retryErr) {
+          lastError = retryErr;
+          console.error("[TelnyxWebhook:ai_assistant_start] retry failed", retryErr instanceof Error ? retryErr.message : String(retryErr));
+        }
       }
-    );
-    // #region agent log
-    console.log("[TelnyxWebhook:ai_assistant_start-ok]", { callControlId });
-    fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        location: "call-events/route.ts:ai_assistant_start-ok",
-        message: "ai_assistant_start succeeded",
-        data: { callControlId },
-        timestamp: Date.now(),
-        hypothesisId: "H4",
-      }),
-    }).catch(() => {});
-    // #endregion
+    }
+    if (lastError) throw lastError;
   } catch (error) {
-    // #region agent log
-    fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        location: "call-events/route.ts:ai_assistant_start-err",
-        message: "ai_assistant_start failed",
-        data: { callControlId, error: error instanceof Error ? error.message : String(error) },
-        timestamp: Date.now(),
-        hypothesisId: "H4",
-      }),
-    }).catch(() => {});
-    // #endregion
     const errMsg = error instanceof Error ? error.message : String(error);
-    console.error("[TelnyxWebhook:ai_assistant_start-err]", { callControlId, assistantId: decoded.a, tenantId: decoded.tid, error: errMsg });
     console.error("[TelnyxWebhook] Outbound call.answered ai_assistant_start failed:", {
       callControlId,
       assistantId: decoded.a,
@@ -401,29 +362,11 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // #region agent log
-  const earlyEventType = resolveEventType(payload);
-  const earlyExternalId = resolveExternalId(payload);
-  console.log("[TelnyxWebhook:post-first]", { eventType: earlyEventType, externalId: earlyExternalId ?? null });
-  fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      location: "call-events/route.ts:post-first",
-      message: "Webhook POST first (before tenant)",
-      data: { eventType: earlyEventType, externalId: earlyExternalId ?? null },
-      timestamp: Date.now(),
-      hypothesisId: "H1-H2",
-    }),
-  }).catch(() => {});
-  // #endregion
-
   let tenantId: string | undefined = resolveTenantId(request, payload);
   if (!tenantId) {
     tenantId = (await resolveTenantIdFromCampaignRecipient(payload)) ?? undefined;
   }
   if (!tenantId) {
-    console.warn("[TelnyxWebhook:tenant-missing]", { eventType: earlyEventType, externalId: earlyExternalId ?? null });
     return NextResponse.json(
       { error: "tenantId is required" },
       { status: 400 }
@@ -433,20 +376,6 @@ export async function POST(request: NextRequest) {
   const eventType = resolveEventType(payload);
   const externalId = resolveExternalId(payload);
   const adminClient = createAdminClient();
-
-  // #region agent log
-  fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      location: "call-events/route.ts:webhook-post",
-      message: "Telnyx webhook received",
-      data: { eventType, tenantId, externalId: externalId ?? null },
-      timestamp: Date.now(),
-      hypothesisId: "H1-H2",
-    }),
-  }).catch(() => {});
-  // #endregion
 
   const { error } = await (adminClient.from("telephony_events") as any).insert({
     tenant_id: tenantId,

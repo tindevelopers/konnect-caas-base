@@ -72,20 +72,14 @@ const AppSidebar: React.FC = () => {
           credentials: "same-origin",
         });
         if (!response.ok) {
-          console.log("[AppSidebar] Platform Admin check failed:", response.status);
-          // #region agent log
-          fetch('http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'AppSidebar.tsx:loadRole',message:'Role check fetch not ok',data:{status:response.status},timestamp:Date.now(),hypothesisId:'H4'})}).catch(()=>{});
-          // #endregion
+          console.debug("[AppSidebar] Platform Admin check failed:", response.status);
           if (isMounted) {
             setIsPlatformAdmin(false);
           }
           return;
         }
         const data = await response.json();
-        console.log("[AppSidebar] Platform Admin check result:", data);
-        // #region agent log
-        fetch('http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'AppSidebar.tsx:loadRole',message:'API response',data:{isPlatformAdmin:Boolean(data?.isPlatformAdmin),role:data?.role,tenantId:data?.tenantId??'null',ok:response.ok},timestamp:Date.now(),hypothesisId:'H1,H4'})}).catch(()=>{});
-        // #endregion
+        console.debug("[AppSidebar] Platform Admin check result:", data);
         if (isMounted) {
           setIsPlatformAdmin(Boolean(data?.isPlatformAdmin));
           const resolvedRole =
@@ -118,7 +112,7 @@ const AppSidebar: React.FC = () => {
   }, []);
 
   const filteredNavItems = useMemo(() => {
-    console.log("[AppSidebar] Filtering nav items, isPlatformAdmin:", isPlatformAdmin);
+    console.debug("[AppSidebar] Filtering nav items, isPlatformAdmin:", isPlatformAdmin);
     const isAllowedByRoleAndPermission = (item: NavItem) => {
       if (isPlatformAdmin) return true;
       if (item.requiredRole?.length) {
@@ -148,11 +142,20 @@ const AppSidebar: React.FC = () => {
             return null;
           }
           if (item.subItems) {
+            if (!isPlatformAdmin && isPlatformOnlyPath(item.path)) {
+              console.debug("[AppSidebar] Filtering out nav item (not Platform Admin):", item.name, item.path);
+              return null;
+            }
             const filtered = filterChildren(item.subItems ?? []);
             if (!item.path && filtered.length === 0) {
               return null;
             }
             return { ...item, subItems: filtered };
+          }
+
+          if (!isPlatformAdmin && isPlatformOnlyPath(item.path)) {
+            console.debug("[AppSidebar] Filtering out leaf item (not Platform Admin):", item.name, item.path);
+            return null;
           }
           return item;
         })

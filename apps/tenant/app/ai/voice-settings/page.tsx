@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import MicrophoneDeviceSelector from "@/components/ai/MicrophoneDeviceSelector";
 
 type Capabilities = {
   stt: Array<{
@@ -100,6 +101,8 @@ export default function VoiceSettingsPage() {
           {error}
         </div>
       )}
+
+      <MicrophoneDeviceSelector />
 
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">

@@ -81,6 +81,14 @@ function providerUiLabel(provider: string): string {
   return provider;
 }
 
+/** Short label for the Provider column (backend used: Telnyx, Abacus, Advanced). */
+function providerColumnLabel(provider: string): string {
+  if (provider === "telnyx") return "Telnyx";
+  if (provider === "abacus") return "Abacus";
+  if (provider === "advanced") return "Advanced";
+  return provider;
+}
+
 export default function AgentManagerPage() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [usage, setUsage] = useState<UsageSummary>(defaultUsage);
@@ -145,17 +153,21 @@ export default function AgentManagerPage() {
     }
   }, []);
 
+  // Load Telnyx assistants for the dropdown regardless of provider, so users can pick an assistant when creating Abacus/Advanced agents too.
   useEffect(() => {
-    if (createPayload.provider === "telnyx") {
-      void fetchTenantAssistants();
-    } else {
-      setTenantAssistants([]);
-    }
-  }, [createPayload.provider, fetchTenantAssistants]);
+    void fetchTenantAssistants();
+  }, [fetchTenantAssistants]);
 
   const [bindingAgentId, setBindingAgentId] = useState<string | null>(null);
   const [listingExternalId, setListingExternalId] = useState("");
   const [isBinding, setIsBinding] = useState(false);
+
+  const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
+  const [editDisplayName, setEditDisplayName] = useState("");
+  const [editExternalRef, setEditExternalRef] = useState("");
+  const [editSaving, setEditSaving] = useState(false);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [deleteDeleting, setDeleteDeleting] = useState(false);
 
   async function loadData() {
     setIsLoading(true);
@@ -346,6 +358,51 @@ export default function AgentManagerPage() {
     }
   }
 
+  function openEditModal(agent: Agent) {
+    setEditingAgent(agent);
+    setEditDisplayName(agent.display_name);
+    setEditExternalRef(agent.external_ref ?? "");
+    setError(null);
+  }
+
+  async function handleSaveEdit() {
+    if (!editingAgent) return;
+    if (!editDisplayName.trim()) {
+      setError("Display name is required.");
+      return;
+    }
+    setEditSaving(true);
+    setError(null);
+    try {
+      await patchAgent(editingAgent.id, {
+        display_name: editDisplayName.trim(),
+        external_ref: editExternalRef.trim() || null,
+      });
+      await loadData();
+      setEditingAgent(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update agent.");
+    } finally {
+      setEditSaving(false);
+    }
+  }
+
+  async function handleDeleteConfirm(agentId: string) {
+    setDeleteDeleting(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/agents/${agentId}`, { method: "DELETE" });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Failed to delete agent.");
+      setDeleteConfirmId(null);
+      await loadData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete agent.");
+    } finally {
+      setDeleteDeleting(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div>
@@ -450,11 +507,11 @@ export default function AgentManagerPage() {
                 external_ref: e.target.value,
               }))
             }
-            disabled={assistantsLoading && createPayload.provider === "telnyx"}
+            disabled={assistantsLoading}
             className="rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-800"
           >
             <option value="">
-              {createPayload.provider === "telnyx" && assistantsLoading
+              {assistantsLoading
                 ? "Loading assistants..."
                 : "Select agent or enter below"}
             </option>
@@ -545,6 +602,7 @@ export default function AgentManagerPage() {
             <tr>
               <th className="px-4 py-3">Name</th>
               <th className="px-4 py-3">Tier</th>
+              <th className="px-4 py-3">Provider</th>
               <th className="px-4 py-3">Integration Level</th>
               <th className="px-4 py-3">Tenant Relation</th>
               <th className="px-4 py-3">Usage Cost</th>
@@ -554,14 +612,14 @@ export default function AgentManagerPage() {
           <tbody>
             {isLoading && (
               <tr>
-                <td className="px-4 py-6 text-gray-500" colSpan={6}>
+                <td className="px-4 py-6 text-gray-500" colSpan={7}>
                   Loading agents...
                 </td>
               </tr>
             )}
             {!isLoading && agents.length === 0 && (
               <tr>
-                <td className="px-4 py-6 text-gray-500" colSpan={6}>
+                <td className="px-4 py-6 text-gray-500" colSpan={7}>
                   No agents found.
                 </td>
               </tr>
@@ -587,6 +645,11 @@ export default function AgentManagerPage() {
                     </div>
                   </td>
                   <td className="px-4 py-3">{agent.tier}</td>
+                  <td className="px-4 py-3">
+                    <span className="font-medium text-gray-700 dark:text-gray-300">
+                      {providerColumnLabel(agent.provider)}
+                    </span>
+                  </td>
                   <td className="px-4 py-3">{agentIntegrationLabel(agent)}</td>
                   <td className="px-4 py-3">
                     {relationLabel[agent.tenant_relation ?? "internal"] ??
@@ -598,6 +661,13 @@ export default function AgentManagerPage() {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => openEditModal(agent)}
+                        className="rounded-lg border border-gray-300 px-2 py-1 text-xs hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
+                      >
+                        Edit
+                      </button>
                       {agent.tier !== "advanced" && (
                         <button
                           type="button"
@@ -631,14 +701,37 @@ export default function AgentManagerPage() {
                       >
                         Bind Listing
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDelete(agent)}
-                        disabled={deletingId === agent.id}
-                        className="rounded-lg border border-red-300 px-2 py-1 text-xs text-red-600 hover:bg-red-50 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-950/50 disabled:opacity-60"
-                      >
-                        {deletingId === agent.id ? "Deleting…" : "Delete"}
-                      </button>
+                      {deleteConfirmId === agent.id ? (
+                        <span className="flex items-center gap-1">
+                          <span className="text-xs text-gray-600 dark:text-gray-400">
+                            Delete?
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteConfirm(agent.id)}
+                            disabled={deleteDeleting}
+                            className="rounded bg-red-600 px-2 py-1 text-xs text-white hover:bg-red-700 disabled:opacity-50"
+                          >
+                            {deleteDeleting ? "…" : "Yes"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDeleteConfirmId(null)}
+                            disabled={deleteDeleting}
+                            className="rounded border border-gray-300 px-2 py-1 text-xs hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800 disabled:opacity-50"
+                          >
+                            No
+                          </button>
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setDeleteConfirmId(agent.id)}
+                          className="rounded-lg border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-900/20"
+                        >
+                          Delete
+                        </button>
+                      )}
                     </div>
                     {bindingAgentId === agent.id && (
                       <div className="mt-2 flex items-center gap-2">
@@ -664,6 +757,70 @@ export default function AgentManagerPage() {
           </tbody>
         </table>
       </div>
+
+      {/* Edit agent modal */}
+      {editingAgent && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="edit-agent-title"
+        >
+          <div className="w-full max-w-md rounded-xl border border-gray-200 bg-white p-4 shadow-lg dark:border-gray-700 dark:bg-gray-900">
+            <h2 id="edit-agent-title" className="text-lg font-semibold text-gray-900 dark:text-white">
+              Edit agent settings
+            </h2>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              Update display name and external ref (e.g. Telnyx assistant ID) for this agent.
+            </p>
+            <div className="mt-4 space-y-3">
+              <div>
+                <label htmlFor="edit-display-name" className="block text-xs font-medium text-gray-700 dark:text-gray-300">
+                  Display name
+                </label>
+                <input
+                  id="edit-display-name"
+                  type="text"
+                  value={editDisplayName}
+                  onChange={(e) => setEditDisplayName(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                  placeholder="Agent name"
+                />
+              </div>
+              <div>
+                <label htmlFor="edit-external-ref" className="block text-xs font-medium text-gray-700 dark:text-gray-300">
+                  External ref (e.g. assistant ID)
+                </label>
+                <input
+                  id="edit-external-ref"
+                  type="text"
+                  value={editExternalRef}
+                  onChange={(e) => setEditExternalRef(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                  placeholder="assistant-xxx"
+                />
+              </div>
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setEditingAgent(null)}
+                className="rounded-lg border border-gray-300 px-3 py-2 text-sm hover:bg-gray-100 dark:border-gray-600 dark:hover:bg-gray-800"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleSaveEdit()}
+                disabled={editSaving}
+                className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+              >
+                {editSaving ? "Saving…" : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
