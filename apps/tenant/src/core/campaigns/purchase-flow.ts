@@ -252,6 +252,16 @@ export async function postDraftOrderToWebhook(
     hasCustomerEmail: Boolean(options?.customerEmail),
   });
 
+  console.info("[CampaignPurchase:PHASE2_DEBUG]", {
+    webhookUrl: url,
+    variantIds: payload.lineItems?.map((i) => i.variantId),
+    quantities: payload.lineItems?.map((i) => i.quantity),
+    customerEmail: options?.customerEmail,
+    callControlId: (options as { callControlId?: string })?.callControlId,
+    timestamp: new Date().toISOString(),
+    payloadPreview: payload,
+  });
+
   try {
     const res = await fetch(url, {
       method: "POST",
@@ -260,6 +270,13 @@ export async function postDraftOrderToWebhook(
     });
     const text = await res.text();
     const responsePreview = text.length > 500 ? `${text.slice(0, 500)}...` : text;
+
+    console.info("[CampaignPurchase:WEBHOOK_RESPONSE]", {
+      webhookUrl: url,
+      status: res.status,
+      ok: res.ok,
+      timestamp: new Date().toISOString(),
+    });
 
     console.info("[CampaignPurchase:webhook] Response", {
       requestId,
@@ -292,6 +309,11 @@ export async function postDraftOrderToWebhook(
             : typeof (draftOrder as { invoice_url?: string } | undefined)?.invoice_url === "string"
               ? ((draftOrder as { invoice_url: string }).invoice_url as string)
               : "";
+
+    console.info("[CampaignPurchase:WEBHOOK_RESULT]", {
+      invoiceUrl,
+      success: !!invoiceUrl,
+    });
 
     if (!invoiceUrl) {
       console.warn("[CampaignPurchase:webhook] Response missing invoiceUrl", {

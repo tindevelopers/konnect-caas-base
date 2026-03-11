@@ -147,11 +147,17 @@ export async function POST(request: NextRequest) {
       : undefined);
 
   if (!customerEmail) {
+    console.warn("[CampaignPurchase:create-draft-order] missing_customer_email", {
+      recipientId: ctx.recipientId,
+      campaignId: ctx.campaignId,
+      callControlId,
+    });
     return NextResponse.json(
       {
         content:
           "I can send the checkout link by email, but I don't have an email address on file. What email should I send it to?",
         error: "missing_customer_email",
+        success: false,
       },
       { status: 200, headers: { "Access-Control-Allow-Origin": "*" } }
     );
@@ -204,6 +210,7 @@ export async function POST(request: NextRequest) {
         content: result.message,
         result: result.message,
         invoiceUrl: result.invoiceUrl,
+        success: true,
       },
       { status: 200, headers: { "Access-Control-Allow-Origin": "*" } }
     );
