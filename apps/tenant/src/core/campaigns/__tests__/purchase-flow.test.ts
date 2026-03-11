@@ -207,6 +207,8 @@ describe("purchase-flow", () => {
             lineItems: [{ variantId: "gid://shopify/ProductVariant/1", quantity: 1 }],
             items: [{ variantId: "gid://shopify/ProductVariant/1", quantity: 1 }],
             line_items: [{ variantId: "gid://shopify/ProductVariant/1", quantity: 1 }],
+            variant_ids: ["gid://shopify/ProductVariant/1"],
+            quantities: [1],
           }),
         })
       );
@@ -221,6 +223,24 @@ describe("purchase-flow", () => {
       vi.stubGlobal("fetch", fetchMock);
       const result = await postDraftOrderToWebhook("https://w.example.com", { lineItems: [] });
       expect(result).toEqual({ success: true, invoiceUrl: "https://checkout.example.com/snake" });
+      vi.unstubAllGlobals();
+    });
+
+    it("accepts draftOrder.invoiceUrl (psd-custom-function / Railway format)", async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              draftOrder: { invoiceUrl: "https://checkout.shopify.com/order/abc123", name: "D123" },
+            })
+          ),
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      const result = await postDraftOrderToWebhook("https://railway.example.com/draft-orders", {
+        lineItems: [{ variantId: "gid://shopify/ProductVariant/1", quantity: 1 }],
+      });
+      expect(result).toEqual({ success: true, invoiceUrl: "https://checkout.shopify.com/order/abc123" });
       vi.unstubAllGlobals();
     });
 
@@ -277,6 +297,8 @@ describe("purchase-flow", () => {
             lineItems: [{ variantId: "gid://shopify/ProductVariant/1", quantity: 1 }],
             items: [{ variantId: "gid://shopify/ProductVariant/1", quantity: 1 }],
             line_items: [{ variantId: "gid://shopify/ProductVariant/1", quantity: 1 }],
+            variant_ids: ["gid://shopify/ProductVariant/1"],
+            quantities: [1],
           }),
         })
       );

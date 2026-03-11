@@ -1,9 +1,12 @@
 #!/usr/bin/env tsx
 /**
- * Update campaign webhookUrl from root to /draft-orders for psd-custom-function-staging.
+ * Update campaign webhookUrl to a new URL.
  *
  * Usage (repo root):
  *   pnpm exec tsx apps/tenant/scripts/update-campaign-webhook-url.ts
+ *
+ * Or with custom URL:
+ *   WEBHOOK_URL=https://example.com/draft pnpm exec tsx apps/tenant/scripts/update-campaign-webhook-url.ts
  */
 import * as dotenv from "dotenv";
 import * as path from "path";
@@ -15,9 +18,9 @@ const rootEnv = path.join(__dirname, "../../../.env.local");
 if (fs.existsSync(tenantEnv)) dotenv.config({ path: tenantEnv });
 if (fs.existsSync(rootEnv)) dotenv.config({ path: rootEnv, override: false });
 
-const OLD_BASE = "https://psd-custom-function-staging.up.railway.app";
-const OLD_URL = `${OLD_BASE}/`;
-const NEW_URL = `${OLD_BASE}/draft-orders`;
+const NEW_URL =
+  process.env.WEBHOOK_URL?.trim() ||
+  "https://shopify-mcp-retell-integration-production-0355.up.railway.app/functions/shopify_send_draft_invoice";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
@@ -30,14 +33,10 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
 
-function needsUpdate(url: string | null | undefined): boolean {
-  if (!url || typeof url !== "string") return false;
-  const u = url.trim();
-  return (
-    u === OLD_URL ||
-    u === OLD_BASE ||
-    (u.startsWith(OLD_BASE) && !u.startsWith(NEW_URL))
-  );
+function hasWebhookUrl(c: { settings?: Record<string, unknown> | null }): boolean {
+  const s = c.settings;
+  const url = (s?.webhookUrl as string) ?? (s?.railwayWebhookUrl as string) ?? "";
+  return typeof url === "string" && url.trim().length > 0;
 }
 
 async function main() {
@@ -50,22 +49,20 @@ async function main() {
     process.exit(1);
   }
 
-  const toUpdate = (campaigns || []).filter((c) => {
-    const s = c.settings as Record<string, unknown> | null;
-    const url =
-      (s?.webhookUrl as string) ?? (s?.railwayWebhookUrl as string) ?? "";
-    return needsUpdate(url);
-  });
+  const toUpdate = (campaigns || []).filter(hasWebhookUrl);
 
   if (toUpdate.length === 0) {
-    console.log("No campaigns found with webhookUrl pointing at root. Nothing to update.");
+    console.log("No campaigns found with webhookUrl set. Nothing to update.");
     return;
   }
 
-  console.log(`Found ${toUpdate.length} campaign(s) to update:`);
+  console.log(`Updating ${toUpdate.length} campaign(s) to:`);
+  console.log(`  ${NEW_URL}`);
+  console.log("");
   for (const c of toUpdate) {
     console.log(`  - ${c.name} (${c.id})`);
   }
+  console.log("");
 
   for (const c of toUpdate) {
     const s = (c.settings as Record<string, unknown>) || {};

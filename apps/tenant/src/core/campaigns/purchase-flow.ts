@@ -172,17 +172,19 @@ export async function postDraftOrderToWebhook(
   payload: { lineItems: PurchaseLineItem[] },
   options?: { customerEmail?: string }
 ): Promise<{ success: true; invoiceUrl: string } | { success: false; error: string }> {
-  // Keep the existing contract (`lineItems`) but also include a few common aliases
-  // so downstream webhooks that expect different naming still work.
+  // Keep the existing contract (`lineItems`) but also include aliases for common webhook formats.
+  const variantIds = payload.lineItems.map((l) => l.variantId);
+  const quantities = payload.lineItems.map((l) => l.quantity);
   const base = {
     ...payload,
     items: payload.lineItems,
     line_items: payload.lineItems,
+    variant_ids: variantIds,
+    quantities,
   };
   const body = options?.customerEmail
     ? {
         ...base,
-        // Provide a few common aliases so downstream services can use whatever they expect.
         customerEmail: options.customerEmail,
         customer_email: options.customerEmail,
         email: options.customerEmail,
@@ -212,12 +214,17 @@ export async function postDraftOrderToWebhook(
     } catch {
       return { success: false, error: "Webhook response was not JSON" };
     }
+    const draftOrder = data.draftOrder as Record<string, unknown> | undefined;
     const invoiceUrl =
       typeof data.invoiceUrl === "string"
         ? data.invoiceUrl
         : typeof (data as { invoice_url?: string }).invoice_url === "string"
           ? (data as { invoice_url: string }).invoice_url
-          : "";
+          : typeof draftOrder?.invoiceUrl === "string"
+            ? (draftOrder.invoiceUrl as string)
+            : typeof (draftOrder as { invoice_url?: string } | undefined)?.invoice_url === "string"
+              ? ((draftOrder as { invoice_url: string }).invoice_url as string)
+              : "";
     if (!invoiceUrl) {
       return { success: false, error: "Webhook response did not include invoiceUrl" };
     }
