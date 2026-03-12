@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { createAdminClient } from "@/core/database/admin-client";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -86,6 +87,92 @@ function extractQuery(body: Record<string, unknown>): string | null {
   return null;
 }
 
+function extractCallControlId(request: NextRequest): string | null {
+  const fromHeader = request.headers.get("x-telnyx-call-control-id");
+  if (typeof fromHeader === "string" && fromHeader.trim()) return fromHeader.trim();
+  return null;
+}
+
+function asConversationId(payload: unknown): string | null {
+  const root = asRecord(payload);
+  const data = asRecord(root.data);
+  const nested = asRecord(data.payload);
+  const candidate =
+    nested.conversation_id ??
+    data.conversation_id ??
+    root.conversation_id;
+  return typeof candidate === "string" && candidate.trim() ? candidate.trim() : null;
+}
+
+async function findConversationIdByCallControlId(
+  callControlId: string
+): Promise<string | null> {
+  try {
+    const admin = createAdminClient();
+    const { data, error } = await (admin.from("ai_agent_events") as any)
+      .select("payload,received_at,event_type")
+      .eq("provider", "telnyx")
+      .eq("external_id", callControlId)
+      .in("event_type", ["call.conversation.created", "call.conversation.ended"])
+      .order("received_at", { ascending: false })
+      .limit(10);
+
+    if (error || !Array.isArray(data)) return null;
+    for (const row of data) {
+      const id = asConversationId(row?.payload);
+      if (id) return id;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function findQueryFromConversationMessages(
+  conversationId: string
+): Promise<string | null> {
+  const apiKey = process.env.TELNYX_API_KEY?.trim();
+  if (!apiKey) return null;
+
+  try {
+    const res = await fetch(
+      `https://api.telnyx.com/v2/ai/conversations/${encodeURIComponent(conversationId)}/messages?sort=desc&page[size]=50`,
+      {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+    if (!res.ok) return null;
+
+    const json = (await res.json()) as Record<string, unknown>;
+    const messages = Array.isArray(json.data) ? json.data : [];
+
+    for (const msg of messages) {
+      const message = asRecord(msg);
+      const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
+      for (const rawToolCall of toolCalls) {
+        const toolCall = asRecord(rawToolCall);
+        const fn = asRecord(toolCall.function);
+        if (fn.name !== "search_products") continue;
+        if (typeof fn.arguments !== "string" || !fn.arguments.trim()) continue;
+        try {
+          const args = JSON.parse(fn.arguments) as Record<string, unknown>;
+          const q = typeof args.query === "string" ? args.query.trim() : "";
+          if (q) return q;
+        } catch {
+          continue;
+        }
+      }
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 type ProductSearchProduct = {
   name?: string;
   title?: string;
@@ -140,11 +227,34 @@ export async function POST(request: NextRequest) {
 
   const body = asRecord(rawBody)?.arguments || asRecord(rawBody)?.args || rawBody || {};
   const bodyRecord = asRecord(body);
-  const query = extractQuery(bodyRecord);
+  let query = extractQuery(bodyRecord);
   console.info("[CampaignPurchase:search-products] parsedQuery", query);
   // #region agent log
   fetch("http://127.0.0.1:7737/ingest/b427048e-2887-4159-bcae-6153d02c1fa9",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"ffbe86"},body:JSON.stringify({sessionId:"ffbe86",runId,hypothesisId:"H2",location:"search-products/route.ts:query-parse",message:"query extraction result",data:{queryPresent:typeof query === "string" && query.length > 0,queryLength:typeof query === "string" ? query.length : 0,bodyKeys:Object.keys(bodyRecord).slice(0,20)},timestamp:Date.now()})}).catch(()=>{});
   // #endregion
+
+  if (!query) {
+    const callControlId = extractCallControlId(request);
+    const conversationId = callControlId
+      ? await findConversationIdByCallControlId(callControlId)
+      : null;
+    const recoveredQuery = conversationId
+      ? await findQueryFromConversationMessages(conversationId)
+      : null;
+
+    // #region agent log
+    fetch("http://127.0.0.1:7737/ingest/b427048e-2887-4159-bcae-6153d02c1fa9",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"ffbe86"},body:JSON.stringify({sessionId:"ffbe86",runId,hypothesisId:"H6",location:"search-products/route.ts:conversation-fallback",message:"attempted query recovery from conversation",data:{callControlIdPresent:!!callControlId,conversationIdPresent:!!conversationId,recoveredQueryPresent:!!recoveredQuery,recoveredQueryLength:recoveredQuery?.length ?? 0},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+
+    if (recoveredQuery) {
+      query = recoveredQuery;
+      console.info("[CampaignPurchase:search-products] recoveredQueryFromConversation", {
+        callControlId,
+        conversationId,
+        recoveredQuery,
+      });
+    }
+  }
 
   if (!query) {
     console.warn("[CampaignPurchase:search-products] 400: missing query", {
