@@ -176,6 +176,8 @@ export default function NewCampaignPage() {
   const [callingDays, setCallingDays] = useState([1, 2, 3, 4, 5]);
   const [maxAttempts, setMaxAttempts] = useState(3);
   const [retryDelayMinutes, setRetryDelayMinutes] = useState(60);
+  // Minimum spacing between scheduled calls for this campaign.
+  const [callIntervalMinutes, setCallIntervalMinutes] = useState(10);
   const [callsPerMinute, setCallsPerMinute] = useState(10);
 
   const [campaignId, setCampaignId] = useState<string | null>(null);
@@ -595,6 +597,7 @@ export default function NewCampaignPage() {
           retry_delay_minutes: retryDelayMinutes,
           calls_per_minute: callsPerMinute,
           settings: {
+            call_interval_minutes: Math.max(1, Math.floor(Number(callIntervalMinutes) || 10)),
             ...(connectionId ? { connection_id: connectionId } : {}),
             ...(greeting.trim() ? { greeting: greeting.trim().slice(0, 3000) } : {}),
             ...(SHOW_CAMPAIGN_AUTOMATION_SETTINGS
@@ -1402,7 +1405,62 @@ export default function NewCampaignPage() {
               </div>
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1">Calls per minute</label>
+              <label className="block text-sm font-medium mb-2">Calling days</label>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { d: 0, label: "Sun" },
+                  { d: 1, label: "Mon" },
+                  { d: 2, label: "Tue" },
+                  { d: 3, label: "Wed" },
+                  { d: 4, label: "Thu" },
+                  { d: 5, label: "Fri" },
+                  { d: 6, label: "Sat" },
+                ].map(({ d, label }) => {
+                  const active = callingDays.includes(d);
+                  return (
+                    <button
+                      key={d}
+                      type="button"
+                      onClick={() => {
+                        setCallingDays((prev) => {
+                          const set = new Set(prev);
+                          if (set.has(d)) set.delete(d);
+                          else set.add(d);
+                          return Array.from(set).sort((a, b) => a - b);
+                        });
+                      }}
+                      className={`px-3 py-1.5 rounded-lg border text-sm ${
+                        active
+                          ? "border-brand-500 bg-brand-50 dark:bg-brand-900/20 text-brand-700 dark:text-brand-300"
+                          : "border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300"
+                      }`}
+                      aria-pressed={active}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                Calls will only be scheduled/placed on these days in the selected timezone.
+              </p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Call interval (minutes)</label>
+              <input
+                type="number"
+                min={1}
+                max={1440}
+                value={callIntervalMinutes}
+                onChange={(e) => setCallIntervalMinutes(Number(e.target.value))}
+                className="w-full px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700"
+              />
+              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                Calls will be scheduled with at least this many minutes between each recipient.
+              </p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Calls per minute (throttle)</label>
               <input
                 type="number"
                 min={1}
@@ -1411,6 +1469,9 @@ export default function NewCampaignPage() {
                 onChange={(e) => setCallsPerMinute(Number(e.target.value))}
                 className="w-full px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700"
               />
+              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                Safety limit when multiple calls are due at once (cron runs in batches).
+              </p>
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">Max retry attempts</label>

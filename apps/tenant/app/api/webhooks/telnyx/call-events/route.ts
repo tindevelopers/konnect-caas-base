@@ -5,6 +5,7 @@ import { telnyxWebhookConfig } from "@/src/core/telnyx/config";
 import { handleTelnyxInboundVoiceEvent } from "@/src/core/telnyx/voice-router";
 import { getTelnyxTransportForWebhook } from "@/src/core/telnyx/webhook-transport";
 import { createTelnyxClient, getAssistant } from "@tinadmin/telnyx-ai-platform/server";
+import { nextAllowedStartUtc } from "@/src/core/campaigns/scheduling";
 
 function resolveTenantId(request: NextRequest, payload: Record<string, unknown>) {
   const headerTenant = request.headers.get("x-tenant-id");
@@ -526,7 +527,7 @@ async function updateCampaignRecipientFromCallEvent(
   if (!callControlId) return;
 
   const { data: recipient } = await (adminClient.from("campaign_recipients") as any)
-    .select("id, campaign_id")
+    .select("id, campaign_id, attempts")
     .eq("tenant_id", tenantId)
     .eq("call_control_id", callControlId)
     .single();
@@ -556,7 +557,41 @@ async function updateCampaignRecipientFromCallEvent(
 
   if (status) {
     const updates: Record<string, unknown> = { status };
-    if (status === "completed" || status === "no_answer" || status === "voicemail") {
+
+    // Retry logic: for "no answer" / "voicemail", reschedule if attempts < max_attempts.
+    if (status === "no_answer" || status === "voicemail") {
+      const { data: campaign } = await (adminClient.from("campaigns") as any)
+        .select(
+          "max_attempts, retry_delay_minutes, calling_window_start, calling_window_end, calling_days, timezone"
+        )
+        .eq("tenant_id", tenantId)
+        .eq("id", recipient.campaign_id)
+        .maybeSingle();
+
+      const attempts = Math.max(0, Math.floor(Number(recipient.attempts) || 0));
+      const maxAttempts = Math.max(0, Math.floor(Number(campaign?.max_attempts) || 3));
+      const retryDelay = Math.max(1, Math.floor(Number(campaign?.retry_delay_minutes) || 60));
+      const tz = String(campaign?.timezone || "UTC");
+      const windowStart = String(campaign?.calling_window_start || "09:00");
+      const windowEnd = String(campaign?.calling_window_end || "20:00");
+      const callingDays = (campaign?.calling_days as number[] | null | undefined) ?? [1, 2, 3, 4, 5];
+
+      if (maxAttempts > 0 && attempts < maxAttempts) {
+        const retryBase = new Date(Date.now() + retryDelay * 60_000);
+        const retryAt = nextAllowedStartUtc({
+          fromUtc: retryBase,
+          timeZone: tz,
+          callingWindowStart: windowStart,
+          callingWindowEnd: windowEnd,
+          callingDays,
+        });
+        updates.status = "scheduled";
+        updates.scheduled_at = retryAt.toISOString();
+        updates.completed_at = null;
+      } else {
+        updates.completed_at = new Date().toISOString();
+      }
+    } else if (status === "completed") {
       updates.completed_at = new Date().toISOString();
     }
     await (adminClient.from("campaign_recipients") as any)

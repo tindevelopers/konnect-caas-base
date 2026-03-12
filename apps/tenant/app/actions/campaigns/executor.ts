@@ -5,6 +5,7 @@ import { createTelnyxClient } from "@tinadmin/telnyx-ai-platform/server";
 import {
   getTelnyxIntegrationForWebhook,
 } from "@/src/core/telnyx/webhook-transport";
+import { nextAllowedStartUtc } from "@/src/core/campaigns/scheduling";
 
 function extractApiKey(credentials: Record<string, unknown> | null): string | null {
   if (!credentials) return null;
@@ -113,7 +114,7 @@ export async function processCampaignVoiceBatch(
 
   let campaignsQuery = (admin.from("campaigns") as any)
     .select(
-      "id, tenant_id, assistant_id, from_number, settings, max_concurrent_calls, calling_window_start, calling_window_end, calling_days, timezone"
+      "id, tenant_id, assistant_id, from_number, settings, max_concurrent_calls, calls_per_minute, max_attempts, retry_delay_minutes, calling_window_start, calling_window_end, calling_days, timezone"
     )
     .eq("status", "running")
     .eq("campaign_type", "voice");
@@ -196,6 +197,10 @@ export async function processCampaignVoiceBatch(
 
     // Cap batch size by campaign max_concurrent_calls to avoid Telnyx "connection channel limit exceeded" (90043)
     const batchSize = Math.min(10, Math.max(1, Number(campaign.max_concurrent_calls) || 10));
+    // Also respect calls_per_minute as a throttle for cron processing (cron typically runs every ~2 minutes).
+    const callsPerMinute = Math.max(1, Math.floor(Number(campaign.calls_per_minute) || 10));
+    const throttleLimit = Math.max(1, Math.floor(callsPerMinute * 2));
+    const limit = Math.max(1, Math.min(batchSize, throttleLimit));
 
     const { data: recipients } = await (admin.from("campaign_recipients") as any)
       .select("id, phone, first_name, last_name, attempts")
@@ -203,7 +208,7 @@ export async function processCampaignVoiceBatch(
       .eq("tenant_id", campaign.tenant_id)
       .eq("status", "scheduled")
       .lte("scheduled_at", now)
-      .limit(batchSize);
+      .limit(limit);
 
     if (!recipients?.length) continue;
 
@@ -282,9 +287,32 @@ export async function processCampaignVoiceBatch(
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         errors.push(`Campaign ${campaign.id}: Recipient ${r.id}: ${msg}`);
-        await (admin.from("campaign_recipients") as any)
-          .update({ status: "failed", result: { error: msg } })
-          .eq("id", r.id);
+        const nextAttempts = (r.attempts ?? 0) + 1;
+        const maxAttempts = Math.max(0, Math.floor(Number(campaign.max_attempts) || 3));
+        const retryDelay = Math.max(1, Math.floor(Number(campaign.retry_delay_minutes) || 60));
+
+        if (maxAttempts > 0 && nextAttempts < maxAttempts) {
+          const retryBase = new Date(Date.now() + retryDelay * 60_000);
+          const retryAt = nextAllowedStartUtc({
+            fromUtc: retryBase,
+            timeZone: tz,
+            callingWindowStart: windowStart,
+            callingWindowEnd: windowEnd,
+            callingDays,
+          });
+
+          await (admin.from("campaign_recipients") as any)
+            .update({
+              status: "scheduled",
+              scheduled_at: retryAt.toISOString(),
+              result: { error: msg, will_retry: true },
+            })
+            .eq("id", r.id);
+        } else {
+          await (admin.from("campaign_recipients") as any)
+            .update({ status: "failed", result: { error: msg } })
+            .eq("id", r.id);
+        }
       }
     }
   }

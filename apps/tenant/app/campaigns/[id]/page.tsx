@@ -446,8 +446,26 @@ export default function CampaignDetailPage() {
                 <dd>{campaign.max_attempts}</dd>
               </div>
               <div>
-                <dt className="text-gray-500">Calls per minute</dt>
-                <dd>{campaign.calls_per_minute}</dd>
+                <dt className="text-gray-500">Call interval</dt>
+                <dd>
+                  {(() => {
+                    const raw = campaign.settings as unknown;
+                    const s =
+                      typeof raw === "string"
+                        ? (() => {
+                            try {
+                              return JSON.parse(raw) as Record<string, unknown>;
+                            } catch {
+                              return {};
+                            }
+                          })()
+                        : (raw as Record<string, unknown> | null) ?? {};
+                    const v = s.call_interval_minutes;
+                    const n = typeof v === "number" ? v : typeof v === "string" ? Number(v) : NaN;
+                    if (Number.isFinite(n) && n > 0) return `${Math.floor(n)} min`;
+                    return `${campaign.calls_per_minute} calls/min`;
+                  })()}
+                </dd>
               </div>
               <div>
                 <dt className="text-gray-500">Max concurrent calls</dt>

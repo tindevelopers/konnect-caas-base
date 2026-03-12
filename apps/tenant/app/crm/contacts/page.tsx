@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { getContacts, deleteContact } from "@/app/actions/crm/contacts";
 import { createDefaultTenantForUser } from "@/app/actions/crm/setup";
 import PageBreadcrumb from "@/components/common/PageBreadCrumb";
 import Button from "@/components/ui/button/Button";
 import { PlusIcon, PencilIcon, TrashIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 
 // Temporary types until database types are regenerated
 type Contact = {
@@ -35,10 +36,21 @@ type Contact = {
 };
 
 export default function ContactsPage() {
+  const searchParams = useSearchParams();
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [needsTenant, setNeedsTenant] = useState(false);
+
+  const importNotice = useMemo(() => {
+    const imported = searchParams.get("imported");
+    if (!imported) return null;
+    const companiesCreated = searchParams.get("companiesCreated");
+    return {
+      imported,
+      companiesCreated,
+    };
+  }, [searchParams]);
 
   useEffect(() => {
     loadContacts();
@@ -139,13 +151,34 @@ export default function ContactsPage() {
               Manage your contacts and customer relationships
             </p>
           </div>
-          <Link href="/crm/contacts/new">
-            <Button>
-              <PlusIcon className="h-5 w-5 mr-2" />
-              Add Contact
-            </Button>
-          </Link>
+          <div className="flex items-center gap-3">
+            <Link href="/crm/contacts/import">
+              <Button variant="outline">
+                Import CSV
+              </Button>
+            </Link>
+            <Link href="/crm/contacts/new">
+              <Button>
+                <PlusIcon className="h-5 w-5 mr-2" />
+                Add Contact
+              </Button>
+            </Link>
+          </div>
         </div>
+
+        {importNotice && (
+          <div className="rounded-lg bg-green-50 p-4 text-sm text-green-800 dark:bg-green-900/20 dark:text-green-300">
+            Imported <span className="font-medium">{importNotice.imported}</span> contacts
+            {importNotice.companiesCreated ? (
+              <>
+                {" "}
+                and created <span className="font-medium">{importNotice.companiesCreated}</span>{" "}
+                companies
+              </>
+            ) : null}
+            .
+          </div>
+        )}
 
         {/* Search */}
         <div className="relative">

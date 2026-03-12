@@ -33,6 +33,8 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
+.pnpm-store/
+**/.pnpm-store/
 .cursor/debug.log
 .cursor/debug-*.log
 **/debug-abacus-response.json
