@@ -140,10 +140,11 @@ export async function POST(request: NextRequest) {
     });
     return NextResponse.json(
       {
-        content: "Please provide a product search query.",
+        content:
+          "Please call search_products again with JSON like {\"query\":\"cordless dog clipper\"}.",
         products: [],
       },
-      { status: 400, headers: { "Access-Control-Allow-Origin": "*" } }
+      { status: 200, headers: { "Access-Control-Allow-Origin": "*" } }
     );
   }
 
