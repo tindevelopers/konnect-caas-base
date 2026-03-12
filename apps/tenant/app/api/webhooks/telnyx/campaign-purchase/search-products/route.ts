@@ -117,13 +117,35 @@ async function findConversationIdByCallControlId(
       .order("received_at", { ascending: false })
       .limit(10);
 
-    if (error || !Array.isArray(data)) return null;
+    if (error || !Array.isArray(data)) {
+      console.warn("[CampaignPurchase:search-products] conversationLookupQueryFailed", {
+        hasError: Boolean(error),
+        callControlId,
+      });
+      return null;
+    }
+
+    console.info("[CampaignPurchase:search-products] conversationLookupRows", {
+      callControlId,
+      rowCount: data.length,
+      eventTypes: data
+        .map((row) => row?.event_type)
+        .filter((v): v is string => typeof v === "string")
+        .slice(0, 10),
+    });
+
     for (const row of data) {
       const id = asConversationId(row?.payload);
       if (id) return id;
     }
+    console.info("[CampaignPurchase:search-products] conversationLookupNoConversationId", {
+      callControlId,
+    });
     return null;
   } catch {
+    console.warn("[CampaignPurchase:search-products] conversationLookupException", {
+      callControlId,
+    });
     return null;
   }
 }
@@ -132,7 +154,13 @@ async function findQueryFromConversationMessages(
   conversationId: string
 ): Promise<string | null> {
   const apiKey = process.env.TELNYX_API_KEY?.trim();
-  if (!apiKey) return null;
+  if (!apiKey) {
+    console.warn("[CampaignPurchase:search-products] conversationMessageLookupSkipped", {
+      reason: "missing_telnyx_api_key",
+      conversationId,
+    });
+    return null;
+  }
 
   try {
     const res = await fetch(
@@ -148,6 +176,10 @@ async function findQueryFromConversationMessages(
 
     const json = (await res.json()) as Record<string, unknown>;
     const messages = Array.isArray(json.data) ? json.data : [];
+    console.info("[CampaignPurchase:search-products] conversationMessagesFetched", {
+      conversationId,
+      count: messages.length,
+    });
 
     for (const msg of messages) {
       const message = asRecord(msg);
@@ -167,8 +199,14 @@ async function findQueryFromConversationMessages(
       }
     }
 
+    console.info("[CampaignPurchase:search-products] conversationMessagesNoToolArgs", {
+      conversationId,
+    });
     return null;
   } catch {
+    console.warn("[CampaignPurchase:search-products] conversationMessageLookupException", {
+      conversationId,
+    });
     return null;
   }
 }
@@ -241,6 +279,11 @@ export async function POST(request: NextRequest) {
     const recoveredQuery = conversationId
       ? await findQueryFromConversationMessages(conversationId)
       : null;
+    console.info("[CampaignPurchase:search-products] fallbackAttempt", {
+      callControlId,
+      conversationId,
+      recoveredQueryPresent: Boolean(recoveredQuery),
+    });
 
     // #region agent log
     fetch("http://127.0.0.1:7737/ingest/b427048e-2887-4159-bcae-6153d02c1fa9",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"ffbe86"},body:JSON.stringify({sessionId:"ffbe86",runId,hypothesisId:"H6",location:"search-products/route.ts:conversation-fallback",message:"attempted query recovery from conversation",data:{callControlIdPresent:!!callControlId,conversationIdPresent:!!conversationId,recoveredQueryPresent:!!recoveredQuery,recoveredQueryLength:recoveredQuery?.length ?? 0},timestamp:Date.now()})}).catch(()=>{});
