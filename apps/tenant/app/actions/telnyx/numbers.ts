@@ -1098,6 +1098,44 @@ export type TelnyxPhoneNumber = {
   updated_at?: string;
 };
 
+// -----------------------------
+// Verified Numbers (outbound CLI)
+// -----------------------------
+
+export type TelnyxVerifiedNumber = {
+  record_type: "verified_number";
+  phone_number: string;
+  verified_at?: string;
+};
+
+export async function listVerifiedNumbersAction(args?: {
+  pageNumber?: number;
+  pageSize?: number;
+}) {
+  const { tenantId, userId } = await getTelemetryContext();
+  try {
+    const transport = await getTelnyxTransport("integrations.read");
+
+    const qs = buildTelnyxFilterQuery({
+      page: { number: args?.pageNumber ?? 1, size: args?.pageSize ?? 50 },
+    });
+
+    return trackApiCall(
+      "listVerifiedNumbers",
+      TELNYX_PROVIDER,
+      async () => {
+        return transport.request<TelnyxListResponse<TelnyxVerifiedNumber>>(
+          `/verified_numbers${qs}`,
+          { method: "GET" }
+        );
+      },
+      { tenantId, userId }
+    );
+  } catch (e) {
+    throw enhanceTelnyxError(e);
+  }
+}
+
 export async function listOwnedPhoneNumbersAction(args?: {
   phoneNumberContains?: string;
   status?: string;

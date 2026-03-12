@@ -35,10 +35,16 @@ import {
 } from "@/app/actions/crm/groups";
 import { seedCrmContacts } from "@/app/actions/crm/seed";
 import { listAssistantsAction } from "@/app/actions/telnyx/assistants";
-import { listOwnedPhoneNumbersAction } from "@/app/actions/telnyx/numbers";
+import {
+  listOwnedPhoneNumbersAction,
+  listVerifiedNumbersAction,
+} from "@/app/actions/telnyx/numbers";
 import { useDropzone } from "react-dropzone";
 
 const STEPS = ["Basics", "Audience", "Content", "Schedule"];
+
+const SHOW_CAMPAIGN_AUTOMATION_SETTINGS =
+  process.env.NEXT_PUBLIC_SHOW_CAMPAIGN_AUTOMATION_SETTINGS === "true";
 
 const CAMPAIGN_TYPES: { value: CampaignType; label: string }[] = [
   { value: "voice", label: "Voice (AI Assistant)" },
@@ -147,7 +153,9 @@ export default function NewCampaignPage() {
 
   // Step 3: Content
   const [assistants, setAssistants] = useState<{ id: string; name?: string }[]>([]);
-  const [numbers, setNumbers] = useState<{ phone_number: string }[]>([]);
+  const [numbers, setNumbers] = useState<
+    { phone_number: string; label: string; kind: "owned" | "verified" }[]
+  >([]);
   const [telnyxApplications, setTelnyxApplications] = useState<
     { value: string; label: string }[]
   >([]);
@@ -382,9 +390,10 @@ export default function NewCampaignPage() {
     setContentOptionsError(null);
     setContentOptionsLoading(true);
     try {
-      const [aList, nList, appRes] = await Promise.all([
+      const [aList, nOwned, nVerified, appRes] = await Promise.all([
         listAssistantsAction(),
         listOwnedPhoneNumbersAction({ pageNumber: 1, pageSize: 50 }),
+        listVerifiedNumbersAction({ pageNumber: 1, pageSize: 50 }).catch(() => ({ data: [] })),
         fetch("/api/integrations/telnyx/applications", {
           method: "GET",
           cache: "no-store",
@@ -404,10 +413,35 @@ export default function NewCampaignPage() {
         setAssistants(list);
         if (list[0]) setAssistantId((prev) => prev || list[0].id);
       }
-      const numData = (nList as any)?.data ?? [];
-      setNumbers(numData.map((n: any) => ({ phone_number: n.phone_number ?? n.id })));
-      const firstNum = numData[0];
-      if (firstNum?.phone_number) setFromNumber((prev) => prev || firstNum.phone_number);
+      const ownedData = (nOwned as any)?.data ?? [];
+      const verifiedData = (nVerified as any)?.data ?? [];
+
+      const merged = new Map<
+        string,
+        { phone_number: string; label: string; kind: "owned" | "verified" }
+      >();
+
+      for (const n of ownedData as any[]) {
+        const pn = String(n?.phone_number ?? n?.id ?? "").trim();
+        if (!pn) continue;
+        merged.set(pn, { phone_number: pn, label: pn, kind: "owned" });
+      }
+
+      for (const n of verifiedData as any[]) {
+        const pn = String(n?.phone_number ?? "").trim();
+        if (!pn) continue;
+        if (!merged.has(pn)) {
+          merged.set(pn, { phone_number: pn, label: `${pn} (verified)`, kind: "verified" });
+        }
+      }
+
+      const list = Array.from(merged.values()).sort((a, b) =>
+        a.phone_number.localeCompare(b.phone_number)
+      );
+      setNumbers(list);
+
+      const first = list[0];
+      if (first?.phone_number) setFromNumber((prev) => prev || first.phone_number);
 
       let appOptions: { value: string; label: string }[] = [];
       try {
@@ -524,7 +558,11 @@ export default function NewCampaignPage() {
         setError("Please select a from number");
         return;
       }
-      if (campaignType === "voice" && enableProductPurchaseFlow) {
+      if (
+        SHOW_CAMPAIGN_AUTOMATION_SETTINGS &&
+        campaignType === "voice" &&
+        enableProductPurchaseFlow
+      ) {
         const url = webhookUrl.trim();
         if (!url) {
           setError("Please enter the Webhook URL when AI Product Purchase Flow is enabled.");
@@ -559,8 +597,12 @@ export default function NewCampaignPage() {
           settings: {
             ...(connectionId ? { connection_id: connectionId } : {}),
             ...(greeting.trim() ? { greeting: greeting.trim().slice(0, 3000) } : {}),
-            enableProductPurchaseFlow: !!enableProductPurchaseFlow,
-            webhookUrl: webhookUrl.trim() || undefined,
+            ...(SHOW_CAMPAIGN_AUTOMATION_SETTINGS
+              ? {
+                  enableProductPurchaseFlow: !!enableProductPurchaseFlow,
+                  webhookUrl: webhookUrl.trim() || undefined,
+                }
+              : {}),
           },
         });
         if (!res.ok) {
@@ -1245,40 +1287,47 @@ export default function NewCampaignPage() {
                     First thing the AI says when the contact answers. Leave blank to use the default.
                   </p>
                 </div>
-                <div className="p-4 rounded-lg border border-gray-200 dark:border-gray-700 space-y-4">
-                  <h3 className="font-medium">Automation Settings</h3>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      id="enable-product-purchase-flow"
-                      checked={enableProductPurchaseFlow}
-                      onChange={(e) => setEnableProductPurchaseFlow(e.target.checked)}
-                      className="rounded border-gray-300 dark:border-gray-600 text-brand-600 focus:ring-brand-500"
-                      aria-describedby="automation-desc"
-                    />
-                    <label htmlFor="enable-product-purchase-flow" id="automation-desc" className="text-sm font-medium">
-                      Enable AI Product Purchase Flow
-                    </label>
+                {SHOW_CAMPAIGN_AUTOMATION_SETTINGS && (
+                  <div className="p-4 rounded-lg border border-gray-200 dark:border-gray-700 space-y-4">
+                    <h3 className="font-medium">Automation Settings</h3>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        id="enable-product-purchase-flow"
+                        checked={enableProductPurchaseFlow}
+                        onChange={(e) => setEnableProductPurchaseFlow(e.target.checked)}
+                        className="rounded border-gray-300 dark:border-gray-600 text-brand-600 focus:ring-brand-500"
+                        aria-describedby="automation-desc"
+                      />
+                      <label
+                        htmlFor="enable-product-purchase-flow"
+                        id="automation-desc"
+                        className="text-sm font-medium"
+                      >
+                        Enable AI Product Purchase Flow
+                      </label>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-1" htmlFor="webhook-url">
+                        Webhook URL
+                      </label>
+                      <input
+                        id="webhook-url"
+                        type="url"
+                        value={webhookUrl}
+                        onChange={(e) => setWebhookUrl(e.target.value)}
+                        placeholder="https://your-app.com/api/create-draft-order"
+                        className="w-full px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700"
+                        aria-required={enableProductPurchaseFlow}
+                        aria-invalid={enableProductPurchaseFlow && !webhookUrl.trim()}
+                      />
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        Endpoint that receives the product selection payload. Required when purchase
+                        flow is enabled. Can be left empty otherwise.
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1" htmlFor="webhook-url">
-                      Webhook URL
-                    </label>
-                    <input
-                      id="webhook-url"
-                      type="url"
-                      value={webhookUrl}
-                      onChange={(e) => setWebhookUrl(e.target.value)}
-                      placeholder="https://your-app.com/api/create-draft-order"
-                      className="w-full px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700"
-                      aria-required={enableProductPurchaseFlow}
-                      aria-invalid={enableProductPurchaseFlow && !webhookUrl.trim()}
-                    />
-                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                      Endpoint that receives the product selection payload. Required when purchase flow is enabled. Can be left empty otherwise.
-                    </p>
-                  </div>
-                </div>
+                )}
               </>
             )}
             {(campaignType === "sms" || campaignType === "whatsapp") && (
@@ -1302,7 +1351,7 @@ export default function NewCampaignPage() {
               >
                 {numbers.map((n) => (
                   <option key={n.phone_number} value={n.phone_number}>
-                    {n.phone_number}
+                    {n.label}
                   </option>
                 ))}
               </select>

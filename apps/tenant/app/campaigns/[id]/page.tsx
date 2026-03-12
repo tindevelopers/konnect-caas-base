@@ -26,6 +26,9 @@ const STATUS_COLORS: Record<string, string> = {
   cancelled: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
 };
 
+const SHOW_CAMPAIGN_AUTOMATION_SETTINGS =
+  process.env.NEXT_PUBLIC_SHOW_CAMPAIGN_AUTOMATION_SETTINGS === "true";
+
 export default function CampaignDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -168,26 +171,38 @@ export default function CampaignDetailPage() {
       // Drop legacy key on save (if present) and persist only the generic `webhookUrl`.
       const { railwayWebhookUrl: _legacyRailwayWebhookUrl, ...settingsSansLegacy } =
         currentSettings;
-      const nextSettings = {
+      const baseSettings: Record<string, unknown> = {
         ...settingsSansLegacy,
         connection_id: connectionIdEdit.trim() || null,
         greeting: greetingEdit.trim().slice(0, 3000) || null,
-        enableProductPurchaseFlow: !!enableProductPurchaseFlowEdit,
-        webhookUrl: webhookUrlEdit.trim() || undefined,
       };
-      if (enableProductPurchaseFlowEdit && webhookUrlEdit.trim()) {
-        try {
-          new URL(webhookUrlEdit.trim());
-        } catch {
-          setAutomationSettingsError("Please enter a valid Webhook URL (e.g. https://your-app.com/api/create-draft-order).");
+      const nextSettings: Record<string, unknown> = SHOW_CAMPAIGN_AUTOMATION_SETTINGS
+        ? {
+            ...baseSettings,
+            enableProductPurchaseFlow: !!enableProductPurchaseFlowEdit,
+            webhookUrl: webhookUrlEdit.trim() || undefined,
+          }
+        : baseSettings;
+
+      if (SHOW_CAMPAIGN_AUTOMATION_SETTINGS) {
+        if (enableProductPurchaseFlowEdit && webhookUrlEdit.trim()) {
+          try {
+            new URL(webhookUrlEdit.trim());
+          } catch {
+            setAutomationSettingsError(
+              "Please enter a valid Webhook URL (e.g. https://your-app.com/api/create-draft-order)."
+            );
+            setSavingConnectionId(false);
+            return;
+          }
+        }
+        if (enableProductPurchaseFlowEdit && !webhookUrlEdit.trim()) {
+          setAutomationSettingsError(
+            "Webhook URL is required when AI Product Purchase Flow is enabled."
+          );
           setSavingConnectionId(false);
           return;
         }
-      }
-      if (enableProductPurchaseFlowEdit && !webhookUrlEdit.trim()) {
-        setAutomationSettingsError("Webhook URL is required when AI Product Purchase Flow is enabled.");
-        setSavingConnectionId(false);
-        return;
       }
       const maxConcurrent = Math.min(100, Math.max(1, Number(maxConcurrentCallsEdit) || 1));
       const res = await updateCampaign(id, {
@@ -564,43 +579,52 @@ export default function CampaignDetailPage() {
               </div>
             </div>
 
-            <div className="p-4 rounded-lg border dark:border-gray-700">
-              <h3 className="font-medium mb-2">Automation Settings</h3>
-              <div className="flex flex-wrap items-end gap-4">
-                <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    id="edit-enable-product-purchase-flow"
-                    checked={enableProductPurchaseFlowEdit}
-                    onChange={(e) => setEnableProductPurchaseFlowEdit(e.target.checked)}
-                    className="rounded border-gray-300 dark:border-gray-600 text-brand-600 focus:ring-brand-500"
-                    aria-describedby="edit-automation-desc"
-                  />
-                  <label htmlFor="edit-enable-product-purchase-flow" id="edit-automation-desc" className="text-sm font-medium">
-                    Enable AI Product Purchase Flow
-                  </label>
+            {SHOW_CAMPAIGN_AUTOMATION_SETTINGS && (
+              <div className="p-4 rounded-lg border dark:border-gray-700">
+                <h3 className="font-medium mb-2">Automation Settings</h3>
+                <div className="flex flex-wrap items-end gap-4">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="edit-enable-product-purchase-flow"
+                      checked={enableProductPurchaseFlowEdit}
+                      onChange={(e) => setEnableProductPurchaseFlowEdit(e.target.checked)}
+                      className="rounded border-gray-300 dark:border-gray-600 text-brand-600 focus:ring-brand-500"
+                      aria-describedby="edit-automation-desc"
+                    />
+                    <label
+                      htmlFor="edit-enable-product-purchase-flow"
+                      id="edit-automation-desc"
+                      className="text-sm font-medium"
+                    >
+                      Enable AI Product Purchase Flow
+                    </label>
+                  </div>
+                  <div className="flex-1 min-w-[280px]">
+                    <label
+                      className="block text-xs text-gray-500 dark:text-gray-400 mb-1"
+                      htmlFor="edit-webhook-url"
+                    >
+                      Webhook URL
+                    </label>
+                    <input
+                      id="edit-webhook-url"
+                      type="url"
+                      className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm"
+                      placeholder="https://your-app.com/api/create-draft-order"
+                      value={webhookUrlEdit}
+                      onChange={(e) => setWebhookUrlEdit(e.target.value)}
+                      aria-required={enableProductPurchaseFlowEdit}
+                    />
+                  </div>
                 </div>
-                <div className="flex-1 min-w-[280px]">
-                  <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1" htmlFor="edit-webhook-url">
-                    Webhook URL
-                  </label>
-                  <input
-                    id="edit-webhook-url"
-                    type="url"
-                    className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm"
-                    placeholder="https://your-app.com/api/create-draft-order"
-                    value={webhookUrlEdit}
-                    onChange={(e) => setWebhookUrlEdit(e.target.value)}
-                    aria-required={enableProductPurchaseFlowEdit}
-                  />
-                </div>
+                {automationSettingsError && (
+                  <p className="mt-2 text-sm text-amber-600 dark:text-amber-400" role="alert">
+                    {automationSettingsError}
+                  </p>
+                )}
               </div>
-              {automationSettingsError && (
-                <p className="mt-2 text-sm text-amber-600 dark:text-amber-400" role="alert">
-                  {automationSettingsError}
-                </p>
-              )}
-            </div>
+            )}
             </>
           )}
         </div>
