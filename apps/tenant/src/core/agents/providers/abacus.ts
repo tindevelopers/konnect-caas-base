@@ -219,6 +219,20 @@ function estimateTokenCount(text: string) {
   return Math.max(1, Math.ceil(text.length / 4));
 }
 
+const PSD_NEW_AGENT_ID = "c146b5d4-94c1-4430-9ed6-b907b0a08a69";
+const ABACUS_DEPLOYMENT_ENDPOINT = "https://apps.abacus.ai/api/getChatResponse";
+
+function resolveAbacusMode(): "deployment" | "model" {
+  const mode = (process.env.ABACUS_MODE ?? "").trim().toLowerCase();
+  return mode === "deployment" ? "deployment" : "model";
+}
+
+function isPsdNewAgentCampaignVoiceCall(request: AgentProviderRequest): boolean {
+  if (request.agent.id !== PSD_NEW_AGENT_ID) return false;
+  const metadata = (request.metadata ?? {}) as Record<string, unknown>;
+  return metadata.telnyx_proxy_brain === true;
+}
+
 function getAbacusTimeoutMs(request: AgentProviderRequest): number {
   const routing = request.agent.routing ?? {};
   const fromRouting = Number(
@@ -269,8 +283,160 @@ export class AbacusAgentProvider implements AgentProviderDriver {
       apiKey,
       baseUrl,
       llmName,
+      deploymentId,
+      deploymentToken,
     } = await getAbacusCredentials(request.tenantId);
+    const mode = resolveAbacusMode();
+    const isPsdCampaignCall = isPsdNewAgentCampaignVoiceCall(request);
 
+    if (isPsdCampaignCall) {
+      const forcedDeploymentToken = process.env.ABACUS_DEPLOYMENT_TOKEN?.trim() ?? "";
+      const forcedDeploymentId = process.env.ABACUS_DEPLOYMENT_ID?.trim() ?? "";
+      if (!forcedDeploymentToken || !forcedDeploymentId) {
+        console.error("Abacus deployment configuration missing for PSD new agent", {
+          agentId: request.agent.id,
+        });
+        throw new Error("Abacus deployment configuration missing for PSD new agent");
+      }
+      const params = new URLSearchParams({
+        deploymentToken: forcedDeploymentToken,
+        deploymentId: forcedDeploymentId,
+      });
+      const endpoint = `${ABACUS_DEPLOYMENT_ENDPOINT}?${params.toString()}`;
+      console.log("PSD new agent campaign call → using Abacus deployment endpoint", {
+        agentId: request.agent.id,
+        deploymentId: forcedDeploymentId,
+        endpoint: ABACUS_DEPLOYMENT_ENDPOINT,
+      });
+
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          messages: [
+            {
+              is_user: true,
+              text: request.message,
+            },
+          ],
+        }),
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`Abacus deployment chat failed (${response.status}): ${text}`);
+      }
+
+      const payload = (await response.json()) as RouteLLMChatResponse & AbacusChatResponse;
+      const debugRaw =
+        process.env.ABACUS_DEBUG_RAW_RESPONSE === "true" ||
+        (request.metadata as Record<string, unknown> | undefined)?.abacus_debug_raw === true;
+      if (debugRaw) {
+        console.log(
+          "[AbacusProvider] RAW_RESPONSE",
+          safeJsonLog(payload, Number(process.env.ABACUS_DEBUG_RAW_MAX_CHARS ?? 20000))
+        );
+      } else {
+        const topKeys = payload && typeof payload === "object" ? Object.keys(payload as object) : [];
+        console.log("[AbacusProvider] RESPONSE_KEYS", topKeys.slice(0, 40));
+      }
+
+      let content = extractAbacusContent(payload);
+      const prefix = process.env.ABACUS_RESPONSE_PREFIX?.trim();
+      if (prefix) content = prefix + content;
+      const inputTokens =
+        Number(payload.usage?.prompt_tokens ?? (payload.usage as { input_tokens?: number })?.input_tokens ?? 0) ||
+        estimateTokenCount(request.message);
+      const outputTokens =
+        Number(payload.usage?.completion_tokens ?? (payload.usage as { output_tokens?: number })?.output_tokens ?? 0) ||
+        estimateTokenCount(content);
+      const estimatedCost = inputTokens * 0.000002 + outputTokens * 0.000008;
+      return {
+        content,
+        externalConversationId: payload.conversation_id as string | undefined,
+        usage: {
+          inputTokens,
+          outputTokens,
+          estimatedCost,
+          currency: "USD",
+        },
+        raw: payload as unknown as Record<string, unknown>,
+      };
+    }
+
+    if (mode === "deployment") {
+      if (!deploymentToken?.trim() || !deploymentId?.trim()) {
+        throw new Error(
+          "Abacus deployment mode requires ABACUS_DEPLOYMENT_TOKEN and ABACUS_DEPLOYMENT_ID."
+        );
+      }
+      console.log("Abacus provider using deployment API");
+      const params = new URLSearchParams({
+        deploymentToken: deploymentToken.trim(),
+        deploymentId: deploymentId.trim(),
+      });
+      const url = `${ABACUS_DEPLOYMENT_ENDPOINT}?${params.toString()}`;
+
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          messages: [
+            {
+              is_user: true,
+              text: request.message,
+            },
+          ],
+        }),
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`Abacus deployment chat failed (${response.status}): ${text}`);
+      }
+
+      const payload = (await response.json()) as RouteLLMChatResponse & AbacusChatResponse;
+      const debugRaw =
+        process.env.ABACUS_DEBUG_RAW_RESPONSE === "true" ||
+        (request.metadata as Record<string, unknown> | undefined)?.abacus_debug_raw === true;
+      if (debugRaw) {
+        console.log(
+          "[AbacusProvider] RAW_RESPONSE",
+          safeJsonLog(payload, Number(process.env.ABACUS_DEBUG_RAW_MAX_CHARS ?? 20000))
+        );
+      } else {
+        const topKeys = payload && typeof payload === "object" ? Object.keys(payload as object) : [];
+        console.log("[AbacusProvider] RESPONSE_KEYS", topKeys.slice(0, 40));
+      }
+
+      let content = extractAbacusContent(payload);
+      const prefix = process.env.ABACUS_RESPONSE_PREFIX?.trim();
+      if (prefix) content = prefix + content;
+      const inputTokens =
+        Number(payload.usage?.prompt_tokens ?? (payload.usage as { input_tokens?: number })?.input_tokens ?? 0) ||
+        estimateTokenCount(request.message);
+      const outputTokens =
+        Number(payload.usage?.completion_tokens ?? (payload.usage as { output_tokens?: number })?.output_tokens ?? 0) ||
+        estimateTokenCount(content);
+      const estimatedCost = inputTokens * 0.000002 + outputTokens * 0.000008;
+      return {
+        content,
+        externalConversationId: payload.conversation_id as string | undefined,
+        usage: {
+          inputTokens,
+          outputTokens,
+          estimatedCost,
+          currency: "USD",
+        },
+        raw: payload as unknown as Record<string, unknown>,
+      };
+    }
+
+    console.log("Abacus provider using RouteLLM API");
     if (!apiKey?.trim()) {
       throw new Error(
         "Abacus API key is not configured. Connect Abacus under Integrations first."
