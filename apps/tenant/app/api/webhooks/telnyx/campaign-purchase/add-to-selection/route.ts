@@ -62,6 +62,30 @@ function parseProduct(body: Record<string, unknown>): SelectedProduct | null {
   };
 }
 
+function parseProductDebugContext(body: Record<string, unknown>): Record<string, unknown> {
+  const variantIdRaw = body.variantId ?? body.variant_id ?? body.variantGid ?? body.variant_gid ?? body.shopifyVariantId;
+  const quantity = body.quantity;
+  const variantIdStr =
+    typeof variantIdRaw === "string"
+      ? variantIdRaw.trim()
+      : typeof variantIdRaw === "number"
+        ? String(variantIdRaw)
+        : "";
+  const norm = variantIdStr ? normalizeShopifyVariantId(variantIdStr) : null;
+  const normalized = norm?.normalized?.trim() ?? "";
+  const q = typeof quantity === "number" ? quantity : typeof quantity === "string" ? parseInt(quantity, 10) : 1;
+  return {
+    bodyKeys: Object.keys(body).slice(0, 20),
+    hasVariantIdRaw: Boolean(variantIdRaw),
+    variantIdRawType: typeof variantIdRaw,
+    variantIdRawPreview: typeof variantIdRaw === "string" ? variantIdRaw.slice(0, 80) : variantIdRaw,
+    normalizedVariantId: normalized || null,
+    normalizedLooksLikeGid: normalized ? isShopifyVariantGid(normalized) : false,
+    quantityType: typeof quantity,
+    parsedQuantity: Number.isFinite(q) ? q : null,
+  };
+}
+
 export async function OPTIONS() {
   return new NextResponse(null, {
     status: 204,
@@ -90,7 +114,32 @@ export async function POST(request: NextRequest) {
   }
 
   const callControlId = getCallControlId(request, body);
+  console.info("[CampaignPurchase:add-to-selection] Request received", {
+    hasCallControlId: Boolean(callControlId),
+    bodyKeys: Object.keys(body).slice(0, 20),
+  });
+  // #region agent log
+  fetch("http://127.0.0.1:7737/ingest/b427048e-2887-4159-bcae-6153d02c1fa9", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "a1db95" },
+    body: JSON.stringify({
+      sessionId: "a1db95",
+      runId: "pre-fix",
+      hypothesisId: "H2",
+      location: "add-to-selection/route.ts:entry",
+      message: "add-to-selection received request",
+      data: {
+        hasCallControlId: Boolean(callControlId),
+        bodyKeys: Object.keys(body).slice(0, 15),
+      },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
   if (!callControlId) {
+    console.warn("[CampaignPurchase:add-to-selection] Returning 400 missing_call_control_id", {
+      bodyKeys: Object.keys(body).slice(0, 20),
+    });
     return NextResponse.json(
       { content: "Call context is missing. I can't add products without an active call.", error: "missing_call_control_id" },
       { status: 400, headers: { "Access-Control-Allow-Origin": "*" } }
@@ -99,6 +148,28 @@ export async function POST(request: NextRequest) {
 
   const product = parseProduct(body);
   if (!product) {
+    console.warn("[CampaignPurchase:add-to-selection] Returning 400 invalid_product", parseProductDebugContext(body));
+    // #region agent log
+    fetch("http://127.0.0.1:7737/ingest/b427048e-2887-4159-bcae-6153d02c1fa9", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "a1db95" },
+      body: JSON.stringify({
+        sessionId: "a1db95",
+        runId: "pre-fix",
+        hypothesisId: "H2",
+        location: "add-to-selection/route.ts:invalid-product",
+        message: "Returning 400 invalid_product",
+        data: {
+          error: "invalid_product",
+          hasVariantId: Boolean(
+            body.variantId ?? body.variant_id ?? body.variantGid ?? body.variant_gid ?? body.shopifyVariantId
+          ),
+          quantityType: typeof body.quantity,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
     return NextResponse.json(
       {
         content:
@@ -111,6 +182,7 @@ export async function POST(request: NextRequest) {
 
   const ctx = await getRecipientAndCampaignByCallControlId(callControlId);
   if (!ctx) {
+    console.warn("[CampaignPurchase:add-to-selection] Returning 404 not_campaign_call", { callControlId });
     return NextResponse.json(
       { content: "This call isn't linked to a campaign. I can't track product selection.", error: "not_campaign_call" },
       { status: 404, headers: { "Access-Control-Allow-Origin": "*" } }
@@ -119,6 +191,10 @@ export async function POST(request: NextRequest) {
 
   const automation = getCampaignAutomationSettings(ctx.campaignSettings);
   if (!automation.enableProductPurchaseFlow) {
+    console.warn("[CampaignPurchase:add-to-selection] Returning 403 purchase_flow_disabled", {
+      callControlId,
+      campaignId: ctx.campaignId,
+    });
     return NextResponse.json(
       { content: "This campaign doesn't support product checkout.", error: "purchase_flow_disabled" },
       { status: 403, headers: { "Access-Control-Allow-Origin": "*" } }
@@ -139,6 +215,26 @@ export async function POST(request: NextRequest) {
     });
     const nextState = await addSelectedProduct(ctx.recipientId, ctx.result, product);
     const count = nextState.selectedProducts?.length ?? 0;
+    // #region agent log
+    fetch("http://127.0.0.1:7737/ingest/b427048e-2887-4159-bcae-6153d02c1fa9", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "a1db95" },
+      body: JSON.stringify({
+        sessionId: "a1db95",
+        runId: "pre-fix",
+        hypothesisId: "H4",
+        location: "add-to-selection/route.ts:selection-persisted",
+        message: "Product persisted to purchase.selectedProducts",
+        data: {
+          recipientId: ctx.recipientId,
+          selectedProductsCount: count,
+          variantId: product.variantId,
+          quantity: product.quantity,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
     const message =
       count <= 1
         ? "Got it, I've added that to your selection."

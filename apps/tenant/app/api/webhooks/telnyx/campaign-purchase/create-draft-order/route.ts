@@ -70,7 +70,42 @@ export async function POST(request: NextRequest) {
   }
 
   const callControlId = getCallControlId(request, body);
+  // #region agent log
+  fetch("http://127.0.0.1:7737/ingest/b427048e-2887-4159-bcae-6153d02c1fa9", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "a1db95" },
+    body: JSON.stringify({
+      sessionId: "a1db95",
+      runId: "pre-fix",
+      hypothesisId: "H1",
+      location: "create-draft-order/route.ts:callControlId-resolved",
+      message: "create-draft-order received request",
+      data: {
+        hasCallControlId: Boolean(callControlId),
+        bodyKeys: Object.keys(body).slice(0, 15),
+        hasCustomerConfirmedKey:
+          "customerConfirmed" in body || "customer_confirmed" in body || "confirmed" in body,
+      },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
   if (!callControlId) {
+    // #region agent log
+    fetch("http://127.0.0.1:7737/ingest/b427048e-2887-4159-bcae-6153d02c1fa9", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "a1db95" },
+      body: JSON.stringify({
+        sessionId: "a1db95",
+        runId: "pre-fix",
+        hypothesisId: "H1",
+        location: "create-draft-order/route.ts:missing-call-control-id",
+        message: "Returning 400 missing_call_control_id",
+        data: { error: "missing_call_control_id" },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
     return NextResponse.json(
       { content: "Call context is missing. I can't create the checkout without an active call.", error: "missing_call_control_id" },
       { status: 400, headers: { "Access-Control-Allow-Origin": "*" } }
@@ -99,6 +134,26 @@ export async function POST(request: NextRequest) {
   const forceCreate = parseStrictBoolean(forceRaw);
 
   const state = getPurchaseState(ctx.result);
+  // #region agent log
+  fetch("http://127.0.0.1:7737/ingest/b427048e-2887-4159-bcae-6153d02c1fa9", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "a1db95" },
+    body: JSON.stringify({
+      sessionId: "a1db95",
+      runId: "pre-fix",
+      hypothesisId: "H3",
+      location: "create-draft-order/route.ts:purchase-state-read",
+      message: "Loaded purchase state before validation",
+      data: {
+        customerConfirmed,
+        forceCreate,
+        selectedProductsCount: state.selectedProducts?.length ?? 0,
+        hasInvoiceUrl: Boolean(state.invoiceUrl),
+      },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
   if (state.invoiceUrl && !forceCreate) {
     return NextResponse.json(
       {
@@ -122,6 +177,30 @@ export async function POST(request: NextRequest) {
   }
 
   if (!state.selectedProducts?.length) {
+    console.warn("[CampaignPurchase:create-draft-order] Returning 400 no_products", {
+      callControlId,
+      recipientId: ctx.recipientId,
+      campaignId: ctx.campaignId,
+      customerConfirmed,
+      selectedProductsCount: state.selectedProducts?.length ?? 0,
+      hasInvoiceUrl: Boolean(state.invoiceUrl),
+      bodyKeys: Object.keys(body).slice(0, 20),
+    });
+    // #region agent log
+    fetch("http://127.0.0.1:7737/ingest/b427048e-2887-4159-bcae-6153d02c1fa9", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "a1db95" },
+      body: JSON.stringify({
+        sessionId: "a1db95",
+        runId: "pre-fix",
+        hypothesisId: "H3",
+        location: "create-draft-order/route.ts:no-products",
+        message: "Returning 400 no_products due to empty selectedProducts",
+        data: { error: "no_products", selectedProductsCount: 0, customerConfirmed },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
     return NextResponse.json(
       {
         content:
