@@ -115,6 +115,7 @@ function normalizeProduct(raw: ProductSearchProduct) {
 }
 
 export async function POST(request: NextRequest) {
+  const runId = `search-products-${Date.now()}`;
   const headersSnapshot = getHeadersSnapshot(request);
   const rawText = await request.text().catch(() => "");
   let rawBody: unknown = null;
@@ -127,17 +128,32 @@ export async function POST(request: NextRequest) {
   }
   console.info("[CampaignPurchase:search-products] requestHeaders", headersSnapshot);
   console.info("[CampaignPurchase:search-products] rawBody", rawBody);
+  console.info("[CampaignPurchase:search-products] requestMeta", {
+    urlPath: request.nextUrl.pathname,
+    urlQuery: request.nextUrl.search,
+    contentLength: request.headers.get("content-length"),
+    contentType: request.headers.get("content-type"),
+  });
+  // #region agent log
+  fetch("http://127.0.0.1:7737/ingest/b427048e-2887-4159-bcae-6153d02c1fa9",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"ffbe86"},body:JSON.stringify({sessionId:"ffbe86",runId,hypothesisId:"H1",location:"search-products/route.ts:post-entry",message:"incoming webhook payload shape",data:{contentLength:request.headers.get("content-length") ?? null,contentType:request.headers.get("content-type") ?? null,hasRawText:rawText.length > 0,rawTextLength:rawText.length,rawBodyType:rawBody === null ? "null" : Array.isArray(rawBody) ? "array" : typeof rawBody,urlPath:request.nextUrl.pathname,urlQuery:request.nextUrl.search},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
 
   const body = asRecord(rawBody)?.arguments || asRecord(rawBody)?.args || rawBody || {};
   const bodyRecord = asRecord(body);
   const query = extractQuery(bodyRecord);
   console.info("[CampaignPurchase:search-products] parsedQuery", query);
+  // #region agent log
+  fetch("http://127.0.0.1:7737/ingest/b427048e-2887-4159-bcae-6153d02c1fa9",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"ffbe86"},body:JSON.stringify({sessionId:"ffbe86",runId,hypothesisId:"H2",location:"search-products/route.ts:query-parse",message:"query extraction result",data:{queryPresent:typeof query === "string" && query.length > 0,queryLength:typeof query === "string" ? query.length : 0,bodyKeys:Object.keys(bodyRecord).slice(0,20)},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
 
   if (!query) {
     console.warn("[CampaignPurchase:search-products] 400: missing query", {
       bodyKeys: Object.keys(bodyRecord).slice(0, 20),
       rawTextPreview: rawText.slice(0, 200),
     });
+    // #region agent log
+    fetch("http://127.0.0.1:7737/ingest/b427048e-2887-4159-bcae-6153d02c1fa9",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"ffbe86"},body:JSON.stringify({sessionId:"ffbe86",runId,hypothesisId:"H3",location:"search-products/route.ts:missing-query-branch",message:"missing query branch taken",data:{rawTextPreview:rawText.slice(0,120),acceptHeader:request.headers.get("accept") ?? null,userAgent:request.headers.get("user-agent") ?? null},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     return NextResponse.json(
       {
         content:
@@ -149,6 +165,9 @@ export async function POST(request: NextRequest) {
   }
 
   console.info("[CampaignPurchase:search-products] Searching", { query });
+  // #region agent log
+  fetch("http://127.0.0.1:7737/ingest/b427048e-2887-4159-bcae-6153d02c1fa9",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"ffbe86"},body:JSON.stringify({sessionId:"ffbe86",runId,hypothesisId:"H4",location:"search-products/route.ts:before-upstream",message:"about to call product search upstream",data:{queryLength:query.length,queryPreview:query.slice(0,40)},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
 
   try {
     const controller = new AbortController();
@@ -192,6 +211,9 @@ export async function POST(request: NextRequest) {
       returned: products.length,
       hasVariantIds: products.filter((p) => !!p.variantId).length,
     });
+    // #region agent log
+    fetch("http://127.0.0.1:7737/ingest/b427048e-2887-4159-bcae-6153d02c1fa9",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"ffbe86"},body:JSON.stringify({sessionId:"ffbe86",runId,hypothesisId:"H5",location:"search-products/route.ts:upstream-results",message:"upstream search results normalized",data:{rawProducts:rawProducts.length,returnedProducts:products.length,variantIdCount:products.filter((p)=>!!p.variantId).length},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
 
     if (products.length === 0) {
       const clarification =
