@@ -149,9 +149,9 @@ export async function OPTIONS() {
  * Body parameters: productTitle, productUrl?, variantId, quantity, variantTitle?, sku?, price?
  */
 export async function POST(request: NextRequest) {
-  const rawBody = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+  const rawBody = await request.json().catch(() => null);
   console.info("[CampaignPurchase:RAW_REQUEST_BODY]", rawBody);
-  const body = asRecord(rawBody?.arguments ?? rawBody?.args ?? rawBody ?? {});
+  const body = asRecord(rawBody?.arguments || rawBody?.args || rawBody || {});
   console.info("[CampaignPurchase:NORMALIZED_BODY]", body);
   console.info("[CampaignPurchase:ADD_SELECTION_PAYLOAD]", body);
   const normalizedBody = getToolArgsBody(body);
@@ -198,7 +198,12 @@ export async function POST(request: NextRequest) {
 
   const product = parseProduct(normalizedBody);
   if (!product) {
-    console.warn("[CampaignPurchase:add-to-selection] Returning 400 invalid_product", parseProductDebugContext(normalizedBody));
+    console.warn("[CampaignPurchase:add-to-selection] Returning 400 invalid_product", {
+      bodyKeys: Object.keys(body),
+      hasVariantIdRaw: Boolean(body.variantId),
+      variantIdRawType: typeof body.variantId,
+    });
+    console.warn("[CampaignPurchase:add-to-selection] invalid_product details", parseProductDebugContext(normalizedBody));
     // #region agent log
     fetch("http://127.0.0.1:7737/ingest/b427048e-2887-4159-bcae-6153d02c1fa9", {
       method: "POST",
