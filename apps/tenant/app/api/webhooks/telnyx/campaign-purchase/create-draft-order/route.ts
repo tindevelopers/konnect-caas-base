@@ -31,6 +31,26 @@ function parseStrictBoolean(value: unknown): boolean {
   return false;
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return value as Record<string, unknown>;
+}
+
+function getToolArgsBody(body: Record<string, unknown>): Record<string, unknown> {
+  const data = asRecord(body.data);
+  const payload = asRecord(data.payload);
+  const nestedCandidates = [
+    asRecord(body.arguments),
+    asRecord(body.args),
+    asRecord(data.arguments),
+    asRecord(data.args),
+    asRecord(payload.arguments),
+    asRecord(payload.args),
+  ];
+  const nested = nestedCandidates.find((c) => Object.keys(c).length > 0) ?? {};
+  return { ...nested, ...body };
+}
+
 function getCallControlId(request: NextRequest, body: Record<string, unknown>): string | null {
   const header = request.headers.get("x-telnyx-call-control-id")?.trim();
   if (header) return header;
@@ -68,8 +88,9 @@ export async function POST(request: NextRequest) {
       { status: 400, headers: { "Access-Control-Allow-Origin": "*" } }
     );
   }
+  const normalizedBody = getToolArgsBody(body);
 
-  const callControlId = getCallControlId(request, body);
+  const callControlId = getCallControlId(request, normalizedBody);
   // #region agent log
   fetch("http://127.0.0.1:7737/ingest/b427048e-2887-4159-bcae-6153d02c1fa9", {
     method: "POST",
@@ -82,9 +103,11 @@ export async function POST(request: NextRequest) {
       message: "create-draft-order received request",
       data: {
         hasCallControlId: Boolean(callControlId),
-        bodyKeys: Object.keys(body).slice(0, 15),
+        bodyKeys: Object.keys(normalizedBody).slice(0, 15),
         hasCustomerConfirmedKey:
-          "customerConfirmed" in body || "customer_confirmed" in body || "confirmed" in body,
+          "customerConfirmed" in normalizedBody ||
+          "customer_confirmed" in normalizedBody ||
+          "confirmed" in normalizedBody,
       },
       timestamp: Date.now(),
     }),
@@ -128,9 +151,10 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const confirmedRaw = body.customerConfirmed ?? body.customer_confirmed ?? body.confirmed;
+  const confirmedRaw =
+    normalizedBody.customerConfirmed ?? normalizedBody.customer_confirmed ?? normalizedBody.confirmed;
   const customerConfirmed = parseStrictBoolean(confirmedRaw);
-  const forceRaw = body.force ?? body.forceCreate ?? body.force_create;
+  const forceRaw = normalizedBody.force ?? normalizedBody.forceCreate ?? normalizedBody.force_create;
   const forceCreate = parseStrictBoolean(forceRaw);
 
   const state = getPurchaseState(ctx.result);
@@ -184,7 +208,7 @@ export async function POST(request: NextRequest) {
       customerConfirmed,
       selectedProductsCount: state.selectedProducts?.length ?? 0,
       hasInvoiceUrl: Boolean(state.invoiceUrl),
-      bodyKeys: Object.keys(body).slice(0, 20),
+      bodyKeys: Object.keys(normalizedBody).slice(0, 20),
     });
     // #region agent log
     fetch("http://127.0.0.1:7737/ingest/b427048e-2887-4159-bcae-6153d02c1fa9", {
@@ -212,12 +236,12 @@ export async function POST(request: NextRequest) {
   }
 
   const bodyEmail =
-    typeof body.customerEmail === "string"
-      ? body.customerEmail
-      : typeof body.customer_email === "string"
-        ? body.customer_email
-        : typeof body.email === "string"
-          ? body.email
+    typeof normalizedBody.customerEmail === "string"
+      ? normalizedBody.customerEmail
+      : typeof normalizedBody.customer_email === "string"
+        ? normalizedBody.customer_email
+        : typeof normalizedBody.email === "string"
+          ? normalizedBody.email
           : undefined;
   const customerEmail =
     (bodyEmail && bodyEmail.trim() ? bodyEmail.trim() : undefined) ||

@@ -33,6 +33,27 @@ function getCallControlId(request: NextRequest, body: Record<string, unknown>): 
   return typeof fromBody === "string" && fromBody.trim() ? fromBody.trim() : null;
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return value as Record<string, unknown>;
+}
+
+function getToolArgsBody(body: Record<string, unknown>): Record<string, unknown> {
+  const data = asRecord(body.data);
+  const payload = asRecord(data.payload);
+  const nestedCandidates = [
+    asRecord(body.arguments),
+    asRecord(body.args),
+    asRecord(data.arguments),
+    asRecord(data.args),
+    asRecord(payload.arguments),
+    asRecord(payload.args),
+  ];
+  const nested = nestedCandidates.find((c) => Object.keys(c).length > 0) ?? {};
+  // Keep top-level keys authoritative when both exist.
+  return { ...nested, ...body };
+}
+
 function parseProduct(body: Record<string, unknown>): SelectedProduct | null {
   const variantIdRaw = body.variantId ?? body.variant_id ?? body.variantGid ?? body.variant_gid ?? body.shopifyVariantId;
   const quantity = body.quantity;
@@ -112,11 +133,17 @@ export async function POST(request: NextRequest) {
       { status: 400, headers: { "Access-Control-Allow-Origin": "*" } }
     );
   }
+  const normalizedBody = getToolArgsBody(body);
 
-  const callControlId = getCallControlId(request, body);
+  const callControlId = getCallControlId(request, normalizedBody);
   console.info("[CampaignPurchase:add-to-selection] Request received", {
     hasCallControlId: Boolean(callControlId),
-    bodyKeys: Object.keys(body).slice(0, 20),
+    bodyKeys: Object.keys(normalizedBody).slice(0, 20),
+    hasNestedArguments:
+      Object.keys(asRecord(body.arguments)).length > 0 ||
+      Object.keys(asRecord(body.args)).length > 0 ||
+      Object.keys(asRecord(asRecord(body.data).arguments)).length > 0 ||
+      Object.keys(asRecord(asRecord(asRecord(body.data).payload).arguments)).length > 0,
   });
   // #region agent log
   fetch("http://127.0.0.1:7737/ingest/b427048e-2887-4159-bcae-6153d02c1fa9", {
@@ -138,7 +165,7 @@ export async function POST(request: NextRequest) {
   // #endregion
   if (!callControlId) {
     console.warn("[CampaignPurchase:add-to-selection] Returning 400 missing_call_control_id", {
-      bodyKeys: Object.keys(body).slice(0, 20),
+      bodyKeys: Object.keys(normalizedBody).slice(0, 20),
     });
     return NextResponse.json(
       { content: "Call context is missing. I can't add products without an active call.", error: "missing_call_control_id" },
@@ -146,9 +173,9 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const product = parseProduct(body);
+  const product = parseProduct(normalizedBody);
   if (!product) {
-    console.warn("[CampaignPurchase:add-to-selection] Returning 400 invalid_product", parseProductDebugContext(body));
+    console.warn("[CampaignPurchase:add-to-selection] Returning 400 invalid_product", parseProductDebugContext(normalizedBody));
     // #region agent log
     fetch("http://127.0.0.1:7737/ingest/b427048e-2887-4159-bcae-6153d02c1fa9", {
       method: "POST",
@@ -162,9 +189,13 @@ export async function POST(request: NextRequest) {
         data: {
           error: "invalid_product",
           hasVariantId: Boolean(
-            body.variantId ?? body.variant_id ?? body.variantGid ?? body.variant_gid ?? body.shopifyVariantId
+            normalizedBody.variantId ??
+              normalizedBody.variant_id ??
+              normalizedBody.variantGid ??
+              normalizedBody.variant_gid ??
+              normalizedBody.shopifyVariantId
           ),
-          quantityType: typeof body.quantity,
+          quantityType: typeof normalizedBody.quantity,
         },
         timestamp: Date.now(),
       }),
