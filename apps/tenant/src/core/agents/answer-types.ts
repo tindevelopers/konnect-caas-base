@@ -10,6 +10,14 @@ export interface ProductRecommendation {
   kind: ProductRecommendationKind;
   title: string;
   productRef: string;
+  /** Shopify ProductVariant GID (gid://shopify/ProductVariant/<id>) when available. */
+  variantId?: string;
+  /** Optional variant title (e.g. size/color). */
+  variantTitle?: string;
+  /** Optional numeric price (currency assumed by tenant context). */
+  price?: number;
+  /** Optional availability (boolean or string like in_stock/out_of_stock). */
+  availability?: boolean | string;
   why: string;
   rep_script: string;
   confidence: number;

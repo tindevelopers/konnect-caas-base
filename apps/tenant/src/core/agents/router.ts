@@ -501,6 +501,7 @@ export async function routeAgentChat(
     message: providerResult.content,
     conversationId,
     externalConversationId: providerConversationId,
+    providerRaw: providerResult.raw,
     handoffSuggested: providerResult.handoffSuggested,
     handoffReason: providerResult.handoffReason,
     handoffTargetAgentId: providerResult.handoffTargetAgentId,

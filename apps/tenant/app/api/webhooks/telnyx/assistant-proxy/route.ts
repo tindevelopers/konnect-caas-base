@@ -665,6 +665,9 @@ async function handleProxyPost(request: NextRequest) {
         : "";
     const content = response.chat_markdown ?? response.voice_text ?? "";
     let finalText = banner ? `${banner}\n\n${content}` : content;
+    const productRecommendations = Array.isArray(response.product_recommendations)
+      ? response.product_recommendations
+      : [];
     const uniqueUrls = extractUniqueUrls(content);
     if (uniqueUrls.length > 0) {
       const conversationIdForLinks = response.conversationId || internalConversationId;
@@ -737,8 +740,10 @@ async function handleProxyPost(request: NextRequest) {
       {
         content: finalText,
         result: finalText,
+        product_recommendations: productRecommendations,
         data: {
           content: finalText,
+          product_recommendations: productRecommendations,
         },
         // Echo through Telnyx conversation id if present (harmless).
         conversation_id: providerConversationId ?? undefined,

@@ -207,6 +207,8 @@ export interface AgentChatResponse {
   message: string;
   conversationId: string;
   externalConversationId?: string;
+  /** Raw provider payload (e.g. Abacus / RouteLLM response). */
+  providerRaw?: unknown;
   handoffSuggested?: boolean;
   handoffReason?: string;
   handoffTargetAgentId?: string;

@@ -205,6 +205,16 @@ function extractAbacusContent(response: AbacusChatResponse | RouteLLMChatRespons
   return "I was unable to generate a response from Abacus.";
 }
 
+function safeJsonLog(value: unknown, maxChars = 20000): string {
+  try {
+    const text = JSON.stringify(value, null, 2);
+    if (text.length <= maxChars) return text;
+    return text.slice(0, maxChars) + `\n... (truncated, total ${text.length} chars)`;
+  } catch (err) {
+    return `[unserializable: ${err instanceof Error ? err.message : String(err)}]`;
+  }
+}
+
 function estimateTokenCount(text: string) {
   return Math.max(1, Math.ceil(text.length / 4));
 }
@@ -297,6 +307,19 @@ export class AbacusAgentProvider implements AgentProviderDriver {
     }
 
     const payload = (await response.json()) as RouteLLMChatResponse & AbacusChatResponse;
+    const debugRaw =
+      process.env.ABACUS_DEBUG_RAW_RESPONSE === "true" ||
+      (request.metadata as Record<string, unknown> | undefined)?.abacus_debug_raw === true;
+    if (debugRaw) {
+      console.log(
+        "[AbacusProvider] RAW_RESPONSE",
+        safeJsonLog(payload, Number(process.env.ABACUS_DEBUG_RAW_MAX_CHARS ?? 20000))
+      );
+    } else {
+      // Lightweight always-on signal so we can tell whether Abacus includes catalog/product fields.
+      const topKeys = payload && typeof payload === "object" ? Object.keys(payload as object) : [];
+      console.log("[AbacusProvider] RESPONSE_KEYS", topKeys.slice(0, 40));
+    }
     let content = extractAbacusContent(payload);
     const prefix = process.env.ABACUS_RESPONSE_PREFIX?.trim();
     if (prefix) content = prefix + content;

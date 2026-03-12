@@ -17,6 +17,7 @@ import type {
   AnswerCitation,
   ProductRecommendation,
 } from "./answer-types";
+import { normalizeShopifyVariantId, isShopifyVariantGid } from "@/src/core/campaigns/shopify-variant-id";
 
 const TIERED_ESCALATION_CONFIDENCE_THRESHOLD = 0.7;
 const TIERED_LEVEL2_BANNER = "Connecting to Strategic Assistant…";
@@ -232,7 +233,7 @@ function buildAnswerResponse(
   const recommendations = extractProductRecommendations(
     request.message,
     chatResponse.message,
-    chatResponse.usage?.metadata
+    chatResponse.providerRaw
   );
 
   return {
@@ -363,7 +364,172 @@ function extractProductRecommendations(
   _content: string,
   _raw: unknown
 ): ProductRecommendation[] {
-  return [];
+  const raw = _raw;
+  if (!raw || typeof raw !== "object") return [];
+
+  const maxDepth = 4;
+  const maxNodes = 2500;
+  const visited = new Set<unknown>();
+  const variantKeysDetected = new Set<string>();
+
+  const isRecord = (v: unknown): v is Record<string, unknown> =>
+    !!v && typeof v === "object" && !Array.isArray(v);
+
+  const asString = (v: unknown): string | null => {
+    if (typeof v === "string") return v.trim() || null;
+    if (typeof v === "number" && Number.isFinite(v)) return String(v);
+    return null;
+  };
+
+  const asNumberLoose = (v: unknown): number | undefined => {
+    if (typeof v === "number" && Number.isFinite(v)) return v;
+    if (typeof v === "string") {
+      const n = Number(v.trim());
+      return Number.isFinite(n) ? n : undefined;
+    }
+    return undefined;
+  };
+
+  const extractVariantId = (obj: Record<string, unknown>): string | null => {
+    const keys = [
+      "variantId",
+      "variant_id",
+      "variant_gid",
+      "variantGid",
+      "shopifyVariantId",
+      "productVariantId",
+    ] as const;
+    const rawCandidate =
+      obj.variantId ??
+      obj.variant_id ??
+      obj.variant_gid ??
+      obj.variantGid ??
+      obj.shopifyVariantId ??
+      obj.productVariantId;
+    for (const k of keys) {
+      if (k in obj) variantKeysDetected.add(k);
+    }
+    const candidate = asString(rawCandidate);
+    if (!candidate) return null;
+    const norm = normalizeShopifyVariantId(candidate);
+    const normalized = (norm.normalized || "").trim();
+    if (!normalized) return null;
+    if (!isShopifyVariantGid(normalized)) return null;
+    return normalized;
+  };
+
+  const extractTitle = (obj: Record<string, unknown>): string | null => {
+    return (
+      asString(obj.title) ??
+      asString(obj.product_title) ??
+      asString(obj.productTitle) ??
+      asString(obj.name) ??
+      asString(obj.product_name)
+    );
+  };
+
+  const extractVariantTitle = (obj: Record<string, unknown>): string | undefined => {
+    return (
+      asString(obj.variant_title) ??
+      asString(obj.variantTitle) ??
+      asString(obj.option_title) ??
+      asString(obj.optionTitle) ??
+      undefined
+    ) ?? undefined;
+  };
+
+  const extractAvailability = (obj: Record<string, unknown>): boolean | string | undefined => {
+    const direct = obj.availability ?? obj.in_stock ?? obj.inStock ?? obj.stock ?? obj.status;
+    if (typeof direct === "boolean") return direct;
+    const s = asString(direct);
+    return s ?? undefined;
+  };
+
+  const extractPrice = (obj: Record<string, unknown>): number | undefined => {
+    const priceCandidate =
+      obj.price ?? obj.unit_price ?? obj.unitPrice ?? obj.amount ?? obj.cost;
+    return asNumberLoose(priceCandidate);
+  };
+
+  const candidateArrays: Array<Record<string, unknown>[]> = [];
+
+  const tryPushArray = (value: unknown) => {
+    if (!Array.isArray(value)) return;
+    const objs = value.filter(isRecord) as Record<string, unknown>[];
+    if (objs.length > 0) candidateArrays.push(objs);
+  };
+
+  // Common explicit paths first
+  const top = raw as Record<string, unknown>;
+  tryPushArray((top as any).products);
+  tryPushArray((top as any).product_recommendations);
+  tryPushArray((top as any).productRecommendations);
+  if (isRecord(top.data)) {
+    tryPushArray((top.data as any).products);
+    tryPushArray((top.data as any).product_recommendations);
+    tryPushArray((top.data as any).productRecommendations);
+  }
+
+  // Heuristic scan: walk the object graph and collect arrays of objects
+  const queue: Array<{ node: unknown; depth: number }> = [{ node: raw, depth: 0 }];
+  let seenNodes = 0;
+  while (queue.length > 0 && seenNodes < maxNodes && candidateArrays.length < 25) {
+    const { node, depth } = queue.shift()!;
+    if (!node || typeof node !== "object") continue;
+    if (visited.has(node)) continue;
+    visited.add(node);
+    seenNodes++;
+    if (depth > maxDepth) continue;
+
+    if (Array.isArray(node)) {
+      // arrays of objects are potential product lists
+      const objs = node.filter(isRecord) as Record<string, unknown>[];
+      if (objs.length > 0) candidateArrays.push(objs);
+      // also scan members for nested arrays/objects
+      for (const item of node) queue.push({ node: item, depth: depth + 1 });
+      continue;
+    }
+
+    const rec = node as Record<string, unknown>;
+    for (const v of Object.values(rec)) queue.push({ node: v, depth: depth + 1 });
+  }
+
+  // Pick the first array that actually contains variantId-like fields.
+  const productItems =
+    candidateArrays.find((arr) => arr.some((o) => !!extractVariantId(o))) ?? [];
+  if (productItems.length === 0) {
+    console.info("[ProductExtraction]", {
+      candidate_arrays_detected: candidateArrays.length,
+      variantId_fields_detected: [...variantKeysDetected],
+      products_extracted_count: 0,
+    });
+    return [];
+  }
+
+  const out: ProductRecommendation[] = [];
+  for (const item of productItems.slice(0, 10)) {
+    const variantId = extractVariantId(item);
+    if (!variantId) continue;
+    const title = extractTitle(item) ?? "Recommended product";
+    out.push({
+      kind: "in_stock",
+      title,
+      productRef: variantId,
+      variantId,
+      variantTitle: extractVariantTitle(item),
+      price: extractPrice(item),
+      availability: extractAvailability(item),
+      why: "",
+      rep_script: "",
+      confidence: 0.8,
+    });
+  }
+  console.info("[ProductExtraction]", {
+    candidate_arrays_detected: candidateArrays.length,
+    variantId_fields_detected: [...variantKeysDetected],
+    products_extracted_count: out.length,
+  });
+  return out;
 }
 
 async function getDirectTelnyxL1Response(args: {
