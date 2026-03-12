@@ -7,7 +7,7 @@
     "node": "20.x"
   },
   "scripts": {
-    "dev": "NODE_OPTIONS='--max-http-header-size=32768' next dev --port 3020 --hostname 0.0.0.0 --webpack",
+    "dev": "cross-env NODE_OPTIONS=--max-http-header-size=32768 next dev --port 3020 --hostname 0.0.0.0 --webpack",
     "dev:3000": "next dev --port 3000 --hostname 0.0.0.0 --webpack",
     "build": "next build --webpack",
     "start": "next start --port 3020",
@@ -74,6 +74,7 @@
     "@types/prismjs": "^1.26.5",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
+    "cross-env": "^7.0.3",
     "concurrently": "^9.2.1",
     "dotenv": "^17.2.3",
     "eslint": "^9",

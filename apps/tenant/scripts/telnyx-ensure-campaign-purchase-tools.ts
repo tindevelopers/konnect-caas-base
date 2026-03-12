@@ -159,14 +159,37 @@ async function main() {
 
   const existingTools: any[] = Array.isArray(assistant?.tools) ? assistant.tools : [];
 
+  const searchProductsUrl = `${baseOrigin}/api/webhooks/telnyx/campaign-purchase/search-products`;
   const addToSelectionUrl = `${baseOrigin}/api/webhooks/telnyx/campaign-purchase/add-to-selection`;
   const createDraftOrderUrl = `${baseOrigin}/api/webhooks/telnyx/campaign-purchase/create-draft-order`;
+  const searchProductsDescription =
+    "Search the product catalog. ALWAYS call this FIRST when the customer asks about products, pricing, or what's available. The response includes products with exact variantId values. You MUST use these variantId values when calling add_to_selection. Send JSON like {\"query\":\"dog shampoo\"}.";
   const addToSelectionDescription =
-    "Use when customer selects a product. Send JSON like {\"variantId\":\"gid://shopify/ProductVariant/1234567890\",\"quantity\":1}. Required: variantId as Shopify ProductVariant GID and quantity >= 1. Include call_control_id only if you have the real value from context; never send placeholder strings. Prefer x-telnyx-call-control-id header when available. Do not send productId, numeric variant IDs, or shopifyVariantId.";
+    "Use when customer selects a product. You MUST first call search_products to get the variantId, then pass it here. Send JSON like {\"variantId\":\"gid://shopify/ProductVariant/1234567890\",\"quantity\":1}. Required: variantId as Shopify ProductVariant GID (from search_products response) and quantity >= 1. NEVER call this without a real variantId from search_products. Include call_control_id only if you have the real value from context; never send placeholder strings.";
   const createDraftOrderDescription =
     "Use only after explicit customer confirmation to send checkout link. Send JSON like {\"customerConfirmed\":true,\"customerEmail\":\"buyer@example.com\"}. Required: customerConfirmed=true. Include call_control_id only if you have the real value from context; never send placeholder strings. Optional: customerEmail.";
 
   const desired = [
+    {
+      type: "webhook",
+      webhook: {
+        name: "search_products",
+        description: searchProductsDescription,
+        url: searchProductsUrl,
+        method: "POST",
+        parameters: {
+          type: "object",
+          required: ["query"],
+          properties: {
+            query: {
+              type: "string",
+              description:
+                "Product search query, e.g. 'dog shampoo' or 'Andis clipper'",
+            },
+          },
+        },
+      },
+    },
     {
       type: "webhook",
       webhook: {
@@ -181,7 +204,7 @@ async function main() {
             variantId: {
               type: "string",
               description:
-                "Shopify Product Variant GID in format gid://shopify/ProductVariant/<id>",
+                "Shopify Product Variant GID from search_products response, in format gid://shopify/ProductVariant/<id>",
             },
             quantity: {
               type: "integer",
@@ -222,6 +245,8 @@ async function main() {
     },
   ];
 
+  const managedToolNames = ["search_products", "add_to_selection", "create_draft_order"];
+
   // Telnyx may return built-in tools (e.g. hangup) without name/description; those often
   // fail schema validation when included in an update payload. Keep only well-formed tools.
   const otherTools = existingTools.filter((t) => {
@@ -230,34 +255,43 @@ async function main() {
     const description = toolDescription(t);
     if (!name.trim() || !description.trim()) return false;
     if (type === "hangup") return false;
-    if (name === "add_to_selection") return false;
-    if (name === "create_draft_order") return false;
+    if (managedToolNames.includes(name)) return false;
     return true;
   });
   const nextTools = [...otherTools, ...desired];
 
+  const existingSearch = existingTools.find((t) => String(t?.type || "") === "webhook" && toolName(t) === "search_products");
   const existingAdd = existingTools.find((t) => String(t?.type || "") === "webhook" && toolName(t) === "add_to_selection");
   const existingCreate = existingTools.find((t) => String(t?.type || "") === "webhook" && toolName(t) === "create_draft_order");
 
+  const needsSearch =
+    !existingSearch ||
+    toolUrl(existingSearch) !== searchProductsUrl ||
+    toolMethod(existingSearch).toUpperCase() !== "POST" ||
+    toolDescription(existingSearch) !== searchProductsDescription ||
+    !jsonEqual(toolParameters(existingSearch), desired[0]?.webhook?.parameters);
   const needsAdd =
     !existingAdd ||
     toolUrl(existingAdd) !== addToSelectionUrl ||
     toolMethod(existingAdd).toUpperCase() !== "POST" ||
     toolDescription(existingAdd) !== addToSelectionDescription ||
-    !jsonEqual(toolParameters(existingAdd), desired[0]?.webhook?.parameters);
+    !jsonEqual(toolParameters(existingAdd), desired[1]?.webhook?.parameters);
   const needsCreate =
     !existingCreate ||
     toolUrl(existingCreate) !== createDraftOrderUrl ||
     toolMethod(existingCreate).toUpperCase() !== "POST" ||
     toolDescription(existingCreate) !== createDraftOrderDescription ||
-    !jsonEqual(toolParameters(existingCreate), desired[1]?.webhook?.parameters);
-  const changed = needsAdd || needsCreate;
+    !jsonEqual(toolParameters(existingCreate), desired[2]?.webhook?.parameters);
+  const changed = needsSearch || needsAdd || needsCreate;
 
   console.log("Assistant:", assistantId);
   console.log("BASE_URL host:", safeHost(baseOrigin) || "(unknown)");
   console.log("Before tools:", existingTools.length);
   console.log("After tools:", nextTools.length);
   console.log("Will update:", changed ? "yes" : "no");
+  if (needsSearch) {
+    console.log("- search_products:", existingSearch ? `updating host=${safeHost(toolUrl(existingSearch)) || "(none)"}` : "missing");
+  }
   if (needsAdd) {
     console.log("- add_to_selection:", existingAdd ? `updating host=${safeHost(toolUrl(existingAdd)) || "(none)"}` : "missing");
   }

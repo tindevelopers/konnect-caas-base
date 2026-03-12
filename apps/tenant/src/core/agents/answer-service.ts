@@ -367,6 +367,22 @@ function extractProductRecommendations(
   const raw = _raw;
   if (!raw || typeof raw !== "object") return [];
 
+  function normalizeVariantId(id: string) {
+    if (!id) return null;
+    const trimmed = id.trim();
+    if (!trimmed) return null;
+
+    if (trimmed.startsWith("gid://")) {
+      return trimmed;
+    }
+
+    if (/^\d+$/.test(trimmed)) {
+      return `gid://shopify/ProductVariant/${trimmed}`;
+    }
+
+    return null;
+  }
+
   const maxDepth = 4;
   const maxNodes = 2500;
   const visited = new Set<unknown>();
@@ -411,8 +427,9 @@ function extractProductRecommendations(
     }
     const candidate = asString(rawCandidate);
     if (!candidate) return null;
-    const norm = normalizeShopifyVariantId(candidate);
-    const normalized = (norm.normalized || "").trim();
+    const directNormalized = normalizeVariantId(candidate);
+    const norm = normalizeShopifyVariantId(directNormalized ?? candidate);
+    const normalized = (directNormalized ?? (norm.normalized || "")).trim();
     if (!normalized) return null;
     if (!isShopifyVariantGid(normalized)) return null;
     return normalized;
