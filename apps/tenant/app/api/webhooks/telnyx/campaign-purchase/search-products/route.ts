@@ -35,6 +35,19 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+function getHeadersSnapshot(request: NextRequest): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of request.headers.entries()) {
+    const lower = key.toLowerCase();
+    if (lower === "authorization" || lower === "cookie" || lower === "set-cookie") {
+      out[key] = "[redacted]";
+      continue;
+    }
+    out[key] = value;
+  }
+  return out;
+}
+
 function extractQuery(body: Record<string, unknown>): string | null {
   const candidates = [
     body.query,
@@ -102,21 +115,33 @@ function normalizeProduct(raw: ProductSearchProduct) {
 }
 
 export async function POST(request: NextRequest) {
-  const rawBody = await request.json().catch(() => null);
-  console.info("[CampaignPurchase:search-products] RAW_REQUEST_BODY", rawBody);
+  const headersSnapshot = getHeadersSnapshot(request);
+  const rawText = await request.text().catch(() => "");
+  let rawBody: unknown = null;
+  if (rawText) {
+    try {
+      rawBody = JSON.parse(rawText) as unknown;
+    } catch {
+      rawBody = null;
+    }
+  }
+  console.info("[CampaignPurchase:search-products] requestHeaders", headersSnapshot);
+  console.info("[CampaignPurchase:search-products] rawBody", rawBody);
 
-  const body = rawBody?.arguments || rawBody?.args || rawBody || {};
+  const body = asRecord(rawBody)?.arguments || asRecord(rawBody)?.args || rawBody || {};
   const bodyRecord = asRecord(body);
   const query = extractQuery(bodyRecord);
+  console.info("[CampaignPurchase:search-products] parsedQuery", query);
 
   if (!query) {
     console.warn("[CampaignPurchase:search-products] 400: missing query", {
       bodyKeys: Object.keys(bodyRecord).slice(0, 20),
+      rawTextPreview: rawText.slice(0, 200),
     });
     return NextResponse.json(
       {
-        content: "I need a product search query. What product are you looking for?",
-        error: "missing_query",
+        content: "Please provide a product search query.",
+        products: [],
       },
       { status: 400, headers: { "Access-Control-Allow-Origin": "*" } }
     );

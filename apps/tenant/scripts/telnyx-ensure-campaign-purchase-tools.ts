@@ -163,7 +163,7 @@ async function main() {
   const addToSelectionUrl = `${baseOrigin}/api/webhooks/telnyx/campaign-purchase/add-to-selection`;
   const createDraftOrderUrl = `${baseOrigin}/api/webhooks/telnyx/campaign-purchase/create-draft-order`;
   const searchProductsDescription =
-    "Search the product catalog. ALWAYS call this FIRST when the customer asks about products, pricing, or what's available. The response includes products with exact variantId values. You MUST use these variantId values when calling add_to_selection. Send JSON like {\"query\":\"dog shampoo\"}.";
+    "Search the product catalog. ALWAYS call this FIRST when the customer asks about products, pricing, or availability. NEVER call search_products without a query. Extract the product phrase from the customer's latest request and pass it as query. Example: customer says 'I need a cordless dog clipper' -> call with {\"query\":\"cordless dog clipper\"}. The response includes products with exact variantId values. You MUST use those variantId values when calling add_to_selection.";
   const addToSelectionDescription =
     "Use when customer selects a product. You MUST first call search_products to get the variantId, then pass it here. Send JSON like {\"variantId\":\"gid://shopify/ProductVariant/1234567890\",\"quantity\":1}. Required: variantId as Shopify ProductVariant GID (from search_products response) and quantity >= 1. NEVER call this without a real variantId from search_products. Include call_control_id only if you have the real value from context; never send placeholder strings.";
   const createDraftOrderDescription =
