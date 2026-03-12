@@ -25,11 +25,36 @@ export async function GET() {
 function getCallControlId(request: NextRequest, body: Record<string, unknown>): string | null {
   const header = request.headers.get("x-telnyx-call-control-id")?.trim();
   if (header) return header;
+  const data = asRecord(body.data);
+  const payload = asRecord(data.payload);
+  const bodyArgs = asRecord(body.arguments);
+  const dataArgs = asRecord(data.arguments);
+  const payloadArgs = asRecord(payload.arguments);
   const fromBody =
     (body.call_control_id as string) ??
     (body.callControlId as string) ??
+    (data.call_control_id as string) ??
+    (data.callControlId as string) ??
+    (payload.call_control_id as string) ??
+    (payload.callControlId as string) ??
+    (bodyArgs.call_control_id as string) ??
+    (bodyArgs.callControlId as string) ??
+    (dataArgs.call_control_id as string) ??
+    (dataArgs.callControlId as string) ??
+    (payloadArgs.call_control_id as string) ??
+    (payloadArgs.callControlId as string) ??
     (body.conversation_id as string) ??
-    (body.conversationId as string);
+    (body.conversationId as string) ??
+    (data.conversation_id as string) ??
+    (data.conversationId as string) ??
+    (payload.conversation_id as string) ??
+    (payload.conversationId as string) ??
+    (bodyArgs.conversation_id as string) ??
+    (bodyArgs.conversationId as string) ??
+    (dataArgs.conversation_id as string) ??
+    (dataArgs.conversationId as string) ??
+    (payloadArgs.conversation_id as string) ??
+    (payloadArgs.conversationId as string);
   return typeof fromBody === "string" && fromBody.trim() ? fromBody.trim() : null;
 }
 
@@ -133,6 +158,7 @@ export async function POST(request: NextRequest) {
       { status: 400, headers: { "Access-Control-Allow-Origin": "*" } }
     );
   }
+  console.info("[CampaignPurchase:ADD_SELECTION_PAYLOAD]", body);
   const normalizedBody = getToolArgsBody(body);
 
   const callControlId = getCallControlId(request, normalizedBody);
@@ -144,6 +170,8 @@ export async function POST(request: NextRequest) {
       Object.keys(asRecord(body.args)).length > 0 ||
       Object.keys(asRecord(asRecord(body.data).arguments)).length > 0 ||
       Object.keys(asRecord(asRecord(asRecord(body.data).payload).arguments)).length > 0,
+    hasCallControlIdHeader: Boolean(request.headers.get("x-telnyx-call-control-id")),
+    rawBodyKeys: Object.keys(body).slice(0, 20),
   });
   // #region agent log
   fetch("http://127.0.0.1:7737/ingest/b427048e-2887-4159-bcae-6153d02c1fa9", {

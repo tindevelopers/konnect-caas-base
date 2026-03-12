@@ -133,13 +133,17 @@ async function main() {
 
   const addToSelectionUrl = `${baseOrigin}/api/webhooks/telnyx/campaign-purchase/add-to-selection`;
   const createDraftOrderUrl = `${baseOrigin}/api/webhooks/telnyx/campaign-purchase/create-draft-order`;
+  const addToSelectionDescription =
+    "Use when customer selects a product. Send JSON: {\"call_control_id\":\"<call_control_id>\",\"variantId\":\"gid://shopify/ProductVariant/<id>\",\"quantity\":1}. Required: variantId as Shopify ProductVariant GID and quantity >= 1. Include call context via x-telnyx-call-control-id header or call_control_id in body. Do not send productId, numeric variant IDs, or shopifyVariantId.";
+  const createDraftOrderDescription =
+    "Use only after explicit customer confirmation to send checkout link. Send JSON: {\"call_control_id\":\"<call_control_id>\",\"customerConfirmed\":true,\"customerEmail\":\"<email optional>\"}. Required: call_control_id and customerConfirmed=true. Optional: customerEmail.";
 
   const desired = [
     {
       type: "webhook",
       webhook: {
         name: "add_to_selection",
-        description: "Add a product variant to the customer's selection during discovery.",
+        description: addToSelectionDescription,
         url: addToSelectionUrl,
         method: "POST",
       },
@@ -148,7 +152,7 @@ async function main() {
       type: "webhook",
       webhook: {
         name: "create_draft_order",
-        description: "Create checkout link after explicit customer confirmation (customerConfirmed=true).",
+        description: createDraftOrderDescription,
         url: createDraftOrderUrl,
         method: "POST",
       },
@@ -173,9 +177,15 @@ async function main() {
   const existingCreate = existingTools.find((t) => String(t?.type || "") === "webhook" && toolName(t) === "create_draft_order");
 
   const needsAdd =
-    !existingAdd || toolUrl(existingAdd) !== addToSelectionUrl || toolMethod(existingAdd).toUpperCase() !== "POST";
+    !existingAdd ||
+    toolUrl(existingAdd) !== addToSelectionUrl ||
+    toolMethod(existingAdd).toUpperCase() !== "POST" ||
+    toolDescription(existingAdd) !== addToSelectionDescription;
   const needsCreate =
-    !existingCreate || toolUrl(existingCreate) !== createDraftOrderUrl || toolMethod(existingCreate).toUpperCase() !== "POST";
+    !existingCreate ||
+    toolUrl(existingCreate) !== createDraftOrderUrl ||
+    toolMethod(existingCreate).toUpperCase() !== "POST" ||
+    toolDescription(existingCreate) !== createDraftOrderDescription;
   const changed = needsAdd || needsCreate;
 
   console.log("Assistant:", assistantId);

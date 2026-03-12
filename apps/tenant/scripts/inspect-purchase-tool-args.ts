@@ -86,6 +86,14 @@ async function main() {
           role: msg?.role ?? null,
           toolName: name,
           args,
+          envelope: {
+            msgConversationId: msg?.conversation_id ?? msg?.conversationId ?? null,
+            msgCallControlId: msg?.call_control_id ?? msg?.callControlId ?? null,
+            toolConversationId:
+              tc?.conversation_id ?? tc?.conversationId ?? fn?.conversation_id ?? fn?.conversationId ?? null,
+            toolCallControlId:
+              tc?.call_control_id ?? tc?.callControlId ?? fn?.call_control_id ?? fn?.callControlId ?? null,
+          },
         })
       );
     }
