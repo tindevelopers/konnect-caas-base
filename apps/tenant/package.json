@@ -69,7 +69,7 @@
     "@builder.io/dev-tools": "^1.25.0",
     "@eslint/eslintrc": "^3",
     "@svgr/webpack": "^8.1.0",
-    "@types/node": "^20",
+    "@types/node": "^25",
     "@types/papaparse": "^5.5.2",
     "@types/prismjs": "^1.26.5",
     "@types/react": "^19.2.7",
