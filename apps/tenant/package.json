@@ -47,7 +47,7 @@
     "flatpickr": "^4.6.13",
     "libphonenumber-js": "^1.12.36",
     "next": "^16.1.6",
-    "openai": "^4.0.0",
+    "openai": "^6.22.0",
     "papaparse": "^5.5.3",
     "prismjs": "^1.30.0",
     "react": "^19.2.3",
