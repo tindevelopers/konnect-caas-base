@@ -106,7 +106,7 @@ export async function OPTIONS() {
 export async function POST(request: NextRequest) {
   const rawBody = (await request.json().catch(() => null)) as Record<string, unknown> | null;
   console.info("[CampaignPurchase:RAW_REQUEST_BODY]", rawBody);
-  const body = rawBody?.arguments || rawBody?.args || rawBody || {};
+  const body = asRecord(rawBody?.arguments ?? rawBody?.args ?? rawBody ?? {});
   console.info("[CampaignPurchase:NORMALIZED_BODY]", body);
   console.info("[CampaignPurchase:CREATE_DRAFT_PAYLOAD]", body);
   const normalizedBody = getToolArgsBody(body);
