@@ -134,9 +134,9 @@ async function main() {
   const addToSelectionUrl = `${baseOrigin}/api/webhooks/telnyx/campaign-purchase/add-to-selection`;
   const createDraftOrderUrl = `${baseOrigin}/api/webhooks/telnyx/campaign-purchase/create-draft-order`;
   const addToSelectionDescription =
-    "Use when customer selects a product. Send JSON: {\"call_control_id\":\"<call_control_id>\",\"variantId\":\"gid://shopify/ProductVariant/<id>\",\"quantity\":1}. Required: variantId as Shopify ProductVariant GID and quantity >= 1. Include call context via x-telnyx-call-control-id header or call_control_id in body. Do not send productId, numeric variant IDs, or shopifyVariantId.";
+    "Use when customer selects a product. Send JSON like {\"variantId\":\"gid://shopify/ProductVariant/1234567890\",\"quantity\":1}. Required: variantId as Shopify ProductVariant GID and quantity >= 1. Include call_control_id only if you have the real value from context; never send placeholder strings. Prefer x-telnyx-call-control-id header when available. Do not send productId, numeric variant IDs, or shopifyVariantId.";
   const createDraftOrderDescription =
-    "Use only after explicit customer confirmation to send checkout link. Send JSON: {\"call_control_id\":\"<call_control_id>\",\"customerConfirmed\":true,\"customerEmail\":\"<email optional>\"}. Required: call_control_id and customerConfirmed=true. Optional: customerEmail.";
+    "Use only after explicit customer confirmation to send checkout link. Send JSON like {\"customerConfirmed\":true,\"customerEmail\":\"buyer@example.com\"}. Required: customerConfirmed=true. Include call_control_id only if you have the real value from context; never send placeholder strings. Optional: customerEmail.";
 
   const desired = [
     {

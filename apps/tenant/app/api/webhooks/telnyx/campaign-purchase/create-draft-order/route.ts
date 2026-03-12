@@ -104,15 +104,10 @@ export async function OPTIONS() {
  * Triggers the campaign webhook with selected products and stores the returned invoiceUrl.
  */
 export async function POST(request: NextRequest) {
-  let body: Record<string, unknown> = {};
-  try {
-    body = (await request.json()) as Record<string, unknown>;
-  } catch {
-    return NextResponse.json(
-      { content: "Invalid request body.", error: "invalid_json" },
-      { status: 400, headers: { "Access-Control-Allow-Origin": "*" } }
-    );
-  }
+  const rawBody = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+  console.info("[CampaignPurchase:RAW_REQUEST_BODY]", rawBody);
+  const body = rawBody?.arguments || rawBody?.args || rawBody || {};
+  console.info("[CampaignPurchase:NORMALIZED_BODY]", body);
   console.info("[CampaignPurchase:CREATE_DRAFT_PAYLOAD]", body);
   const normalizedBody = getToolArgsBody(body);
 
