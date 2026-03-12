@@ -118,6 +118,34 @@ function toolMethod(t: any): string {
   return (direct || webhook || "").trim();
 }
 
+function toolParameters(t: any): any {
+  if (t && typeof t === "object") {
+    if ("parameters" in t) return (t as any).parameters;
+    if (t.webhook && typeof t.webhook === "object" && "parameters" in t.webhook) {
+      return (t.webhook as any).parameters;
+    }
+  }
+  return undefined;
+}
+
+function normalizeJson(value: any): any {
+  if (Array.isArray(value)) return value.map(normalizeJson);
+  if (value && typeof value === "object") {
+    const sorted = Object.keys(value)
+      .sort()
+      .reduce<Record<string, any>>((acc, key) => {
+        acc[key] = normalizeJson(value[key]);
+        return acc;
+      }, {});
+    return sorted;
+  }
+  return value;
+}
+
+function jsonEqual(a: any, b: any): boolean {
+  return JSON.stringify(normalizeJson(a)) === JSON.stringify(normalizeJson(b));
+}
+
 async function main() {
   const getRes = await telnyxJson(`https://api.telnyx.com/v2/ai/assistants/${encodeURIComponent(assistantId)}`);
   if (!getRes.ok) {
@@ -146,6 +174,26 @@ async function main() {
         description: addToSelectionDescription,
         url: addToSelectionUrl,
         method: "POST",
+        parameters: {
+          type: "object",
+          required: ["variantId", "quantity"],
+          properties: {
+            variantId: {
+              type: "string",
+              description:
+                "Shopify Product Variant GID in format gid://shopify/ProductVariant/<id>",
+            },
+            quantity: {
+              type: "integer",
+              minimum: 1,
+              description: "Quantity of product to add",
+            },
+            call_control_id: {
+              type: "string",
+              description: "Telnyx call control ID",
+            },
+          },
+        },
       },
     },
     {
@@ -155,6 +203,21 @@ async function main() {
         description: createDraftOrderDescription,
         url: createDraftOrderUrl,
         method: "POST",
+        parameters: {
+          type: "object",
+          required: ["customerConfirmed"],
+          properties: {
+            customerConfirmed: {
+              type: "boolean",
+            },
+            customerEmail: {
+              type: "string",
+            },
+            call_control_id: {
+              type: "string",
+            },
+          },
+        },
       },
     },
   ];
@@ -180,12 +243,14 @@ async function main() {
     !existingAdd ||
     toolUrl(existingAdd) !== addToSelectionUrl ||
     toolMethod(existingAdd).toUpperCase() !== "POST" ||
-    toolDescription(existingAdd) !== addToSelectionDescription;
+    toolDescription(existingAdd) !== addToSelectionDescription ||
+    !jsonEqual(toolParameters(existingAdd), desired[0]?.webhook?.parameters);
   const needsCreate =
     !existingCreate ||
     toolUrl(existingCreate) !== createDraftOrderUrl ||
     toolMethod(existingCreate).toUpperCase() !== "POST" ||
-    toolDescription(existingCreate) !== createDraftOrderDescription;
+    toolDescription(existingCreate) !== createDraftOrderDescription ||
+    !jsonEqual(toolParameters(existingCreate), desired[1]?.webhook?.parameters);
   const changed = needsAdd || needsCreate;
 
   console.log("Assistant:", assistantId);
