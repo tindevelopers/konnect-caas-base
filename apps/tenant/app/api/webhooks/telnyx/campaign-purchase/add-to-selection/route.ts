@@ -151,22 +151,23 @@ export async function OPTIONS() {
 export async function POST(request: NextRequest) {
   const rawBody = await request.json().catch(() => null);
   console.info("[CampaignPurchase:RAW_REQUEST_BODY]", rawBody);
-  const body = asRecord(rawBody?.arguments || rawBody?.args || rawBody || {});
+  const body = rawBody?.arguments || rawBody?.args || rawBody || {};
   console.info("[CampaignPurchase:NORMALIZED_BODY]", body);
   console.info("[CampaignPurchase:ADD_SELECTION_PAYLOAD]", body);
-  const normalizedBody = getToolArgsBody(body);
+  const bodyRecord = asRecord(body);
+  const normalizedBody = getToolArgsBody(bodyRecord);
 
   const callControlId = getCallControlId(request, normalizedBody);
   console.info("[CampaignPurchase:add-to-selection] Request received", {
     hasCallControlId: Boolean(callControlId),
     bodyKeys: Object.keys(normalizedBody).slice(0, 20),
     hasNestedArguments:
-      Object.keys(asRecord(body.arguments)).length > 0 ||
-      Object.keys(asRecord(body.args)).length > 0 ||
-      Object.keys(asRecord(asRecord(body.data).arguments)).length > 0 ||
-      Object.keys(asRecord(asRecord(asRecord(body.data).payload).arguments)).length > 0,
+      Object.keys(asRecord(bodyRecord.arguments)).length > 0 ||
+      Object.keys(asRecord(bodyRecord.args)).length > 0 ||
+      Object.keys(asRecord(asRecord(bodyRecord.data).arguments)).length > 0 ||
+      Object.keys(asRecord(asRecord(asRecord(bodyRecord.data).payload).arguments)).length > 0,
     hasCallControlIdHeader: Boolean(request.headers.get("x-telnyx-call-control-id")),
-    rawBodyKeys: Object.keys(body).slice(0, 20),
+    rawBodyKeys: Object.keys(bodyRecord).slice(0, 20),
   });
   // #region agent log
   fetch("http://127.0.0.1:7737/ingest/b427048e-2887-4159-bcae-6153d02c1fa9", {
@@ -180,7 +181,7 @@ export async function POST(request: NextRequest) {
       message: "add-to-selection received request",
       data: {
         hasCallControlId: Boolean(callControlId),
-        bodyKeys: Object.keys(body).slice(0, 15),
+        bodyKeys: Object.keys(bodyRecord).slice(0, 15),
       },
       timestamp: Date.now(),
     }),
@@ -199,9 +200,9 @@ export async function POST(request: NextRequest) {
   const product = parseProduct(normalizedBody);
   if (!product) {
     console.warn("[CampaignPurchase:add-to-selection] Returning 400 invalid_product", {
-      bodyKeys: Object.keys(body),
-      hasVariantIdRaw: Boolean(body.variantId),
-      variantIdRawType: typeof body.variantId,
+      bodyKeys: Object.keys(bodyRecord),
+      hasVariantIdRaw: Boolean(bodyRecord.variantId),
+      variantIdRawType: typeof bodyRecord.variantId,
     });
     console.warn("[CampaignPurchase:add-to-selection] invalid_product details", parseProductDebugContext(normalizedBody));
     // #region agent log
