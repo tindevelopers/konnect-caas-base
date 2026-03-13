@@ -43,9 +43,6 @@ import { useDropzone } from "react-dropzone";
 
 const STEPS = ["Basics", "Audience", "Content", "Schedule"];
 
-const SHOW_CAMPAIGN_AUTOMATION_SETTINGS =
-  process.env.NEXT_PUBLIC_SHOW_CAMPAIGN_AUTOMATION_SETTINGS === "true";
-
 const CAMPAIGN_TYPES: { value: CampaignType; label: string }[] = [
   { value: "voice", label: "Voice (AI Assistant)" },
   { value: "sms", label: "SMS" },
@@ -560,11 +557,7 @@ export default function NewCampaignPage() {
         setError("Please select a from number");
         return;
       }
-      if (
-        SHOW_CAMPAIGN_AUTOMATION_SETTINGS &&
-        campaignType === "voice" &&
-        enableProductPurchaseFlow
-      ) {
+      if (campaignType === "voice" && enableProductPurchaseFlow) {
         const url = webhookUrl.trim();
         if (!url) {
           setError("Please enter the Webhook URL when AI Product Purchase Flow is enabled.");
@@ -600,12 +593,8 @@ export default function NewCampaignPage() {
             call_interval_minutes: Math.max(1, Math.floor(Number(callIntervalMinutes) || 10)),
             ...(connectionId ? { connection_id: connectionId } : {}),
             ...(greeting.trim() ? { greeting: greeting.trim().slice(0, 3000) } : {}),
-            ...(SHOW_CAMPAIGN_AUTOMATION_SETTINGS
-              ? {
-                  enableProductPurchaseFlow: !!enableProductPurchaseFlow,
-                  webhookUrl: webhookUrl.trim() || undefined,
-                }
-              : {}),
+            enableProductPurchaseFlow: !!enableProductPurchaseFlow,
+            webhookUrl: webhookUrl.trim() || undefined,
           },
         });
         if (!res.ok) {
@@ -1290,47 +1279,45 @@ export default function NewCampaignPage() {
                     First thing the AI says when the contact answers. Leave blank to use the default.
                   </p>
                 </div>
-                {SHOW_CAMPAIGN_AUTOMATION_SETTINGS && (
-                  <div className="p-4 rounded-lg border border-gray-200 dark:border-gray-700 space-y-4">
-                    <h3 className="font-medium">Automation Settings</h3>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        id="enable-product-purchase-flow"
-                        checked={enableProductPurchaseFlow}
-                        onChange={(e) => setEnableProductPurchaseFlow(e.target.checked)}
-                        className="rounded border-gray-300 dark:border-gray-600 text-brand-600 focus:ring-brand-500"
-                        aria-describedby="automation-desc"
-                      />
-                      <label
-                        htmlFor="enable-product-purchase-flow"
-                        id="automation-desc"
-                        className="text-sm font-medium"
-                      >
-                        Enable AI Product Purchase Flow
-                      </label>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium mb-1" htmlFor="webhook-url">
-                        Webhook URL
-                      </label>
-                      <input
-                        id="webhook-url"
-                        type="url"
-                        value={webhookUrl}
-                        onChange={(e) => setWebhookUrl(e.target.value)}
-                        placeholder="https://your-app.com/api/create-draft-order"
-                        className="w-full px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700"
-                        aria-required={enableProductPurchaseFlow}
-                        aria-invalid={enableProductPurchaseFlow && !webhookUrl.trim()}
-                      />
-                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                        Endpoint that receives the product selection payload. Required when purchase
-                        flow is enabled. Can be left empty otherwise.
-                      </p>
-                    </div>
+                <div className="p-4 rounded-lg border border-gray-200 dark:border-gray-700 space-y-4">
+                  <h3 className="font-medium">Automation Settings</h3>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="enable-product-purchase-flow"
+                      checked={enableProductPurchaseFlow}
+                      onChange={(e) => setEnableProductPurchaseFlow(e.target.checked)}
+                      className="rounded border-gray-300 dark:border-gray-600 text-brand-600 focus:ring-brand-500"
+                      aria-describedby="automation-desc"
+                    />
+                    <label
+                      htmlFor="enable-product-purchase-flow"
+                      id="automation-desc"
+                      className="text-sm font-medium"
+                    >
+                      Enable AI Product Purchase Flow
+                    </label>
                   </div>
-                )}
+                  <div>
+                    <label className="block text-sm font-medium mb-1" htmlFor="webhook-url">
+                      Webhook URL
+                    </label>
+                    <input
+                      id="webhook-url"
+                      type="url"
+                      value={webhookUrl}
+                      onChange={(e) => setWebhookUrl(e.target.value)}
+                      placeholder="https://your-app.com/api/create-draft-order"
+                      className="w-full px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700"
+                      aria-required={enableProductPurchaseFlow}
+                      aria-invalid={enableProductPurchaseFlow && !webhookUrl.trim()}
+                    />
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      Endpoint that receives the product selection payload. Required when purchase
+                      flow is enabled. Can be left empty otherwise.
+                    </p>
+                  </div>
+                </div>
               </>
             )}
             {(campaignType === "sms" || campaignType === "whatsapp") && (
