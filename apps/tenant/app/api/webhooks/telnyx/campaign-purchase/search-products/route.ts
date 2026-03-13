@@ -4,8 +4,13 @@ import { createAdminClient } from "@/core/database/admin-client";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const PRODUCT_SEARCH_URL =
-  process.env.PRODUCT_SEARCH_URL || "https://productsearch.mypetjet.com/api/chat";
+/**
+ * Abacus Predictions API for product search.
+ * Requires env: ABACUS_DEPLOYMENT_TOKEN, ABACUS_DEPLOYMENT_ID.
+ * For add_to_selection to work, the Abacus deployment should return a top-level or nested
+ * `products` array with objects containing at least variantId (or variant_id).
+ */
+const ABACUS_GET_CHAT_RESPONSE_URL = "https://apps.abacus.ai/api/getChatResponse";
 const PRODUCT_SEARCH_TIMEOUT_MS = 12000;
 
 export async function GET() {
@@ -239,6 +244,28 @@ function normalizeProduct(raw: ProductSearchProduct) {
   };
 }
 
+/** Abacus getChatResponse can return content in several shapes. */
+function extractAbacusContent(payload: Record<string, unknown>): string {
+  const choices = payload.choices as Array<{ message?: { content?: string | null } }> | undefined;
+  if (Array.isArray(choices) && choices[0]?.message?.content != null) {
+    const c = choices[0].message.content;
+    if (typeof c === "string" && c.trim()) return c.trim();
+  }
+  const c = payload.content ?? payload.response ?? payload.message;
+  if (typeof c === "string" && c.trim()) return c.trim();
+  return "";
+}
+
+/** Extract products array from Abacus response (top-level or nested). */
+function extractAbacusProducts(payload: Record<string, unknown>): unknown[] {
+  if (Array.isArray(payload.products)) return payload.products;
+  const data = asRecord(payload.data);
+  if (Array.isArray(data.products)) return data.products;
+  const result = asRecord(payload.result);
+  if (Array.isArray(result.products)) return result.products;
+  return [];
+}
+
 export async function POST(request: NextRequest) {
   const runId = `search-products-${Date.now()}`;
   const headersSnapshot = getHeadersSnapshot(request);
@@ -317,46 +344,68 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const deploymentToken = process.env.ABACUS_DEPLOYMENT_TOKEN?.trim();
+  const deploymentId = process.env.ABACUS_DEPLOYMENT_ID?.trim();
+  if (!deploymentToken || !deploymentId) {
+    console.warn("[CampaignPurchase:search-products] Abacus not configured", {
+      hasToken: Boolean(deploymentToken),
+      hasDeploymentId: Boolean(deploymentId),
+    });
+    return NextResponse.json(
+      {
+        content: "I'm having trouble searching the catalog right now.",
+        products: [],
+      },
+      { status: 200, headers: { "Access-Control-Allow-Origin": "*" } }
+    );
+  }
+
+  const abacusUrl = `${ABACUS_GET_CHAT_RESPONSE_URL}?${new URLSearchParams({
+    deploymentToken,
+    deploymentId,
+  }).toString()}`;
+
   console.info("[CampaignPurchase:search-products] Searching", { query });
   // #region agent log
-  fetch("http://127.0.0.1:7737/ingest/b427048e-2887-4159-bcae-6153d02c1fa9",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"ffbe86"},body:JSON.stringify({sessionId:"ffbe86",runId,hypothesisId:"H4",location:"search-products/route.ts:before-upstream",message:"about to call product search upstream",data:{queryLength:query.length,queryPreview:query.slice(0,40)},timestamp:Date.now()})}).catch(()=>{});
+  fetch("http://127.0.0.1:7737/ingest/b427048e-2887-4159-bcae-6153d02c1fa9",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"ffbe86"},body:JSON.stringify({sessionId:"ffbe86",runId,hypothesisId:"H4",location:"search-products/route.ts:before-upstream",message:"about to call Abacus getChatResponse",data:{queryLength:query.length,queryPreview:query.slice(0,40)},timestamp:Date.now()})}).catch(()=>{});
   // #endregion
 
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), PRODUCT_SEARCH_TIMEOUT_MS);
 
-    const searchRes = await fetch(PRODUCT_SEARCH_URL, {
+    const searchRes = await fetch(abacusUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        message: query,
-        conversationHistory: [],
+        messages: [{ is_user: true, text: query }],
       }),
       signal: controller.signal,
     }).finally(() => clearTimeout(timeout));
 
     if (!searchRes.ok) {
       const errText = await searchRes.text().catch(() => "");
-      console.error("[CampaignPurchase:search-products] Upstream error", {
+      console.error("[CampaignPurchase:search-products] Abacus API error", {
         status: searchRes.status,
         body: errText.slice(0, 300),
       });
       return NextResponse.json(
         {
-          content: "Product search is temporarily unavailable. Please try again.",
-          error: "upstream_error",
+          content: "I'm having trouble searching the catalog right now.",
+          products: [],
         },
-        { status: 502, headers: { "Access-Control-Allow-Origin": "*" } }
+        { status: 200, headers: { "Access-Control-Allow-Origin": "*" } }
       );
     }
 
     const searchData = (await searchRes.json()) as Record<string, unknown>;
-    const rawProducts = Array.isArray(searchData.products) ? searchData.products : [];
+    const rawProducts = extractAbacusProducts(searchData);
     const products = rawProducts
       .filter((p): p is ProductSearchProduct => !!p && typeof p === "object")
       .map(normalizeProduct)
       .slice(0, 10);
+
+    const abacusContent = extractAbacusContent(searchData);
 
     console.info("[CampaignPurchase:search-products] Results", {
       query,
@@ -365,16 +414,13 @@ export async function POST(request: NextRequest) {
       hasVariantIds: products.filter((p) => !!p.variantId).length,
     });
     // #region agent log
-    fetch("http://127.0.0.1:7737/ingest/b427048e-2887-4159-bcae-6153d02c1fa9",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"ffbe86"},body:JSON.stringify({sessionId:"ffbe86",runId,hypothesisId:"H5",location:"search-products/route.ts:upstream-results",message:"upstream search results normalized",data:{rawProducts:rawProducts.length,returnedProducts:products.length,variantIdCount:products.filter((p)=>!!p.variantId).length},timestamp:Date.now()})}).catch(()=>{});
+    fetch("http://127.0.0.1:7737/ingest/b427048e-2887-4159-bcae-6153d02c1fa9",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"ffbe86"},body:JSON.stringify({sessionId:"ffbe86",runId,hypothesisId:"H5",location:"search-products/route.ts:upstream-results",message:"Abacus results normalized",data:{rawProducts:rawProducts.length,returnedProducts:products.length,variantIdCount:products.filter((p)=>!!p.variantId).length},timestamp:Date.now()})}).catch(()=>{});
     // #endregion
 
     if (products.length === 0) {
       const clarification =
-        typeof searchData.message === "string" && searchData.message.trim()
-          ? searchData.message.trim()
-          : typeof searchData.response === "string" && searchData.response.trim()
-            ? searchData.response.trim()
-            : "No products matched your search. Could you be more specific about what you're looking for?";
+        abacusContent ||
+        "No products matched your search. Could you be more specific about what you're looking for?";
 
       return NextResponse.json(
         {
@@ -394,7 +440,9 @@ export async function POST(request: NextRequest) {
       })
       .join("\n");
 
-    const content = `Here are the products I found:\n${productList}\n\nWhen the customer selects a product, call add_to_selection with the exact variantId and quantity.`;
+    const content =
+      abacusContent ||
+      `Here are the products I found:\n${productList}\n\nWhen the customer selects a product, call add_to_selection with the exact variantId and quantity.`;
 
     return NextResponse.json(
       {
@@ -409,12 +457,10 @@ export async function POST(request: NextRequest) {
     console.error("[CampaignPurchase:search-products]", isTimeout ? "Timeout" : msg);
     return NextResponse.json(
       {
-        content: isTimeout
-          ? "Product search took too long. Please try a simpler query."
-          : "I couldn't search products right now. Please try again.",
-        error: isTimeout ? "timeout" : msg,
+        content: "I'm having trouble searching the catalog right now.",
+        products: [],
       },
-      { status: isTimeout ? 504 : 500, headers: { "Access-Control-Allow-Origin": "*" } }
+      { status: 200, headers: { "Access-Control-Allow-Origin": "*" } }
     );
   }
 }
