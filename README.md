@@ -9,6 +9,8 @@ A complete, enterprise-grade SaaS platform template built with Next.js 15, Supab
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue)](https://www.typescriptlang.org/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind-4.0-38bdf8)](https://tailwindcss.com/)
 
+Staging branch pushes trigger Vercel preview deployments.
+
 ---
 
 ## 🍴 Fork This Template
