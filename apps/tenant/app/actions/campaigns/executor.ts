@@ -202,12 +202,19 @@ export async function processCampaignVoiceBatch(
     const throttleLimit = Math.max(1, Math.floor(callsPerMinute * 2));
     const limit = Math.max(1, Math.min(batchSize, throttleLimit));
 
+    // When "Process now" is used (bypassCallingWindow), use a 2-min grace so recipients just
+    // scheduled (scheduled_at can be a few seconds in the future) are still picked up.
+    const dueThreshold =
+      bypassCallingWindow
+        ? new Date(Date.now() + 2 * 60 * 1000).toISOString()
+        : now;
+
     const { data: recipients } = await (admin.from("campaign_recipients") as any)
       .select("id, phone, first_name, last_name, attempts")
       .eq("campaign_id", campaign.id)
       .eq("tenant_id", campaign.tenant_id)
       .eq("status", "scheduled")
-      .lte("scheduled_at", now)
+      .lte("scheduled_at", dueThreshold)
       .limit(limit);
 
     if (!recipients?.length) continue;

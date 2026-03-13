@@ -284,7 +284,7 @@ export default function CampaignDetailPage() {
         } else {
           setMessage({
             type: "warning",
-            text: "No recipients were processed. Check that recipients are scheduled and due, and that the campaign has connection, assistant, and from number configured.",
+            text: "No recipients were processed. Ensure: (1) Call Control App ID is set in the Telnyx Call Control section below, (2) a From number is set for voice, (3) an AI Assistant is selected, (4) Telnyx API key is configured for the tenant or in env. If all are set, recipients may not be due yet—try Process now again after a few seconds.",
           });
         }
       } else {
