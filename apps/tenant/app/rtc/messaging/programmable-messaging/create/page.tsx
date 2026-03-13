@@ -325,7 +325,7 @@ export default function CreateMessagingProfileWizardPage() {
         <div>
           <h1 className="text-2xl font-semibold text-gray-900 dark:text-white/90">Create Messaging Profile</h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Progressive setup backed by Telnyx v2 Messaging Profiles API.
+            Progressive setup backed by the provider Messaging Profiles API.
           </p>
           {profileId && (
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
@@ -548,7 +548,7 @@ export default function CreateMessagingProfileWizardPage() {
                   <div>
                     <p className="font-medium text-gray-900 dark:text-white/90">URL shortener</p>
                     <p className="text-sm text-gray-500 dark:text-gray-400">
-                      Replace public shortener URLs with Telnyx-generated links.
+                      Replace public shortener URLs with provider-generated links.
                     </p>
                   </div>
                   <Switch checked={urlShortenerEnabled} onChange={setUrlShortenerEnabled} label="Enable" />
@@ -626,7 +626,7 @@ export default function CreateMessagingProfileWizardPage() {
               <div>
                 <h2 className="text-lg font-semibold text-gray-900 dark:text-white/90">Senders</h2>
                 <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                  Assign phone numbers to this messaging profile (Telnyx phone number ID).
+                  Assign phone numbers to this messaging profile (provider phone number ID).
                 </p>
               </div>
 

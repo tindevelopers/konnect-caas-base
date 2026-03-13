@@ -19,10 +19,14 @@ import type {
   TelnyxIntegrationSecret,
   TelnyxIntegrationSecretListResponse,
 } from "./integrationSecrets";
+import type { TelnyxIntegrationsListResponse } from "./integrations";
+
+/** Result of listAssistants: either data or an error message (avoids Next.js masking thrown errors in prod). */
+export type ListAssistantsResult = TelnyxAssistantListResponse | { error: string };
 
 /** Server-safe API interface for assistants (used by server actions and api layer). */
 export interface TelnyxAssistantsApi {
-  listAssistants: () => Promise<TelnyxAssistantListResponse>;
+  listAssistants: () => Promise<ListAssistantsResult>;
   getAssistant: (assistantId: string) => Promise<TelnyxAssistant>;
   createAssistant: (payload: TelnyxCreateAssistantRequest) => Promise<TelnyxAssistant>;
   updateAssistant: (
@@ -56,4 +60,9 @@ export interface TelnyxIntegrationSecretsApi {
   createIntegrationSecret: (
     payload: TelnyxCreateIntegrationSecretRequest
   ) => Promise<TelnyxIntegrationSecret>;
+}
+
+/** Server-safe API interface for Telnyx AI integrations catalog. */
+export interface TelnyxIntegrationsApi {
+  listIntegrations: () => Promise<TelnyxIntegrationsListResponse>;
 }

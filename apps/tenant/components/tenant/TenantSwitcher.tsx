@@ -6,7 +6,7 @@
 
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { createClient as createBrowserClient } from "@/core/database/client";
 import { useTenant } from "@/core/multi-tenancy";
@@ -60,6 +60,23 @@ export default function TenantSwitcher({ className = "" }: TenantSwitcherProps) 
   const [impersonationError, setImpersonationError] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
+  const loadTenants = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      const [tenantsData, adminStatus] = await Promise.all([
+        getAllTenants(),
+        isPlatformAdmin(),
+      ]);
+      setTenants((tenantsData || []) as Tenant[]);
+      setIsPlatformAdminUser(adminStatus);
+    } catch (error) {
+      console.error("Error loading tenants:", error);
+      setTenants([]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     setSelectedTenantId(getSelectedTenantId());
     isPlatformAdmin()
@@ -70,26 +87,18 @@ export default function TenantSwitcher({ className = "" }: TenantSwitcherProps) 
   }, []);
 
   useEffect(() => {
-    async function loadTenants() {
-      try {
-        setIsLoading(true);
-        const [tenantsData, adminStatus] = await Promise.all([
-          getAllTenants(),
-          isPlatformAdmin(),
-        ]);
-        setTenants(tenantsData as Tenant[]);
-        setIsPlatformAdminUser(adminStatus);
-      } catch (error) {
-        console.error("Error loading tenants:", error);
-      } finally {
-        setIsLoading(false);
-      }
-    }
-
-    if (isOpen) {
+    // Platform admins can browse all tenants on demand from the dropdown.
+    if (isOpen && isPlatformAdminUser) {
       loadTenants();
     }
-  }, [isOpen]);
+  }, [isOpen, isPlatformAdminUser, loadTenants]);
+
+  useEffect(() => {
+    // Non-platform users may still have explicit tenant access through user_tenant_roles.
+    if (!isPlatformAdminUser) {
+      loadTenants();
+    }
+  }, [isPlatformAdminUser, loadTenants]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -192,9 +201,8 @@ export default function TenantSwitcher({ className = "" }: TenantSwitcherProps) 
     t.domain.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  // For Platform Admins, show all tenants
-  // For regular users, show only their tenant (should be 1)
-  const displayTenants = isPlatformAdminUser ? filteredTenants : tenants;
+  const displayTenants = filteredTenants;
+  const canSwitchTenants = isPlatformAdminUser || tenants.length > 1;
 
   if (tenantLoading || (!tenant && !isPlatformAdminUser)) {
     return (
@@ -208,6 +216,31 @@ export default function TenantSwitcher({ className = "" }: TenantSwitcherProps) 
   const isImpersonating = isPlatformAdminUser && !!selectedTenantId;
   const tenantName = tenant?.name || "Select tenant";
   const tenantAvatarUrl = tenant?.avatar_url;
+
+  if (!canSwitchTenants) {
+    return (
+      <div className={`flex items-center gap-3 px-3 py-2 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 min-w-[200px] ${className}`}>
+        <div className="flex items-center gap-2 flex-1 min-w-0">
+          {tenantAvatarUrl ? (
+            <Image
+              src={tenantAvatarUrl}
+              alt={tenantName}
+              width={24}
+              height={24}
+              className="rounded-lg flex-shrink-0"
+            />
+          ) : (
+            <div className="h-6 w-6 rounded-lg bg-indigo-100 dark:bg-indigo-900 flex items-center justify-center flex-shrink-0">
+              <BuildingOffice2Icon className="h-4 w-4 text-indigo-600 dark:text-indigo-300" />
+            </div>
+          )}
+          <span className="text-sm font-medium text-gray-900 dark:text-white truncate">
+            {tenantName}
+          </span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={`relative ${className}`} ref={dropdownRef}>
@@ -255,7 +288,7 @@ export default function TenantSwitcher({ className = "" }: TenantSwitcherProps) 
       {isOpen && (
         <div className="absolute top-full left-0 mt-2 w-80 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50">
           {/* Search */}
-          {isPlatformAdminUser && displayTenants.length > 3 && (
+          {displayTenants.length > 3 && (
             <div className="p-3 border-b border-gray-200 dark:border-gray-700">
               <div className="relative">
                 <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />

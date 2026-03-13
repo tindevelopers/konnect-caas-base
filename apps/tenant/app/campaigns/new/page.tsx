@@ -35,10 +35,16 @@ import {
 } from "@/app/actions/crm/groups";
 import { seedCrmContacts } from "@/app/actions/crm/seed";
 import { listAssistantsAction } from "@/app/actions/telnyx/assistants";
-import { listOwnedPhoneNumbersAction } from "@/app/actions/telnyx/numbers";
+import {
+  listOwnedPhoneNumbersAction,
+  listVerifiedNumbersAction,
+} from "@/app/actions/telnyx/numbers";
 import { useDropzone } from "react-dropzone";
 
 const STEPS = ["Basics", "Audience", "Content", "Schedule"];
+
+const SHOW_CAMPAIGN_AUTOMATION_SETTINGS =
+  process.env.NEXT_PUBLIC_SHOW_CAMPAIGN_AUTOMATION_SETTINGS === "true";
 
 const CAMPAIGN_TYPES: { value: CampaignType; label: string }[] = [
   { value: "voice", label: "Voice (AI Assistant)" },
@@ -54,6 +60,30 @@ const FIELD_TARGETS = [
   { key: "email", label: "Email", required: false },
   { key: "timezone", label: "Timezone", required: false },
   { key: "client_type", label: "Client Type", required: false },
+];
+
+/** IANA time zone options for campaign calling window (value = IANA identifier). */
+const IANA_TIMEZONES: { value: string; label: string }[] = [
+  { value: "UTC", label: "UTC" },
+  { value: "America/New_York", label: "Eastern (America/New_York)" },
+  { value: "America/Chicago", label: "Central (America/Chicago)" },
+  { value: "America/Denver", label: "Mountain (America/Denver)" },
+  { value: "America/Los_Angeles", label: "Pacific (America/Los_Angeles)" },
+  { value: "America/Phoenix", label: "Arizona (America/Phoenix)" },
+  { value: "America/Anchorage", label: "Alaska (America/Anchorage)" },
+  { value: "Pacific/Honolulu", label: "Hawaii (Pacific/Honolulu)" },
+  { value: "America/Toronto", label: "Toronto (America/Toronto)" },
+  { value: "America/Vancouver", label: "Vancouver (America/Vancouver)" },
+  { value: "Europe/London", label: "London (Europe/London)" },
+  { value: "Europe/Paris", label: "Paris (Europe/Paris)" },
+  { value: "Europe/Berlin", label: "Berlin (Europe/Berlin)" },
+  { value: "Europe/Madrid", label: "Madrid (Europe/Madrid)" },
+  { value: "Asia/Tokyo", label: "Tokyo (Asia/Tokyo)" },
+  { value: "Asia/Shanghai", label: "Shanghai (Asia/Shanghai)" },
+  { value: "Asia/Singapore", label: "Singapore (Asia/Singapore)" },
+  { value: "Australia/Sydney", label: "Sydney (Australia/Sydney)" },
+  { value: "Australia/Melbourne", label: "Melbourne (Australia/Melbourne)" },
+  { value: "Pacific/Auckland", label: "Auckland (Pacific/Auckland)" },
 ];
 
 type AudienceTab = "file" | "crm" | "google_sheets" | "airtable";
@@ -96,6 +126,8 @@ export default function NewCampaignPage() {
   } | null>(null);
   const [crmLoading, setCrmLoading] = useState(false);
   const [seeding, setSeeding] = useState(false);
+  /** Selected contact IDs when "All Contacts" is used; empty = use all, non-empty = use only these */
+  const [selectedCrmContactIds, setSelectedCrmContactIds] = useState<Set<string>>(new Set());
 
   // Step 2c: Google Sheets audience
   const [gsSheetId, setGsSheetId] = useState("");
@@ -121,18 +153,31 @@ export default function NewCampaignPage() {
 
   // Step 3: Content
   const [assistants, setAssistants] = useState<{ id: string; name?: string }[]>([]);
-  const [numbers, setNumbers] = useState<{ phone_number: string }[]>([]);
+  const [numbers, setNumbers] = useState<
+    { phone_number: string; label: string; kind: "owned" | "verified" }[]
+  >([]);
+  const [telnyxApplications, setTelnyxApplications] = useState<
+    { value: string; label: string }[]
+  >([]);
   const [assistantId, setAssistantId] = useState("");
   const [fromNumber, setFromNumber] = useState("");
   const [messageTemplate, setMessageTemplate] = useState("");
   const [connectionId, setConnectionId] = useState("");
+  const [greeting, setGreeting] = useState("");
+  const [enableProductPurchaseFlow, setEnableProductPurchaseFlow] = useState(false);
+  const [webhookUrl, setWebhookUrl] = useState("");
+  const [contentOptionsLoading, setContentOptionsLoading] = useState(false);
+  const [contentOptionsError, setContentOptionsError] = useState<string | null>(null);
 
   // Step 4: Schedule
   const [callingWindowStart, setCallingWindowStart] = useState("09:00");
   const [callingWindowEnd, setCallingWindowEnd] = useState("20:00");
+  const [timezone, setTimezone] = useState("America/New_York");
   const [callingDays, setCallingDays] = useState([1, 2, 3, 4, 5]);
   const [maxAttempts, setMaxAttempts] = useState(3);
   const [retryDelayMinutes, setRetryDelayMinutes] = useState(60);
+  // Minimum spacing between scheduled calls for this campaign.
+  const [callIntervalMinutes, setCallIntervalMinutes] = useState(10);
   const [callsPerMinute, setCallsPerMinute] = useState(10);
 
   const [campaignId, setCampaignId] = useState<string | null>(null);
@@ -343,23 +388,100 @@ export default function NewCampaignPage() {
 
   // ── Content options ───────────────────────────────────────────────
 
-  const loadContentOptions = async () => {
+  const loadContentOptions = useCallback(async () => {
+    setContentOptionsError(null);
+    setContentOptionsLoading(true);
     try {
-      const [aList, nList] = await Promise.all([
+      const [aList, nOwned, nVerified, appRes] = await Promise.all([
         listAssistantsAction(),
         listOwnedPhoneNumbersAction({ pageNumber: 1, pageSize: 50 }),
+        listVerifiedNumbersAction({ pageNumber: 1, pageSize: 50 }).catch(() => ({ data: [] })),
+        fetch("/api/integrations/telnyx/applications", {
+          method: "GET",
+          cache: "no-store",
+        }),
       ]);
-      const assistantsData = Array.isArray(aList) ? aList : (aList as any)?.data ?? [];
-      setAssistants(assistantsData.map((a: any) => ({ id: a.id, name: a.name ?? a.id })));
-      const numData = (nList as any)?.data ?? [];
-      setNumbers(numData.map((n: any) => ({ phone_number: n.phone_number ?? n.id })));
-      if (assistantsData[0]) setAssistantId(assistantsData[0].id);
-      const firstNum = numData[0];
-      if (firstNum?.phone_number) setFromNumber(firstNum.phone_number);
+      // listAssistantsAction returns { data: [...] } (tenant-filtered) or { error: string }
+      const aResult = aList as { data?: unknown[]; error?: string };
+      if (aResult?.error) {
+        setContentOptionsError(aResult.error);
+        setAssistants([]);
+      } else {
+        const assistantsData = Array.isArray(aResult) ? aResult : aResult?.data ?? [];
+        const list = (assistantsData as { id: string; name?: string }[]).map((a) => ({
+          id: a.id,
+          name: a.name ?? a.id,
+        }));
+        setAssistants(list);
+        if (list[0]) setAssistantId((prev) => prev || list[0].id);
+      }
+      const ownedData = (nOwned as any)?.data ?? [];
+      const verifiedData = (nVerified as any)?.data ?? [];
+
+      const merged = new Map<
+        string,
+        { phone_number: string; label: string; kind: "owned" | "verified" }
+      >();
+
+      for (const n of ownedData as any[]) {
+        const pn = String(n?.phone_number ?? n?.id ?? "").trim();
+        if (!pn) continue;
+        merged.set(pn, { phone_number: pn, label: pn, kind: "owned" });
+      }
+
+      for (const n of verifiedData as any[]) {
+        const pn = String(n?.phone_number ?? "").trim();
+        if (!pn) continue;
+        if (!merged.has(pn)) {
+          merged.set(pn, { phone_number: pn, label: `${pn} (verified)`, kind: "verified" });
+        }
+      }
+
+      const list = Array.from(merged.values()).sort((a, b) =>
+        a.phone_number.localeCompare(b.phone_number)
+      );
+      setNumbers(list);
+
+      const first = list[0];
+      if (first?.phone_number) setFromNumber((prev) => prev || first.phone_number);
+
+      let appOptions: { value: string; label: string }[] = [];
+      try {
+        const appBody = (await appRes.json()) as {
+          options?: { value: string; label: string }[];
+          error?: string;
+        };
+        if (!appRes.ok) {
+          throw new Error(appBody?.error ?? "Failed to load Telnyx applications");
+        }
+        appOptions = Array.isArray(appBody.options) ? appBody.options : [];
+      } catch (appErr) {
+        throw new Error(
+          appErr instanceof Error ? appErr.message : "Failed to load Telnyx applications"
+        );
+      }
+      setTelnyxApplications(appOptions);
+      if (appOptions[0]) setConnectionId((prev) => prev || appOptions[0].value);
     } catch (e) {
       console.error("Load content options:", e);
+      setContentOptionsError(
+        e instanceof Error
+          ? e.message
+          : "Failed to load assistants, numbers, and Telnyx applications"
+      );
+      setAssistants([]);
+      setTelnyxApplications([]);
+    } finally {
+      setContentOptionsLoading(false);
     }
-  };
+  }, []);
+
+  // Load AI assistants and numbers when user reaches the Content step (tenant-scoped)
+  useEffect(() => {
+    if (step === 2) {
+      loadContentOptions();
+    }
+  }, [step, loadContentOptions]);
 
   // ── Step navigation ───────────────────────────────────────────────
 
@@ -413,6 +535,15 @@ export default function NewCampaignPage() {
           setError("No contacts with valid phone numbers found. Add contacts to your CRM first.");
           return;
         }
+        if (crmSourceType === "all_contacts" && selectedCrmContactIds.size > 0) {
+          const selectedWithPhone = crmPreview.contacts.filter(
+            (c) => selectedCrmContactIds.has(c.id) && c.phone && c.phone.trim().length >= 7
+          );
+          if (selectedWithPhone.length === 0) {
+            setError("Select at least one contact with a valid phone number, or use “Deselect all” to include everyone.");
+            return;
+          }
+        }
       }
       setStep(2);
       loadContentOptions();
@@ -421,9 +552,30 @@ export default function NewCampaignPage() {
         setError("Please select an AI assistant");
         return;
       }
+      if (campaignType === "voice" && !connectionId) {
+        setError("Please select a Telnyx Call Control application");
+        return;
+      }
       if (!fromNumber) {
         setError("Please select a from number");
         return;
+      }
+      if (
+        SHOW_CAMPAIGN_AUTOMATION_SETTINGS &&
+        campaignType === "voice" &&
+        enableProductPurchaseFlow
+      ) {
+        const url = webhookUrl.trim();
+        if (!url) {
+          setError("Please enter the Webhook URL when AI Product Purchase Flow is enabled.");
+          return;
+        }
+        try {
+          new URL(url);
+        } catch {
+          setError("Please enter a valid Webhook URL (e.g. https://your-app.com/api/create-draft-order).");
+          return;
+        }
       }
       setStep(3);
     } else if (step === 3) {
@@ -439,11 +591,22 @@ export default function NewCampaignPage() {
           message_template: campaignType !== "voice" ? messageTemplate : null,
           calling_window_start: callingWindowStart,
           calling_window_end: callingWindowEnd,
+          timezone,
           calling_days: callingDays,
           max_attempts: maxAttempts,
           retry_delay_minutes: retryDelayMinutes,
           calls_per_minute: callsPerMinute,
-          settings: connectionId ? { connection_id: connectionId } : {},
+          settings: {
+            call_interval_minutes: Math.max(1, Math.floor(Number(callIntervalMinutes) || 10)),
+            ...(connectionId ? { connection_id: connectionId } : {}),
+            ...(greeting.trim() ? { greeting: greeting.trim().slice(0, 3000) } : {}),
+            ...(SHOW_CAMPAIGN_AUTOMATION_SETTINGS
+              ? {
+                  enableProductPurchaseFlow: !!enableProductPurchaseFlow,
+                  webhookUrl: webhookUrl.trim() || undefined,
+                }
+              : {}),
+          },
         });
         if (!res.ok) {
           setError(res.error);
@@ -495,11 +658,15 @@ export default function NewCampaignPage() {
           const crmSource: CrmAudienceSource =
             crmSourceType === "group" && selectedGroupId
               ? { type: "group", groupId: selectedGroupId }
-              : { type: "all_contacts" };
+              : selectedCrmContactIds.size > 0
+                ? { type: "selected", contactIds: Array.from(selectedCrmContactIds) }
+                : { type: "all_contacts" };
           const groupLabel =
             crmSourceType === "group"
               ? crmGroups.find((g) => g.id === selectedGroupId)?.name ?? "CRM Group"
-              : "All CRM Contacts";
+              : selectedCrmContactIds.size > 0
+                ? "Selected contacts"
+                : "All CRM Contacts";
           const importRes = await importCrmContactsToCampaign(
             res.id,
             groupLabel,
@@ -731,7 +898,7 @@ export default function NewCampaignPage() {
                   </div>
                 ) : crmPreview ? (
                   <div className="p-4 rounded-lg bg-gray-50 dark:bg-gray-800 space-y-3">
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
                       <div>
                         <p className="text-sm">
                           <span className="font-medium">{crmPreview.totalCount}</span> contacts found
@@ -739,27 +906,85 @@ export default function NewCampaignPage() {
                         <p className="text-sm text-green-600 dark:text-green-400">
                           <span className="font-medium">{crmPreview.validCount}</span> with valid phone numbers
                         </p>
+                        {crmSourceType === "all_contacts" && (
+                          <p className="text-sm text-brand-600 dark:text-brand-400 mt-1">
+                            {selectedCrmContactIds.size > 0
+                              ? `${selectedCrmContactIds.size} selected · ${crmPreview.contacts.filter((c) => selectedCrmContactIds.has(c.id) && c.phone && c.phone.trim().length >= 7).length} with valid phone`
+                              : "Select contacts below, or leave unselected to use all."}
+                          </p>
+                        )}
                         {crmPreview.totalCount - crmPreview.validCount > 0 && (
                           <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
                             {crmPreview.totalCount - crmPreview.validCount} contacts missing phone numbers (will be skipped)
                           </p>
                         )}
                       </div>
+                      {crmSourceType === "all_contacts" && crmPreview.contacts.length > 0 && (
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedCrmContactIds(new Set(crmPreview.contacts.map((c) => c.id)))}
+                            className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline"
+                          >
+                            Select all
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedCrmContactIds(new Set())}
+                            className="text-xs font-medium text-gray-500 hover:underline"
+                          >
+                            Deselect all
+                          </button>
+                        </div>
+                      )}
                     </div>
-                    {/* Contact preview table */}
+                    {/* Contact preview table with checkboxes (All Contacts only) */}
                     {crmPreview.contacts.length > 0 && (
-                      <div className="overflow-x-auto">
+                      <div className="overflow-x-auto max-h-64 overflow-y-auto">
                         <table className="w-full text-xs">
-                          <thead>
+                          <thead className="sticky top-0 bg-gray-50 dark:bg-gray-800 z-10">
                             <tr className="border-b border-gray-200 dark:border-gray-700">
+                              {crmSourceType === "all_contacts" && (
+                                <th className="text-left py-1.5 pr-2 w-8">
+                                  <input
+                                    type="checkbox"
+                                    checked={crmPreview.contacts.length > 0 && crmPreview.contacts.every((c) => selectedCrmContactIds.has(c.id))}
+                                    onChange={(e) => {
+                                      if (e.target.checked) {
+                                        setSelectedCrmContactIds(new Set(crmPreview.contacts.map((c) => c.id)));
+                                      } else {
+                                        setSelectedCrmContactIds(new Set());
+                                      }
+                                    }}
+                                    className="rounded border-gray-300 dark:border-gray-600"
+                                    aria-label="Select all"
+                                  />
+                                </th>
+                              )}
                               <th className="text-left py-1.5 pr-3 font-medium text-gray-500">Name</th>
                               <th className="text-left py-1.5 pr-3 font-medium text-gray-500">Phone</th>
                               <th className="text-left py-1.5 font-medium text-gray-500">Email</th>
                             </tr>
                           </thead>
                           <tbody>
-                            {crmPreview.contacts.slice(0, 5).map((c) => (
-                              <tr key={c.id} className="border-b border-gray-100 dark:border-gray-700/50">
+                            {crmPreview.contacts.map((c) => (
+                              <tr key={c.id} className="border-b border-gray-100 dark:border-gray-700/50 hover:bg-gray-100/50 dark:hover:bg-gray-700/30">
+                                {crmSourceType === "all_contacts" && (
+                                  <td className="py-1.5 pr-2">
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedCrmContactIds.has(c.id)}
+                                      onChange={(e) => {
+                                        const next = new Set(selectedCrmContactIds);
+                                        if (e.target.checked) next.add(c.id);
+                                        else next.delete(c.id);
+                                        setSelectedCrmContactIds(next);
+                                      }}
+                                      className="rounded border-gray-300 dark:border-gray-600"
+                                      aria-label={`Select ${c.first_name} ${c.last_name}`}
+                                    />
+                                  </td>
+                                )}
                                 <td className="py-1.5 pr-3">{c.first_name} {c.last_name}</td>
                                 <td className="py-1.5 pr-3 font-mono">{c.phone || "—"}</td>
                                 <td className="py-1.5 text-gray-500">{c.email || "—"}</td>
@@ -767,11 +992,6 @@ export default function NewCampaignPage() {
                             ))}
                           </tbody>
                         </table>
-                        {crmPreview.contacts.length > 5 && (
-                          <p className="text-xs text-gray-400 mt-1">
-                            + {crmPreview.contacts.length - 5} more contacts
-                          </p>
-                        )}
                       </div>
                     )}
                   </div>
@@ -1005,23 +1225,112 @@ export default function NewCampaignPage() {
                   <select
                     value={assistantId}
                     onChange={(e) => setAssistantId(e.target.value)}
-                    className="w-full px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700"
+                    disabled={contentOptionsLoading}
+                    className="w-full px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700 disabled:opacity-60"
+                    aria-label="Select an AI assistant for this tenant"
                   >
+                    <option value="">
+                      {contentOptionsLoading
+                        ? "Loading assistants..."
+                        : assistants.length === 0
+                          ? "No assistants in this tenant"
+                          : "Select an assistant"}
+                    </option>
                     {assistants.map((a) => (
-                      <option key={a.id} value={a.id}>{a.name ?? a.id}</option>
+                      <option key={a.id} value={a.id}>
+                        {a.name ?? a.id}
+                      </option>
+                    ))}
+                  </select>
+                  {contentOptionsError && (
+                    <p className="mt-1 text-sm text-amber-600 dark:text-amber-400">
+                      {contentOptionsError}
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">
+                    Telnyx Call Control Application
+                  </label>
+                  <select
+                    value={connectionId}
+                    onChange={(e) => setConnectionId(e.target.value)}
+                    disabled={contentOptionsLoading}
+                    className="w-full px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700 disabled:opacity-60"
+                    aria-label="Select a Telnyx Call Control application"
+                  >
+                    <option value="">
+                      {contentOptionsLoading
+                        ? "Loading applications..."
+                        : telnyxApplications.length === 0
+                          ? "No Call Control applications found"
+                          : "Select an application"}
+                    </option>
+                    {telnyxApplications.map((app) => (
+                      <option key={app.value} value={app.value}>
+                        {app.label}
+                      </option>
                     ))}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium mb-1">Connection ID (optional)</label>
-                  <input
-                    type="text"
-                    value={connectionId}
-                    onChange={(e) => setConnectionId(e.target.value)}
-                    placeholder="Telnyx Call Control connection ID"
+                  <label className="block text-sm font-medium mb-1">
+                    Greeting (optional)
+                  </label>
+                  <textarea
+                    value={greeting}
+                    onChange={(e) => setGreeting(e.target.value)}
+                    placeholder="Hello, thanks for taking our call. How can I help you today?"
+                    rows={3}
+                    maxLength={3000}
                     className="w-full px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700"
+                    aria-label="Custom greeting when contact answers"
                   />
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    First thing the AI says when the contact answers. Leave blank to use the default.
+                  </p>
                 </div>
+                {SHOW_CAMPAIGN_AUTOMATION_SETTINGS && (
+                  <div className="p-4 rounded-lg border border-gray-200 dark:border-gray-700 space-y-4">
+                    <h3 className="font-medium">Automation Settings</h3>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        id="enable-product-purchase-flow"
+                        checked={enableProductPurchaseFlow}
+                        onChange={(e) => setEnableProductPurchaseFlow(e.target.checked)}
+                        className="rounded border-gray-300 dark:border-gray-600 text-brand-600 focus:ring-brand-500"
+                        aria-describedby="automation-desc"
+                      />
+                      <label
+                        htmlFor="enable-product-purchase-flow"
+                        id="automation-desc"
+                        className="text-sm font-medium"
+                      >
+                        Enable AI Product Purchase Flow
+                      </label>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-1" htmlFor="webhook-url">
+                        Webhook URL
+                      </label>
+                      <input
+                        id="webhook-url"
+                        type="url"
+                        value={webhookUrl}
+                        onChange={(e) => setWebhookUrl(e.target.value)}
+                        placeholder="https://your-app.com/api/create-draft-order"
+                        className="w-full px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700"
+                        aria-required={enableProductPurchaseFlow}
+                        aria-invalid={enableProductPurchaseFlow && !webhookUrl.trim()}
+                      />
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        Endpoint that receives the product selection payload. Required when purchase
+                        flow is enabled. Can be left empty otherwise.
+                      </p>
+                    </div>
+                  </div>
+                )}
               </>
             )}
             {(campaignType === "sms" || campaignType === "whatsapp") && (
@@ -1045,7 +1354,7 @@ export default function NewCampaignPage() {
               >
                 {numbers.map((n) => (
                   <option key={n.phone_number} value={n.phone_number}>
-                    {n.phone_number}
+                    {n.label}
                   </option>
                 ))}
               </select>
@@ -1057,6 +1366,24 @@ export default function NewCampaignPage() {
         {step === 3 && (
           <div className="space-y-6">
             <h2 className="text-xl font-semibold">Schedule</h2>
+            <div>
+              <label className="block text-sm font-medium mb-1">Timezone</label>
+              <select
+                value={timezone}
+                onChange={(e) => setTimezone(e.target.value)}
+                className="w-full px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700"
+                aria-describedby="timezone-help"
+              >
+                {IANA_TIMEZONES.map(({ value, label }) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+              <p id="timezone-help" className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                Calling window times are interpreted in this timezone.
+              </p>
+            </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium mb-1">Calling window start</label>
@@ -1078,7 +1405,62 @@ export default function NewCampaignPage() {
               </div>
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1">Calls per minute</label>
+              <label className="block text-sm font-medium mb-2">Calling days</label>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { d: 0, label: "Sun" },
+                  { d: 1, label: "Mon" },
+                  { d: 2, label: "Tue" },
+                  { d: 3, label: "Wed" },
+                  { d: 4, label: "Thu" },
+                  { d: 5, label: "Fri" },
+                  { d: 6, label: "Sat" },
+                ].map(({ d, label }) => {
+                  const active = callingDays.includes(d);
+                  return (
+                    <button
+                      key={d}
+                      type="button"
+                      onClick={() => {
+                        setCallingDays((prev) => {
+                          const set = new Set(prev);
+                          if (set.has(d)) set.delete(d);
+                          else set.add(d);
+                          return Array.from(set).sort((a, b) => a - b);
+                        });
+                      }}
+                      className={`px-3 py-1.5 rounded-lg border text-sm ${
+                        active
+                          ? "border-brand-500 bg-brand-50 dark:bg-brand-900/20 text-brand-700 dark:text-brand-300"
+                          : "border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300"
+                      }`}
+                      aria-pressed={active}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                Calls will only be scheduled/placed on these days in the selected timezone.
+              </p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Call interval (minutes)</label>
+              <input
+                type="number"
+                min={1}
+                max={1440}
+                value={callIntervalMinutes}
+                onChange={(e) => setCallIntervalMinutes(Number(e.target.value))}
+                className="w-full px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700"
+              />
+              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                Calls will be scheduled with at least this many minutes between each recipient.
+              </p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Calls per minute (throttle)</label>
               <input
                 type="number"
                 min={1}
@@ -1087,6 +1469,9 @@ export default function NewCampaignPage() {
                 onChange={(e) => setCallsPerMinute(Number(e.target.value))}
                 className="w-full px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700"
               />
+              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                Safety limit when multiple calls are due at once (cron runs in batches).
+              </p>
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">Max retry attempts</label>

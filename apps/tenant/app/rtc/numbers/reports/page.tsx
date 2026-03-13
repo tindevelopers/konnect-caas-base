@@ -90,7 +90,7 @@ export default function NumbersReportsPage() {
       <div className="mb-6">
         <h1 className="text-2xl font-semibold text-gray-900 dark:text-white/90">Reports</h1>
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-          Operational reporting from live Telnyx data (no database required).
+          Operational reporting from live provider data (no database required).
         </p>
       </div>
 

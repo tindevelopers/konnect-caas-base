@@ -2,6 +2,7 @@
 
 import { createClient } from "@/core/database/server";
 import { getTenantForCrm } from "../crm/tenant-helper";
+import { processCampaignVoiceBatch, type ProcessCampaignOptions } from "./executor";
 
 export type CampaignType = "voice" | "sms" | "whatsapp" | "multi_channel";
 export type CampaignStatus =
@@ -26,6 +27,7 @@ export type Campaign = {
   schedule_end: string | null;
   calling_window_start: string;
   calling_window_end: string;
+  timezone: string;
   calling_days: number[];
   max_attempts: number;
   retry_delay_minutes: number;
@@ -63,6 +65,7 @@ export async function getCampaigns(): Promise<Campaign[]> {
   const { data, error } = await (supabase.from("campaigns") as any)
     .select("*")
     .eq("tenant_id", tenantId)
+    .is("deleted_at", null)
     .order("created_at", { ascending: false });
 
   if (error) throw error;
@@ -76,6 +79,7 @@ export async function getCampaign(id: string): Promise<Campaign | null> {
     .select("*")
     .eq("id", id)
     .eq("tenant_id", tenantId)
+    .is("deleted_at", null)
     .single();
 
   if (error) {
@@ -105,6 +109,7 @@ export async function createCampaign(
       schedule_end: input.schedule_end ?? null,
       calling_window_start: input.calling_window_start ?? "09:00",
       calling_window_end: input.calling_window_end ?? "20:00",
+      timezone: input.timezone ?? "UTC",
       calling_days: input.calling_days ?? [1, 2, 3, 4, 5],
       max_attempts: input.max_attempts ?? 3,
       retry_delay_minutes: input.retry_delay_minutes ?? 60,
@@ -153,11 +158,13 @@ export async function deleteCampaign(
   try {
     const tenantId = await getTenantForCrm();
     const supabase = await createClient();
+    const now = new Date().toISOString();
 
     const { error } = await (supabase.from("campaigns") as any)
-      .delete()
+      .update({ deleted_at: now, status: "cancelled" })
       .eq("id", id)
-      .eq("tenant_id", tenantId);
+      .eq("tenant_id", tenantId)
+      .is("deleted_at", null);
 
     if (error) return { ok: false, error: error.message };
     return { ok: true };
@@ -265,4 +272,28 @@ export async function getRecipientTimezoneStats(
     counts[tz] = (counts[tz] ?? 0) + 1;
   }
   return counts;
+}
+
+/**
+ * Run one batch of campaign calls for the current tenant (for "Process now" / testing).
+ * In production, the cron job at /api/campaigns/process runs every 2 minutes.
+ * @param tenantId - Optional. When provided (e.g. from campaign page), skips getTenantForCrm()
+ *   so we only use the admin client in the executor, avoiding 502 from Supabase session/RLS.
+ * @param options - bypassCallingWindow: when true, skips the calling window check so calls
+ *   can be placed immediately for testing (used by "Process now" button).
+ */
+export async function processCampaignBatchNow(
+  tenantId?: string,
+  options?: ProcessCampaignOptions
+): Promise<
+  { ok: true; processed: number; errors: string[] } | { ok: false; error: string }
+> {
+  try {
+    const resolvedTenantId = tenantId ?? (await getTenantForCrm());
+    const result = await processCampaignVoiceBatch(resolvedTenantId, options);
+    return { ok: true, processed: result.processed, errors: result.errors };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg };
+  }
 }

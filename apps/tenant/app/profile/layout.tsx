@@ -1,3 +1,5 @@
+import AdminLayout from "@/layout/AdminLayout";
+
 // Force dynamic rendering for this route
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -7,5 +9,5 @@ export default function ProfileLayout({
 }: {
   children: React.ReactNode;
 }) {
-  return <>{children}</>;
+  return <AdminLayout>{children}</AdminLayout>;
 }

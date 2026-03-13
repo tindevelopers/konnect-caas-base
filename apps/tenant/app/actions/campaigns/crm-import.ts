@@ -2,7 +2,7 @@
 
 import { createClient } from "@/core/database/server";
 import { getTenantForCrm } from "../crm/tenant-helper";
-import { getContacts } from "../crm/contacts";
+import { getContacts, getContactsByIds } from "../crm/contacts";
 import { getContactGroups, getGroupContacts } from "../crm/groups";
 import {
   normalizeRecipient,
@@ -13,7 +13,8 @@ import {
 export type CrmAudienceSource =
   | { type: "all_contacts" }
   | { type: "group"; groupId: string }
-  | { type: "tagged"; tag: string };
+  | { type: "tagged"; tag: string }
+  | { type: "selected"; contactIds: string[] };
 
 /**
  * Fetch contacts from local CRM for preview (before campaign creation).
@@ -43,6 +44,8 @@ export async function previewCrmContacts(
 
   if (source.type === "group") {
     rawContacts = await getGroupContacts(source.groupId);
+  } else if (source.type === "selected") {
+    rawContacts = await getContactsByIds(source.contactIds);
   } else {
     const all = await getContacts();
     rawContacts = all;
@@ -112,6 +115,9 @@ export async function importCrmContactsToCampaign(
     if (source.type === "group") {
       rawContacts = await getGroupContacts(source.groupId);
       sourceLabel = "crm_group";
+    } else if (source.type === "selected") {
+      rawContacts = await getContactsByIds(source.contactIds);
+      sourceLabel = "crm_selected";
     } else {
       const all = await getContacts();
       rawContacts = all;

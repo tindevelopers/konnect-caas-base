@@ -82,11 +82,11 @@ export async function upsertIntegrationConfig(params: IntegrationConfigParams) {
     status: params.status ?? "disconnected",
   };
 
-  // Supabase client infers never for upsert when Table uses Record<string, unknown> for jsonb; assert.
+  // Conflict on (tenant_id, provider) so we update the existing row instead of inserting a duplicate.
   const { data, error } = await supabase
     .from("integration_configs")
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    .upsert(row as any)
+    .upsert(row as any, { onConflict: "tenant_id,provider" })
     .select()
     .single();
 

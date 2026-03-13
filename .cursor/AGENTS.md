@@ -142,3 +142,38 @@ Once activated and visible, the Abacus AI Agent can help with:
 - **Status Bar**: Check the bottom status bar for Abacus indicators or buttons
 
 For more information, check the extension's documentation or visit the Abacus AI website.
+
+## Multi-Agent Workflow For This Repo
+
+Use this lightweight workflow for larger feature implementation:
+
+1. Start with one orchestrator chat in Cursor Agent mode.
+2. Delegate focused tasks in parallel (max 2-4 at a time), for example:
+   - schema + migrations
+   - API/routes + server actions
+   - UI page wiring
+   - provider adapter implementation
+3. Merge back in small vertical slices and validate each slice before expanding scope.
+4. Keep provider logic isolated behind adapters (`telnyx`, `advanced`, `abacus`, etc.).
+5. Ensure every agent runtime path emits usage + telemetry before marking work complete.
+
+### Model Selection Guidance
+
+- Use a more capable model for:
+  - architecture decisions
+  - multi-file refactors
+  - provider abstraction design
+  - complex debugging
+- Use a faster/cheaper model for:
+  - CRUD route scaffolding
+  - repetitive UI edits
+  - straightforward data plumbing
+- Preferred blend for this project:
+  - design/planning: higher-capability model
+  - implementation + follow-up fixes: balanced or faster model
+
+### Agent Platform Notes
+
+- Keep tenant isolation as the default assumption in every table, route, and action.
+- Record all provider calls in normalized telemetry (`ai_agent_events`, `agent_usage_events`).
+- Use `agent_instances` as the canonical source of truth; provider IDs are references, not primary records.

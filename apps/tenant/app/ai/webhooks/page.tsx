@@ -52,6 +52,11 @@ export default function WebhookEventsPage() {
     return new Date(dateStr).toLocaleString();
   };
 
+  const formatProvider = (provider: string) => {
+    if (provider === "telnyx") return "premium_telephony";
+    return provider;
+  };
+
   const getEventTypeColor = (eventType: string) => {
     const normalized = eventType.toLowerCase();
     if (normalized.includes("error") || normalized.includes("failed")) {
@@ -79,7 +84,7 @@ export default function WebhookEventsPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Webhook Events</h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            View recent Telnyx webhook events for telephony and AI assistant calls
+            View recent webhook events for telephony and AI assistant calls
           </p>
         </div>
         <button
@@ -255,7 +260,9 @@ export default function WebhookEventsPage() {
               </div>
               <div>
                 <div className="text-sm font-medium text-gray-500 dark:text-gray-400">Provider</div>
-                <div className="mt-1 text-gray-900 dark:text-white">{selectedEvent.provider}</div>
+                <div className="mt-1 text-gray-900 dark:text-white">
+                  {formatProvider(selectedEvent.provider)}
+                </div>
               </div>
               <div>
                 <div className="text-sm font-medium text-gray-500 dark:text-gray-400">External ID</div>

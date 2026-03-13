@@ -82,7 +82,7 @@ export default function SystemKeysPanel() {
               error: null,
             }));
           } catch (e) {
-            const msg = e instanceof Error ? e.message : "Failed to load Telnyx keys";
+            const msg = e instanceof Error ? e.message : "Failed to load telephony provider keys";
             if (msg.includes("Platform Admin")) setAccessDenied(true);
             setTelnyx((s) => ({ ...s, isLoading: false, error: msg }));
           }
@@ -140,9 +140,9 @@ export default function SystemKeysPanel() {
     () => [
       {
         key: "telnyx",
-        title: "Telnyx (system-wide)",
+        title: "Premium Telephony (system-wide)",
         description:
-          "Default Telnyx credentials used when an organization has not connected Telnyx under Integrations → Telephony → Telnyx.",
+          "Default telephony provider credentials used when an organization has not connected a telephony provider under Integrations → Telephony.",
         state: telnyx,
         setState: setTelnyx,
         provider: TELNYX_PROVIDER,

@@ -15,6 +15,7 @@ import {
   ExclamationTriangleIcon,
   MapPinIcon,
   PrinterIcon,
+  XMarkIcon,
 } from "@heroicons/react/24/outline";
 import PageBreadcrumb from "@/components/common/PageBreadCrumb";
 import { Tooltip } from "@/components/ui/tooltip/Tooltip";
@@ -27,6 +28,9 @@ import {
   createNumberOrderAction,
   createNumberReservationAction,
   extendNumberReservationAction,
+  retrieveNumberReservationAction,
+  deleteNumberReservationAction,
+  listNumberReservationsAction,
   listAvailableAreaCodesAction,
   listCountryCoverageAction,
   listRequirementGroupsAction,
@@ -38,9 +42,16 @@ import {
   type TelnyxNumberOrder,
   type TelnyxNumberReservation,
 } from "@/app/actions/telnyx/numbers";
+import {
+  searchTwilioAvailableNumbersAction,
+  purchaseTwilioNumberAction,
+  type TwilioAvailablePhoneNumber,
+} from "@/app/actions/twilio/numbers";
 import { OMIT_FEATURES_FOR_COUNTRIES } from "@/src/core/telnyx/country-constraints";
-import { ACTIVE_SUPPLIERS, COMING_SOON_SUPPLIERS } from "@/src/core/numbers/suppliers";
+import { ACTIVE_SUPPLIERS, COMING_SOON_SUPPLIERS, type NumberSupplierId } from "@/src/core/numbers/suppliers";
+import { ISO_COUNTRIES } from "@/src/lib/isoCountries";
 import { isPlatformAdmin } from "@/app/actions/organization-admins";
+import NotifyAdministrator from "@/components/support/NotifyAdministrator";
 
 const TELNYX_FEATURES = [
   "sms",
@@ -133,23 +144,102 @@ function LineTypeIcon({ type, className = "h-5 w-5" }: { type: string; className
 }
 
 export default function BuyNumbersPage() {
+  // Supplier selection
+  const [activeSupplier, setActiveSupplier] = useState<NumberSupplierId>("telnyx");
+
+  // Twilio search state
+  const [twilioCountryCode, setTwilioCountryCode] = useState("US");
+  const [twilioPhoneType, setTwilioPhoneType] = useState("local");
+  const [twilioAreaCode, setTwilioAreaCode] = useState("");
+  const [twilioContains, setTwilioContains] = useState("");
+  const [twilioLocality, setTwilioLocality] = useState("");
+  const [twilioRegion, setTwilioRegion] = useState("");
+  const [twilioVoice, setTwilioVoice] = useState(true);
+  const [twilioSms, setTwilioSms] = useState(true);
+  const [twilioLimit, setTwilioLimit] = useState(30);
+  const [twilioResults, setTwilioResults] = useState<TwilioAvailablePhoneNumber[]>([]);
+  const [twilioSearching, setTwilioSearching] = useState(false);
+  const [twilioPurchasing, setTwilioPurchasing] = useState<string | null>(null);
+  const [twilioError, setTwilioError] = useState<string | null>(null);
+  const [twilioInfo, setTwilioInfo] = useState<string | null>(null);
+
+  // Telnyx state (existing)
   const [countries, setCountries] = useState<{ code: string; name: string }[]>([]);
   const [countriesLoading, setCountriesLoading] = useState(true);
-  const [countryCode, setCountryCode] = useState("US");
-  const [phoneNumberType, setPhoneNumberType] = useState<string>("local");
-  const [nationalDestinationCode, setNationalDestinationCode] = useState("");
-  const [locality, setLocality] = useState("");
+  const [countryCode, setCountryCode] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("buy_numbers_country_code") || "US";
+    }
+    return "US";
+  });
+  const [phoneNumberType, setPhoneNumberType] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("buy_numbers_phone_type") || "local";
+    }
+    return "local";
+  });
+  const [nationalDestinationCode, setNationalDestinationCode] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("buy_numbers_ndc") || "";
+    }
+    return "";
+  });
+  const [locality, setLocality] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("buy_numbers_locality") || "";
+    }
+    return "";
+  });
+  const [administrativeArea, setAdministrativeArea] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("buy_numbers_admin_area") || "";
+    }
+    return "";
+  });
+  const [rateCenter, setRateCenter] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("buy_numbers_rate_center") || "";
+    }
+    return "";
+  });
+
+  // Persist search form state to localStorage
+  useEffect(() => {
+    localStorage.setItem("buy_numbers_country_code", countryCode);
+  }, [countryCode]);
+
+  useEffect(() => {
+    localStorage.setItem("buy_numbers_phone_type", phoneNumberType);
+  }, [phoneNumberType]);
+
+  useEffect(() => {
+    localStorage.setItem("buy_numbers_ndc", nationalDestinationCode);
+  }, [nationalDestinationCode]);
+
+  useEffect(() => {
+    localStorage.setItem("buy_numbers_locality", locality);
+  }, [locality]);
+
+  useEffect(() => {
+    localStorage.setItem("buy_numbers_admin_area", administrativeArea);
+  }, [administrativeArea]);
+
+  useEffect(() => {
+    localStorage.setItem("buy_numbers_rate_center", rateCenter);
+  }, [rateCenter]);
 
   useEffect(() => {
     listCountryCoverageAction().then((res) => {
-      if (res.ok) {
+      if (res.ok && res.countries.length > 0) {
         setCountries(res.countries);
         setCountryCode((prev) => {
-          if (res.countries.length === 0) return prev;
           if (res.countries.some((c) => c.code === prev)) return prev;
           const us = res.countries.find((c) => c.code === "US");
           return us?.code ?? res.countries[0].code;
         });
+      } else {
+        // Fallback when API fails or returns empty so country dropdown is always populated
+        setCountries(ISO_COUNTRIES);
       }
       setCountriesLoading(false);
     });
@@ -189,6 +279,7 @@ export default function BuyNumbersPage() {
   const localityInputRef = useRef<HTMLInputElement>(null);
   const localityDropdownRef = useRef<HTMLDivElement>(null);
   const localitySearchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const panelScrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     isPlatformAdmin().then(setShowSuppliers).catch(() => setShowSuppliers(false));
@@ -255,8 +346,6 @@ export default function BuyNumbersPage() {
 
   const [searchPhoneNumber, setSearchPhoneNumber] = useState("");
   const [phoneNumberPattern, setPhoneNumberPattern] = useState<PhoneNumberPattern>("contains");
-  const [administrativeArea, setAdministrativeArea] = useState("");
-  const [rateCenter, setRateCenter] = useState("");
 
   const [features, setFeatures] = useState<FeatureName[]>(["sms", "voice"]);
   const [limit, setLimit] = useState(50);
@@ -277,8 +366,88 @@ export default function BuyNumbersPage() {
   const [selectedNumbers, setSelectedNumbers] = useState<string[]>([]);
   const selectedSet = useMemo(() => new Set(selectedNumbers), [selectedNumbers]);
 
+  /** Reset search form to defaults and clear persisted criteria. Optionally clear results/messages. */
+  const resetSearchForm = useCallback((clearResults = false) => {
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("buy_numbers_country_code");
+      localStorage.removeItem("buy_numbers_phone_type");
+      localStorage.removeItem("buy_numbers_ndc");
+      localStorage.removeItem("buy_numbers_locality");
+      localStorage.removeItem("buy_numbers_admin_area");
+      localStorage.removeItem("buy_numbers_rate_center");
+    }
+    setCountryCode("US");
+    setPhoneNumberType("local");
+    setNationalDestinationCode("");
+    setLocality("");
+    setAdministrativeArea("");
+    setRateCenter("");
+    setSearchPhoneNumber("");
+    setPhoneNumberPattern("contains");
+    setFeatures(["sms", "voice"]);
+    setLimit(50);
+    setBestEffort(false);
+    setQuickship(false);
+    setReservableOnly(true);
+    setExcludeHeldNumbers(false);
+    if (clearResults) {
+      setResults([]);
+      setSelectedNumbers([]);
+      setError(null);
+      setInfo(null);
+    }
+  }, []);
+
   const [reservation, setReservation] = useState<TelnyxNumberReservation | null>(null);
   const [isReserving, setIsReserving] = useState(false);
+  const [loadingReservation, setLoadingReservation] = useState(false);
+  const [reservationIdInput, setReservationIdInput] = useState("");
+  const [availableReservations, setAvailableReservations] = useState<TelnyxNumberReservation[]>([]);
+  const [deletingReservationId, setDeletingReservationId] = useState<string | null>(null);
+  const [showReservationsList, setShowReservationsList] = useState(false);
+
+  // Load saved reservation ID from localStorage on mount
+  useEffect(() => {
+    const savedReservationId = localStorage.getItem("telnyx_active_reservation_id");
+    if (savedReservationId) {
+      setLoadingReservation(true);
+      retrieveNumberReservationAction(savedReservationId)
+        .then((res) => {
+          const data = res?.data;
+          if (data?.id) {
+            setReservation(data);
+            setInfo(`Loaded active reservation: ${data.id}`);
+            setCartOrderOpen(true);
+          } else {
+            localStorage.removeItem("telnyx_active_reservation_id");
+          }
+        })
+        .catch(() => {
+          localStorage.removeItem("telnyx_active_reservation_id");
+        })
+        .finally(() => {
+          setLoadingReservation(false);
+        });
+    }
+  }, []);
+
+  // Close panel with ESC key
+  useEffect(() => {
+    function handleEscape(e: KeyboardEvent) {
+      if (e.key === "Escape" && cartOrderOpen) {
+        setCartOrderOpen(false);
+      }
+    }
+    document.addEventListener("keydown", handleEscape);
+    return () => document.removeEventListener("keydown", handleEscape);
+  }, [cartOrderOpen]);
+
+  // When opening the reservations list, scroll panel to top so "Select a Reservation" title is visible
+  useEffect(() => {
+    if (showReservationsList && panelScrollRef.current) {
+      panelScrollRef.current.scrollTop = 0;
+    }
+  }, [showReservationsList]);
 
   const [connectionId, setConnectionId] = useState("");
   const [messagingProfileId, setMessagingProfileId] = useState("");
@@ -311,6 +480,7 @@ export default function BuyNumbersPage() {
 
   const [isOrdering, setIsOrdering] = useState(false);
   const [order, setOrder] = useState<TelnyxNumberOrder | null>(null);
+  const [orderError, setOrderError] = useState<string | null>(null);
 
   const selectedFromResults = useMemo(() => {
     const inResults = new Set(results.map((r) => r.phone_number));
@@ -354,6 +524,7 @@ export default function BuyNumbersPage() {
       setSelectedNumbers((prev) => prev.filter((n) => available.has(n)));
 
       setInfo(`Found ${data.length} numbers.`);
+      // Do not reset the form here — user may want to tweak only the pattern (e.g. ends_with 888 → 999) and search again. Use "New search" to reset all parameters.
     } catch (e) {
       setError(e instanceof Error ? e.message : "Search failed");
     } finally {
@@ -377,6 +548,10 @@ export default function BuyNumbersPage() {
       else set.add(phoneNumber);
       return Array.from(set);
     });
+    // Show info message to guide user to reserve
+    if (!reservation) {
+      setInfo("Number added to selection. Click 'Reserve selected' to create a cart reservation.");
+    }
   }
 
   function selectAllOnPage() {
@@ -406,7 +581,12 @@ export default function BuyNumbersPage() {
       const created = res?.data ?? null;
       if (!created?.id) throw new Error("Reservation created but no id was returned.");
       setReservation(created);
+      // Save reservation ID to localStorage so user can return to it
+      localStorage.setItem("telnyx_active_reservation_id", created.id);
       setInfo(`Reserved ${created.phone_numbers?.length ?? selectedFromResults.length} numbers.`);
+      // Auto-open cart panel after successful reservation
+      setCartOrderOpen(true);
+      setRightPanelTab("cart");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Reservation failed");
     } finally {
@@ -430,9 +610,127 @@ export default function BuyNumbersPage() {
     }
   }
 
-  async function handleCreateOrder() {
+  async function handleLoadReservation() {
     setError(null);
     setInfo(null);
+    const id = reservationIdInput.trim();
+    if (!id) {
+      setError("Please enter a reservation ID");
+      return;
+    }
+    setLoadingReservation(true);
+    try {
+      const res = await retrieveNumberReservationAction(id);
+      const data = res?.data;
+      if (!data?.id) throw new Error("Reservation not found");
+      setReservation(data);
+      localStorage.setItem("telnyx_active_reservation_id", data.id);
+      setInfo(`Loaded reservation: ${data.id}`);
+      setCartOrderOpen(true);
+      setRightPanelTab("cart");
+      setReservationIdInput("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load reservation");
+    } finally {
+      setLoadingReservation(false);
+    }
+  }
+
+  async function handleFindMyReservations() {
+    setError(null);
+    setInfo(null);
+    setLoadingReservation(true);
+    try {
+      const res = await listNumberReservationsAction({ pageNumber: 1, pageSize: 50 });
+      const reservations = res?.data ?? [];
+      
+      if (reservations.length === 0) {
+        setInfo("No active reservations found. The reservation may have expired (30-minute limit).");
+        setAvailableReservations([]);
+        setShowReservationsList(false);
+        return;
+      }
+
+      // Show list of reservations for user to choose
+      setAvailableReservations(reservations);
+      setShowReservationsList(true);
+      setInfo(`Found ${reservations.length} active reservation${reservations.length > 1 ? 's' : ''}. Select one to load.`);
+      setCartOrderOpen(true);
+      setRightPanelTab("cart");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to find reservations");
+      setAvailableReservations([]);
+      setShowReservationsList(false);
+    } finally {
+      setLoadingReservation(false);
+    }
+  }
+
+  async function handleSelectReservation(selectedReservation: TelnyxNumberReservation) {
+    setReservation(selectedReservation);
+    localStorage.setItem("telnyx_active_reservation_id", selectedReservation.id);
+    setShowReservationsList(false);
+    setInfo(`Loaded reservation with ${selectedReservation.phone_numbers?.length ?? 0} number(s)`);
+  }
+
+  async function handleCancelReservation() {
+    if (!reservation?.id) return;
+
+    if (
+      !confirm(
+        `Are you sure you want to cancel this reservation? The number(s) will be released and may be purchased by someone else.`
+      )
+    ) {
+      return;
+    }
+
+    setError(null);
+    setInfo(null);
+    setIsReserving(true);
+    try {
+      await deleteNumberReservationAction(reservation.id);
+      localStorage.removeItem("telnyx_active_reservation_id");
+      setReservation(null);
+      setAvailableReservations((prev) => prev.filter((r) => r.id !== reservation.id));
+      setInfo("Reservation cancelled successfully. The number(s) have been released.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to cancel reservation");
+    } finally {
+      setIsReserving(false);
+    }
+  }
+
+  async function handleRemoveReservation(res: TelnyxNumberReservation) {
+    const numbersLabel = res.phone_numbers?.map((p) => p.phone_number).join(", ") || "this reservation";
+    if (
+      !confirm(
+        `Remove reservation for ${numbersLabel}? The number(s) will be released and may be purchased by someone else.`
+      )
+    ) {
+      return;
+    }
+    setError(null);
+    setInfo(null);
+    setDeletingReservationId(res.id);
+    try {
+      await deleteNumberReservationAction(res.id);
+      if (reservation?.id === res.id) {
+        localStorage.removeItem("telnyx_active_reservation_id");
+        setReservation(null);
+      }
+      setAvailableReservations((prev) => prev.filter((r) => r.id !== res.id));
+      setInfo("Reservation removed.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to remove reservation");
+    } finally {
+      setDeletingReservationId(null);
+    }
+  }
+
+  async function handleCreateOrder(bypassReservation = false) {
+    setError(null);
+    setInfo(null);
+    setOrderError(null);
     setIsOrdering(true);
 
     try {
@@ -471,15 +769,75 @@ export default function BuyNumbersPage() {
           avgUpfront > 0 || avgMonthly > 0
             ? { upfrontCost: avgUpfront, monthlyCost: avgMonthly, currency: costCurrency }
             : undefined,
+        bypassReservation,
       });
       const created = res?.data ?? null;
       if (!created?.id) throw new Error("Order created but no id was returned.");
       setOrder(created);
+      // Clear saved reservation since order is complete
+      localStorage.removeItem("telnyx_active_reservation_id");
+      setReservation(null);
+      setOrderError(null);
       setInfo(`Order created: ${created.id}`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to create order");
+      const errorMsg = e instanceof Error ? e.message : "Failed to create order";
+      setError(errorMsg);
+      setOrderError(errorMsg);
     } finally {
       setIsOrdering(false);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Twilio search + purchase handlers
+  // ---------------------------------------------------------------------------
+
+  async function handleTwilioSearch() {
+    setTwilioError(null);
+    setTwilioInfo(null);
+    setTwilioSearching(true);
+    setTwilioResults([]);
+
+    try {
+      if (!twilioCountryCode.trim()) throw new Error("Country code is required.");
+      const res = await searchTwilioAvailableNumbersAction({
+        countryCode: twilioCountryCode.trim().toUpperCase(),
+        phoneNumberType: twilioPhoneType || undefined,
+        areaCode: twilioAreaCode.trim() || undefined,
+        contains: twilioContains.trim() || undefined,
+        locality: twilioLocality.trim() || undefined,
+        region: twilioRegion.trim() || undefined,
+        voiceEnabled: twilioVoice || undefined,
+        smsEnabled: twilioSms || undefined,
+        limit: twilioLimit,
+      });
+      if (!res.ok) throw new Error(res.error);
+      setTwilioResults(res.data);
+      setTwilioInfo(`Found ${res.data.length} Twilio numbers.`);
+    } catch (e) {
+      setTwilioError(e instanceof Error ? e.message : "Search failed");
+    } finally {
+      setTwilioSearching(false);
+    }
+  }
+
+  async function handleTwilioPurchase(phoneNumber: string) {
+    setTwilioError(null);
+    setTwilioInfo(null);
+    setTwilioPurchasing(phoneNumber);
+
+    try {
+      const res = await purchaseTwilioNumberAction({
+        phoneNumber,
+        friendlyName: `Platform number ${phoneNumber}`,
+      });
+      if (!res.ok) throw new Error(res.error);
+      setTwilioInfo(`Purchased and wired ${phoneNumber} to your platform.`);
+      setTwilioResults((prev) => prev.filter((r) => r.phone_number !== phoneNumber));
+    } catch (e) {
+      setTwilioError(e instanceof Error ? e.message : "Purchase failed");
+    } finally {
+      setTwilioPurchasing(null);
     }
   }
 
@@ -487,11 +845,22 @@ export default function BuyNumbersPage() {
 
   return (
     <div>
+      <div className="mb-4">
+        <Link
+          href="/rtc/numbers/manage-numbers"
+          className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
+        >
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+          </svg>
+          Back to Numbers
+        </Link>
+      </div>
       <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold text-gray-900 dark:text-white/90">Buy Numbers</h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Search Telnyx inventory, reserve numbers in a cart, then place an order.
+            Search provider inventory, reserve numbers in a cart, then place an order.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -532,9 +901,70 @@ export default function BuyNumbersPage() {
         </div>
       </div>
 
+      {reservation && (
+        <div className="mb-4 rounded-lg border border-green-200 bg-green-50 p-4 dark:border-green-800 dark:bg-green-950/30">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex-1">
+              <p className="text-sm font-medium text-green-900 dark:text-green-100">
+                Active Reservation: {reservation.phone_numbers?.length ?? 0} number{(reservation.phone_numbers?.length ?? 0) !== 1 ? 's' : ''} reserved
+              </p>
+              <p className="mt-1 text-xs text-green-700 dark:text-green-300">
+                ID: {reservation.id}
+                {reservationExpiresAt && (
+                  <> • Expires: {new Date(reservationExpiresAt).toLocaleString()}</>
+                )}
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setCartOrderOpen(true);
+                  setRightPanelTab("cart");
+                  handleFindMyReservations();
+                }}
+                disabled={loadingReservation}
+                className="mt-2 text-xs font-medium text-green-700 underline hover:text-green-800 dark:text-green-300 dark:hover:text-green-200 disabled:opacity-50"
+              >
+                {loadingReservation ? "Loading…" : "View all reservations"}
+              </button>
+            </div>
+            <Button
+              size="sm"
+              onClick={() => {
+                setCartOrderOpen(true);
+                setRightPanelTab("cart");
+              }}
+            >
+              Complete Checkout
+            </Button>
+          </div>
+        </div>
+      )}
+
       {error && (
         <div className="mb-4">
           <Alert variant="error" title="Error" message={error} />
+          <NotifyAdministrator
+            errorMessage={error}
+            actionContext="Buy numbers / Place order"
+          />
+          {error.includes("already reserved") && (
+            <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950/30">
+              <p className="text-sm font-medium text-amber-900 dark:text-amber-100">
+                Number Already Reserved?
+              </p>
+              <p className="mt-1 text-sm text-amber-700 dark:text-amber-300">
+                This number is already in a reservation. Click below to find and load your active reservations.
+              </p>
+              <Button
+                onClick={handleFindMyReservations}
+                disabled={loadingReservation}
+                className="mt-3"
+                size="sm"
+              >
+                {loadingReservation ? "Searching..." : "Find My Reservations"}
+              </Button>
+            </div>
+          )}
         </div>
       )}
       {info && (
@@ -548,25 +978,37 @@ export default function BuyNumbersPage() {
           <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white/90">Search</h2>
-              {showSuppliers && (
-                <div className="flex items-center gap-2 text-sm">
-                  <span className="text-gray-500 dark:text-gray-400">Inventory from:</span>
-                  {ACTIVE_SUPPLIERS.map((s) => (
-                    <span
-                      key={s.id}
-                      className="rounded-md bg-green-50 px-2 py-0.5 font-medium text-green-700 dark:bg-green-900/30 dark:text-green-400"
-                    >
-                      {s.name}
-                    </span>
-                  ))}
-                  {COMING_SOON_SUPPLIERS.length > 0 && (
-                    <span className="rounded-md border border-dashed border-gray-300 px-2 py-0.5 text-gray-500 dark:border-gray-600 dark:text-gray-400">
-                      {COMING_SOON_SUPPLIERS.map((s) => s.name).join(", ")} — Coming soon
-                    </span>
-                  )}
-                </div>
+              {COMING_SOON_SUPPLIERS.length > 0 && (
+                <span className="rounded-md border border-dashed border-gray-300 px-2 py-0.5 text-xs text-gray-500 dark:border-gray-600 dark:text-gray-400">
+                  {COMING_SOON_SUPPLIERS.map((s) => s.name).join(", ")} — Coming soon
+                </span>
               )}
             </div>
+
+            {/* Supplier tabs */}
+            <div className="mt-4 flex items-center gap-1 border-b border-gray-200 dark:border-gray-700">
+              {ACTIVE_SUPPLIERS.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => setActiveSupplier(s.id)}
+                  className={`relative px-4 py-2.5 text-sm font-medium transition-colors ${
+                    activeSupplier === s.id
+                      ? "text-brand-600 dark:text-brand-400"
+                      : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                  }`}
+                >
+                  {s.name}
+                  {activeSupplier === s.id && (
+                    <span className="absolute bottom-0 left-0 right-0 h-0.5 rounded-full bg-brand-600 dark:bg-brand-400" />
+                  )}
+                </button>
+              ))}
+            </div>
+
+            {/* Telnyx search form */}
+            {activeSupplier === "telnyx" && (<>
+            <div className="sr-only">Telnyx number search</div>
 
             <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
               <div>
@@ -580,8 +1022,6 @@ export default function BuyNumbersPage() {
                 >
                   {countriesLoading ? (
                     <option value={countryCode}>Loading…</option>
-                  ) : countries.length === 0 ? (
-                    <option value="US">US (fallback)</option>
                   ) : (
                     countries.map((c) => (
                       <option key={c.code} value={c.code}>
@@ -795,6 +1235,15 @@ export default function BuyNumbersPage() {
               <Button onClick={handleSearch} disabled={isSearching}>
                 {isSearching ? "Searching…" : "Search numbers"}
               </Button>
+              <span title="Clear form and results for a new search">
+                <Button
+                  variant="outline"
+                  onClick={() => resetSearchForm(true)}
+                  disabled={isSearching}
+                >
+                  New search
+                </Button>
+              </span>
               <Button variant="outline" onClick={selectAllOnPage} disabled={results.length === 0}>
                 Select all
               </Button>
@@ -805,8 +1254,130 @@ export default function BuyNumbersPage() {
                 Selected: {selectedNumbers.length}
               </span>
             </div>
+            </>)}
+
+            {/* Twilio search form */}
+            {activeSupplier === "twilio" && (
+              <div className="mt-4 space-y-4">
+                {twilioError && (
+                  <Alert variant="error" title="Twilio Error" message={twilioError} />
+                )}
+                {twilioInfo && (
+                  <Alert variant="success" title="Info" message={twilioInfo} />
+                )}
+
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                  <div>
+                    <Label htmlFor="twilio-country">Country</Label>
+                    <select
+                      id="twilio-country"
+                      value={twilioCountryCode}
+                      onChange={(e) => setTwilioCountryCode(e.target.value)}
+                      className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-sm text-gray-800 shadow-theme-xs focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:focus:border-brand-800"
+                    >
+                      {ISO_COUNTRIES.map((c) => (
+                        <option key={c.code} value={c.code}>
+                          {c.name} ({c.code})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <Label htmlFor="twilio-type">Type</Label>
+                    <select
+                      id="twilio-type"
+                      value={twilioPhoneType}
+                      onChange={(e) => setTwilioPhoneType(e.target.value)}
+                      className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-sm text-gray-800 shadow-theme-xs focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:focus:border-brand-800"
+                    >
+                      <option value="local">Local</option>
+                      <option value="toll_free">Toll-Free</option>
+                      <option value="mobile">Mobile</option>
+                    </select>
+                  </div>
+                  <div>
+                    <Label htmlFor="twilio-limit">Limit</Label>
+                    <Input
+                      id="twilio-limit"
+                      type="number"
+                      value={twilioLimit}
+                      onChange={(e) => setTwilioLimit(Number(e.target.value))}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                  <div>
+                    <Label htmlFor="twilio-area-code">Area code</Label>
+                    <Input
+                      id="twilio-area-code"
+                      placeholder="e.g. 312"
+                      value={twilioAreaCode}
+                      onChange={(e) => setTwilioAreaCode(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="twilio-contains">Contains (digits)</Label>
+                    <Input
+                      id="twilio-contains"
+                      placeholder="e.g. 555"
+                      value={twilioContains}
+                      onChange={(e) => setTwilioContains(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                  <div>
+                    <Label htmlFor="twilio-locality">Locality (city)</Label>
+                    <Input
+                      id="twilio-locality"
+                      placeholder="e.g. Chicago"
+                      value={twilioLocality}
+                      onChange={(e) => setTwilioLocality(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="twilio-region">Region (state)</Label>
+                    <Input
+                      id="twilio-region"
+                      placeholder="e.g. IL"
+                      value={twilioRegion}
+                      onChange={(e) => setTwilioRegion(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-6">
+                  <Switch label="Voice" checked={twilioVoice} onChange={setTwilioVoice} />
+                  <Switch label="SMS" checked={twilioSms} onChange={setTwilioSms} />
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <Button onClick={handleTwilioSearch} disabled={twilioSearching}>
+                    {twilioSearching ? "Searching Twilio…" : "Search Twilio numbers"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setTwilioResults([]);
+                      setTwilioError(null);
+                      setTwilioInfo(null);
+                      setTwilioAreaCode("");
+                      setTwilioContains("");
+                      setTwilioLocality("");
+                      setTwilioRegion("");
+                    }}
+                  >
+                    Clear
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
 
+          {/* Telnyx results */}
+          {activeSupplier === "telnyx" && (
           <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
             <div className="flex items-start justify-between gap-3">
               <div>
@@ -818,8 +1389,9 @@ export default function BuyNumbersPage() {
               <Button
                 onClick={handleReserveSelected}
                 disabled={isReserving || selectedFromResults.length === 0}
+                className={selectedFromResults.length > 0 ? "animate-pulse" : ""}
               >
-                {isReserving ? "Reserving…" : "Reserve selected"}
+                {isReserving ? "Reserving…" : `Reserve selected (${selectedFromResults.length})`}
               </Button>
             </div>
 
@@ -921,6 +1493,92 @@ export default function BuyNumbersPage() {
               </div>
             )}
           </div>
+          )}
+
+          {/* Twilio results */}
+          {activeSupplier === "twilio" && twilioResults.length > 0 && (
+          <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-white/90">Twilio Results</h2>
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                  Purchase a number to wire it to your platform and assign to an agent.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-4 overflow-x-auto">
+              <table className="min-w-full text-left text-sm">
+                <thead className="border-b border-gray-200 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                  <tr>
+                    <th className="py-3 pr-4">Number</th>
+                    <th className="py-3 pr-4">Location</th>
+                    <th className="py-3 pr-4">Capabilities</th>
+                    <th className="py-3 pr-4"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 text-gray-800 dark:divide-gray-800 dark:text-white/90">
+                  {twilioResults.map((r) => {
+                    const caps: string[] = [];
+                    if (r.capabilities?.voice) caps.push("Voice");
+                    if (r.capabilities?.SMS) caps.push("SMS");
+                    if (r.capabilities?.MMS) caps.push("MMS");
+                    if (r.capabilities?.fax) caps.push("Fax");
+                    const location = [r.locality, r.region, r.iso_country]
+                      .filter(Boolean)
+                      .join(", ");
+
+                    return (
+                      <tr key={r.phone_number} className="transition-colors hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                        <td className="py-3 pr-4">
+                          <span className="font-medium">{r.friendly_name || r.phone_number}</span>
+                          {r.friendly_name && r.friendly_name !== r.phone_number && (
+                            <span className="ml-2 text-xs text-gray-500">{r.phone_number}</span>
+                          )}
+                        </td>
+                        <td className="py-3 pr-4 min-w-[140px]">{location || "-"}</td>
+                        <td className="py-3 pr-4">
+                          <span className="inline-flex items-center gap-1.5">
+                            {caps.length > 0 ? (
+                              caps.map((c) => (
+                                <span
+                                  key={c}
+                                  className="rounded bg-gray-100 px-1.5 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-300"
+                                >
+                                  {c}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-gray-400">-</span>
+                            )}
+                          </span>
+                        </td>
+                        <td className="py-3 pr-4 text-right">
+                          <Button
+                            size="sm"
+                            onClick={() => handleTwilioPurchase(r.phone_number)}
+                            disabled={twilioPurchasing === r.phone_number}
+                          >
+                            {twilioPurchasing === r.phone_number ? "Purchasing…" : "Purchase & Wire"}
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          )}
+
+          {activeSupplier === "twilio" && twilioResults.length === 0 && !twilioSearching && (
+            <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white/90">Twilio Results</h2>
+              <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                Search Twilio inventory to see available numbers. Purchase to wire them to your platform.
+              </p>
+            </div>
+          )}
         </section>
 
         {cartOrderOpen && (
@@ -930,8 +1588,8 @@ export default function BuyNumbersPage() {
               onClick={() => setCartOrderOpen(false)}
               aria-hidden="true"
             />
-            <aside className="fixed right-0 top-0 z-50 flex h-full w-full max-w-md flex-col border-l border-gray-200 bg-white shadow-xl dark:border-gray-800 dark:bg-gray-900">
-              <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-4 py-3 dark:border-gray-800">
+            <aside className="fixed right-0 top-0 z-50 flex h-screen w-full max-w-md flex-col border-l border-gray-200 bg-white shadow-xl dark:border-gray-800 dark:bg-gray-900 pt-[env(safe-area-inset-top)]">
+              <div className="flex flex-shrink-0 items-center justify-between border-b border-gray-200 px-4 py-3 dark:border-gray-800">
                 <h2 className="text-base font-semibold text-gray-900 dark:text-white/90">
                   {rightPanelTab === "cart" ? "Cart (Reservation)" : "Order settings"}
                 </h2>
@@ -968,32 +1626,170 @@ export default function BuyNumbersPage() {
                   <button
                     type="button"
                     onClick={() => setCartOrderOpen(false)}
-                    className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
+                    className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-300"
+                    aria-label="Close panel"
+                    title="Close"
                   >
-                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
+                    <XMarkIcon className="h-5 w-5" />
                   </button>
                 </div>
               </div>
 
-              <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6 pt-4">
+              <div
+                ref={panelScrollRef}
+                className="flex-1 overflow-y-auto overscroll-contain px-6 pb-6 pt-4"
+                style={{ minHeight: 0 }}
+              >
               {rightPanelTab === "cart" ? (
                 <>
-                  {!reservation ? (
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
-                      No active reservation yet. Reserve selected numbers to start a 30-minute hold window.
-                    </p>
+                  {showReservationsList ? (
+                    <div className="space-y-4">
+                      <div className="sticky top-0 z-10 -mx-6 -mt-4 flex flex-col gap-1 bg-white px-6 pt-4 pb-2 dark:bg-gray-900">
+                        <div className="flex items-center justify-between">
+                          <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                            Select a Reservation
+                          </p>
+                          <button
+                            onClick={() => setShowReservationsList(false)}
+                            className="text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+                          >
+                            Back
+                          </button>
+                        </div>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                          Found {availableReservations.length} active reservation{availableReservations.length > 1 ? 's' : ''}
+                        </p>
+                      </div>
+                      <div className="space-y-2">
+                        {availableReservations.map((res) => (
+                          <div
+                            key={res.id}
+                            className="flex items-stretch gap-2 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden"
+                          >
+                            <button
+                              type="button"
+                              onClick={() => handleSelectReservation(res)}
+                              className="flex-1 min-w-0 p-3 text-left transition-colors hover:border-brand-500 hover:bg-brand-50 dark:hover:border-brand-500 dark:hover:bg-brand-950/20"
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="flex-1 min-w-0">
+                                  <div className="font-medium text-sm text-gray-900 dark:text-gray-100">
+                                    {res.phone_numbers?.map((p) => p.phone_number).join(", ") || "No numbers"}
+                                  </div>
+                                  <div className="mt-1 text-xs text-gray-500 dark:text-gray-400 font-mono truncate">
+                                    ID: {res.id}
+                                  </div>
+                                  {res.phone_numbers?.[0]?.expired_at && (
+                                    <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                      Expires: {new Date(res.phone_numbers[0].expired_at).toLocaleString()}
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="text-xs font-medium text-brand-600 dark:text-brand-400">
+                                  {res.phone_numbers?.length || 0} number
+                                  {(res.phone_numbers?.length || 0) !== 1 ? "s" : ""}
+                                </div>
+                              </div>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleRemoveReservation(res);
+                              }}
+                              disabled={deletingReservationId === res.id}
+                              title="Remove reservation (release numbers)"
+                              className="shrink-0 flex items-center justify-center w-10 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:text-red-400 dark:hover:bg-red-950/30 disabled:opacity-50"
+                            >
+                              {deletingReservationId === res.id ? (
+                                <span className="text-xs">…</span>
+                              ) : (
+                                <XMarkIcon className="h-5 w-5" />
+                              )}
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : !reservation ? (
+                    <div className="space-y-4">
+                      <p className="text-sm text-gray-700 dark:text-gray-300">
+                        No active reservation yet.
+                      </p>
+                      <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-950/30">
+                        <p className="text-sm font-medium text-blue-900 dark:text-blue-100">
+                          How to checkout:
+                        </p>
+                        <ol className="mt-2 space-y-1 text-sm text-blue-800 dark:text-blue-200">
+                          <li>1. Select numbers from the search results</li>
+                          <li>2. Click "Reserve selected" button</li>
+                          <li>3. Review your cart (30-minute hold)</li>
+                          <li>4. Click "Place order" to complete</li>
+                        </ol>
+                      </div>
+                      {selectedFromResults.length > 0 && (
+                        <Button onClick={handleReserveSelected} disabled={isReserving} className="w-full">
+                          {isReserving ? "Reserving…" : `Reserve ${selectedFromResults.length} selected number${selectedFromResults.length > 1 ? 's' : ''}`}
+                        </Button>
+                      )}
+                      <div className="border-t border-gray-200 pt-4 dark:border-gray-700">
+                        <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                          Have an existing reservation?
+                        </p>
+                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                          Find your recent reservations or enter a reservation ID
+                        </p>
+                        <div className="mt-3 space-y-2">
+                          <Button
+                            onClick={handleFindMyReservations}
+                            disabled={loadingReservation}
+                            className="w-full"
+                          >
+                            {loadingReservation ? "Searching..." : "Find My Reservations"}
+                          </Button>
+                          <div className="flex gap-2">
+                            <Input
+                              placeholder="Or enter Reservation ID"
+                              value={reservationIdInput}
+                              onChange={(e) => setReservationIdInput(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") handleLoadReservation();
+                              }}
+                            />
+                            <Button
+                              onClick={handleLoadReservation}
+                              disabled={loadingReservation || !reservationIdInput.trim()}
+                              variant="outline"
+                            >
+                              {loadingReservation ? "Loading…" : "Load"}
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
                   ) : (
                     <div className="mt-3 space-y-3">
-                      <div className="text-sm text-gray-700 dark:text-gray-200">
-                        Reservation ID: <span className="font-mono text-xs">{reservation.id}</span>
-                      </div>
-                      {reservationExpiresAt && (
-                        <div className="text-xs text-gray-500 dark:text-gray-400">
-                          Expires: {new Date(reservationExpiresAt).toLocaleString()}
+                      <button
+                        type="button"
+                        onClick={handleFindMyReservations}
+                        disabled={loadingReservation}
+                        className="text-xs font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300 disabled:opacity-50"
+                      >
+                        {loadingReservation ? "Loading…" : "View all reservations"}
+                      </button>
+                      <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-800/50">
+                        <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
+                          Reservation ID
                         </div>
-                      )}
+                        <div className="font-mono text-xs text-gray-900 dark:text-gray-100 break-all">
+                          {reservation.id}
+                        </div>
+                        {reservationExpiresAt && (
+                          <div className="mt-2 text-xs text-gray-600 dark:text-gray-400">
+                            Expires: {new Date(reservationExpiresAt).toLocaleString()}
+                          </div>
+                        )}
+                      </div>
                       <div className="max-h-[240px] overflow-auto rounded-lg border border-gray-100 p-3 text-sm dark:border-gray-800">
                         {reservation.phone_numbers?.length ? (
                           <ul className="space-y-1">
@@ -1009,12 +1805,56 @@ export default function BuyNumbersPage() {
                         )}
                       </div>
 
+                      {orderError && orderError.includes("10027") && (
+                        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/30">
+                          <p className="text-sm font-medium text-amber-900 dark:text-amber-100">
+                            Reservation Issue Detected
+                          </p>
+                          <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+                            The provider doesn't recognize this number in the reservation. This usually means the reservation expired or the number is no longer available.
+                          </p>
+                          <p className="mt-2 text-xs font-medium text-amber-800 dark:text-amber-200">
+                            Options:
+                          </p>
+                          <ul className="mt-1 text-xs text-amber-700 dark:text-amber-300 list-disc list-inside space-y-1">
+                            <li>Search for the number again to verify availability</li>
+                            <li>Create a new reservation with fresh numbers</li>
+                            <li>Contact support if you believe this is an error</li>
+                          </ul>
+                        </div>
+                      )}
+
+                      {orderError && !orderError.includes("10027") && (
+                        <div className="rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-800 dark:bg-red-950/30">
+                          <p className="text-sm font-medium text-red-900 dark:text-red-100">
+                            Order failed
+                          </p>
+                          <p className="mt-1 text-xs text-red-700 dark:text-red-300">
+                            {orderError}
+                          </p>
+                          <p className="mt-2 text-xs font-medium text-red-800 dark:text-red-200">
+                            If the provider requires a connection, messaging profile, or billing group, open the <strong>Settings</strong> tab above, fill them in, then try Place order again.
+                          </p>
+                        </div>
+                      )}
+
                       <div className="flex flex-col gap-2">
                         <Button onClick={handleCreateOrder} disabled={isOrdering}>
                           {isOrdering ? "Placing order…" : "Place order"}
                         </Button>
                         <Button variant="outline" onClick={handleExtendReservation} disabled={isReserving}>
                           {isReserving ? "Extending…" : "Extend reservation"}
+                        </Button>
+                        <Button 
+                          variant="outline" 
+                          onClick={handleCancelReservation} 
+                          disabled={isReserving}
+                          className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:text-red-300 dark:hover:bg-red-950/30"
+                        >
+                          {isReserving ? "Cancelling…" : "Cancel Reservation"}
+                        </Button>
+                        <Button variant="outline" onClick={() => setCartOrderOpen(false)}>
+                          Close
                         </Button>
                         <p className="text-xs text-gray-500 dark:text-gray-400">
                           Need to assign connection, messaging profile, or billing group? Use the Settings tab.
@@ -1029,9 +1869,9 @@ export default function BuyNumbersPage() {
                     Optional: attach your numbers to a connection, messaging profile, and billing group.
                   </p>
                   <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm dark:border-amber-800 dark:bg-amber-950/30">
-                    <p className="font-medium text-amber-800 dark:text-amber-200">Client pricing vs Telnyx cost</p>
+                    <p className="font-medium text-amber-800 dark:text-amber-200">Client pricing vs provider cost</p>
                     <p className="mt-1 text-amber-700 dark:text-amber-300">
-                      To charge clients one price while buying at Telnyx&apos;s cost: define a product/price catalog (client price), integrate with Stripe or your billing system to charge before placing the order, then place the order with Telnyx at their price. The margin is the difference.
+                      To charge clients one price while buying at provider cost: define a product/price catalog (client price), integrate with Stripe or your billing system to charge before placing the order, then place the order at the provider price. The margin is the difference.
                     </p>
                   </div>
 
@@ -1100,9 +1940,47 @@ export default function BuyNumbersPage() {
                       </p>
                     </div>
 
-                    <Button onClick={handleCreateOrder} disabled={isOrdering}>
-                      {isOrdering ? "Creating order…" : "Create number order"}
-                    </Button>
+                    {orderError && orderError.includes("10027") && (
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/30">
+                        <p className="text-sm font-medium text-amber-900 dark:text-amber-100">
+                          Reservation Issue Detected
+                        </p>
+                        <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+                          The provider doesn't recognize this number in the reservation. This usually means the reservation expired or the number is no longer available.
+                        </p>
+                        <p className="mt-2 text-xs font-medium text-amber-800 dark:text-amber-200">
+                          Recommended Actions:
+                        </p>
+                        <ul className="mt-1 text-xs text-amber-700 dark:text-amber-300 list-disc list-inside space-y-1">
+                          <li>Search for the number again to verify it's still available</li>
+                          <li>Create a new reservation with the current available numbers</li>
+                          <li>Check if the reservation expired (30-minute limit)</li>
+                        </ul>
+                      </div>
+                    )}
+
+                    {orderError && !orderError.includes("10027") && (
+                      <div className="rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-800 dark:bg-red-950/30">
+                        <p className="text-sm font-medium text-red-900 dark:text-red-100">
+                          Order failed
+                        </p>
+                        <p className="mt-1 text-xs text-red-700 dark:text-red-300">
+                          {orderError}
+                        </p>
+                        <p className="mt-2 text-xs text-red-800 dark:text-red-200">
+                          Fill in Connection ID, Messaging Profile ID, and/or Billing Group ID below if required by your provider, then click Create number order.
+                        </p>
+                      </div>
+                    )}
+
+                    <div className="flex flex-col gap-2">
+                      <Button onClick={handleCreateOrder} disabled={isOrdering}>
+                        {isOrdering ? "Creating order…" : "Create number order"}
+                      </Button>
+                      <Button variant="outline" onClick={() => setCartOrderOpen(false)}>
+                        Cancel
+                      </Button>
+                    </div>
                   </div>
 
                   {order && (

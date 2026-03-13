@@ -23,7 +23,7 @@ export async function createClient() {
     );
   }
 
-  return createServerClient<Database>(
+  const client = createServerClient<Database>(
     supabaseUrl,
     supabaseAnonKey,
     {
@@ -52,5 +52,57 @@ export async function createClient() {
       },
     }
   );
+
+  // Set app.current_tenant_id for RLS when tenant is known (cookie/header) so we control
+  // the session variable and avoid relying on pooler/JWT using the wrong name (app.current_tenant).
+  const tenantIdFromCookie = cookieStore.get("current_tenant_id")?.value;
+  if (tenantIdFromCookie && /^[0-9a-f-]{36}$/i.test(tenantIdFromCookie)) {
+    try {
+      // #region agent log
+      fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          location: "database/server.ts:before-set_app_tenant_id",
+          message: "Calling set_app_tenant_id RPC",
+          data: { hasTenantId: true },
+          timestamp: Date.now(),
+          hypothesisId: "H1",
+        }),
+      }).catch(() => {});
+      // #endregion
+      await (client as any).rpc("set_app_tenant_id", { tenant_id: tenantIdFromCookie });
+      // #region agent log
+      fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          location: "database/server.ts:after-set_app_tenant_id",
+          message: "set_app_tenant_id RPC succeeded",
+          data: {},
+          timestamp: Date.now(),
+          hypothesisId: "H1",
+        }),
+      }).catch(() => {});
+      // #endregion
+    } catch (e) {
+      // #region agent log
+      fetch("http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          location: "database/server.ts:set_app_tenant_id-err",
+          message: "set_app_tenant_id RPC failed",
+          data: { error: e instanceof Error ? e.message : String(e) },
+          timestamp: Date.now(),
+          hypothesisId: "H1",
+        }),
+      }).catch(() => {});
+      // #endregion
+      // Non-fatal: RLS may still resolve tenant from auth.users metadata
+    }
+  }
+
+  return client;
 }
 

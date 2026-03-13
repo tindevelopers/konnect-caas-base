@@ -1,6 +1,8 @@
 import { Outfit } from "next/font/google";
 import "./globals.css";
-import "swiper/swiper-bundle.css";
+import "swiper/css";
+import "swiper/css/navigation";
+import "swiper/css/pagination";
 import "simplebar-react/dist/simplebar.min.css";
 import { SidebarProvider } from "@/context/SidebarContext";
 import { ThemeProvider } from "@/context/ThemeContext";
@@ -22,7 +24,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${outfit.variable} ${outfit.className} dark:bg-gray-900`} suppressHydrationWarning>
+      <body className={`${outfit.variable} ${outfit.className} bg-white dark:bg-gray-900`} suppressHydrationWarning>
         <BuilderDevTools />
         <ThemeProvider>
           <TenantProvider>

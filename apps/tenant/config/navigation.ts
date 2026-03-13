@@ -36,9 +36,8 @@ export type NavItem = {
   new?: boolean;
   pro?: boolean;
   subItems?: NavItem[];
-  // Future: Add permission/role requirements
-  // requiredRole?: string[];
-  // requiredPermission?: string[];
+  requiredRole?: string[];
+  requiredPermission?: string[];
 };
 
 // Helper function to create icon components
@@ -83,12 +82,20 @@ export const mainNavItems: NavItem[] = [
     new: true,
     subItems: [
       {
+        name: "Agent Manager",
+        path: "/ai/agent-manager",
+      },
+      {
         name: "AI Assistants",
         path: "/ai/assistants",
       },
       {
         name: "AI Tests",
         path: "/ai/tests",
+      },
+      {
+        name: "Voice Settings",
+        path: "/ai/voice-settings",
       },
       {
         name: "MCP Servers",
@@ -101,6 +108,11 @@ export const mainNavItems: NavItem[] = [
       {
         name: "Telemetry",
         path: "/ai/telemetry",
+      },
+      {
+        name: "Chatbot Embed",
+        path: "/ai/chatbot-embed",
+        new: true,
       },
       {
         name: "Webhook Events",
@@ -137,13 +149,14 @@ export const mainNavItems: NavItem[] = [
     name: "Integrations",
     icon: createIcon(PlugInIcon),
     subItems: [
-      { name: "Telephony (Telnyx)", path: "/saas/integrations/telephony" },
+      { name: "Telephony", path: "/saas/integrations/telephony" },
       { name: "All Integrations", path: "/saas/integrations/list" },
+      { name: "Scheduling", path: "/saas/integrations/list?category=Scheduling" },
       { name: "CRM", path: "/saas/integrations/crm" },
     ],
   },
   {
-    name: "Real-Time Communications",
+    name: "Communications",
     icon: createIcon(BoltIcon),
     // Stubs for now; pages will be placeholders until we wire real functionality.
     subItems: [
@@ -221,12 +234,29 @@ export const mainNavItems: NavItem[] = [
     name: "Admin",
     icon: createIcon(UserCircleIcon),
     subItems: [
-      { name: "User Management", path: "/saas/admin/entity/user-management" },
-      { name: "Tenant Management", path: "/saas/admin/entity/tenant-management" },
-      { name: "Organization Management", path: "/saas/admin/entity/organization-management" },
-      { name: "Role Management", path: "/saas/admin/entity/role-management" },
+      {
+        name: "User Management",
+        path: "/saas/admin/entity/user-management",
+        requiredPermission: ["users.read"],
+      },
+      {
+        name: "Tenant Management",
+        path: "/saas/admin/entity/tenant-management",
+        requiredRole: ["Platform Admin"],
+      },
+      {
+        name: "Organization Management",
+        path: "/saas/admin/entity/organization-management",
+        requiredPermission: ["tenants.read"],
+      },
+      {
+        name: "Role Management",
+        path: "/saas/admin/entity/role-management",
+        requiredPermission: ["roles.read"],
+      },
       {
         name: "Email & Notifications",
+        requiredPermission: ["settings.read"],
         subItems: [
           { name: "Templates", path: "/saas/email-notifications/templates" },
           { name: "Settings", path: "/saas/email-notifications/settings" },
@@ -239,11 +269,13 @@ export const mainNavItems: NavItem[] = [
   {
     name: "System Admin",
     icon: createIcon(LockIcon),
+    requiredRole: ["Platform Admin"],
     subItems: [
       { name: "Organization Admins", path: "/saas/admin/system-admin/organization-admins" },
       { name: "API Configuration", path: "/saas/admin/system-admin/api-configuration" },
       { name: "Default Integrations", path: "/saas/admin/system-admin/default-integrations" },
       { name: "Integrations", path: "/saas/admin/system-admin/integrations" },
+      { name: "Agent Providers", path: "/saas/admin/system-admin/agent-providers", new: true },
       { name: "Pricing & Markup", path: "/saas/admin/system-admin/pricing", new: true },
       { name: "Tenant Costs", path: "/saas/admin/system-admin/tenant-costs", new: true },
       { name: "Multi-Tenant", path: "/multi-tenant", new: true },
@@ -282,6 +314,7 @@ export const mainNavItems: NavItem[] = [
     name: "SaaS",
     icon: createIcon(ShootingStarIcon),
     new: true,
+    requiredRole: ["Platform Admin"],
     subItems: [
       { name: "Dashboard", path: "/saas/dashboard" },
       {
@@ -337,6 +370,7 @@ export const mainNavItems: NavItem[] = [
         subItems: [
           { name: "All Integrations", path: "/saas/integrations/list" },
           { name: "CRM", path: "/saas/integrations/crm" },
+          { name: "Scheduling", path: "/saas/integrations/list?category=Scheduling" },
           { name: "Email Marketing", path: "/saas/integrations/email-marketing" },
           { name: "Telephony", path: "/saas/integrations/telephony" },
           { name: "Payments", path: "/saas/integrations/payments" },
@@ -383,6 +417,7 @@ export const mainNavItems: NavItem[] = [
       { name: "Edit Profile", path: "/profile?tab=profile" },
       { name: "Account Settings", path: "/profile?tab=account" },
       { name: "Change Password", path: "/profile?tab=password" },
+      { name: "Support", path: "/profile?tab=support" },
     ],
   },
   {

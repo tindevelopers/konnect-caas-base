@@ -1,0 +1,26 @@
+# Vercel + Turbo Build Rules
+
+## Goal
+
+Keep CI/Vercel builds deterministic for this Turborepo + Next.js monorepo.
+
+## Node / package manager
+
+- Respect the repo-level `package.json#engines.node`. If Vercel Project Settings specify a different major, the repo `engines` wins.
+- Use the repo `package.json#packageManager` (pnpm) for all install/build commands.
+
+## Turbo + environment variables
+
+- If a build relies on environment variables in Vercel, ensure they are declared in `turbo.json` (so tasks receive them on Vercel).
+- Prefer scoping env vars to the smallest set of tasks/packages that need them (e.g. `packages/@tinadmin/telnyx-ai-platform#build`).
+
+## Type safety during Next builds
+
+- Next.js builds run TypeScript checks; avoid `string | null` leaking into required `string` fields.
+- When a value is guarded by runtime checks, make the type-narrowing explicit (e.g. non-null assertion after a `!value` early return) and add a final safe fallback for UI strings.
+
+## Dependency build scripts (Vercel)
+
+- Vercel may ignore dependency build scripts by default (e.g. `sharp`, `esbuild`); don’t assume postinstall scripts run in CI.
+- If native deps are required at build time, prefer prebuilt binaries and avoid relying on postinstall compilation.
+

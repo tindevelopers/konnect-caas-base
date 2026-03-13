@@ -3,6 +3,9 @@ import { createHmac, createPublicKey, verify as cryptoVerify } from "crypto";
 import { createAdminClient } from "@/core/database/admin-client";
 import { telnyxWebhookConfig } from "@/src/core/telnyx/config";
 import { handleTelnyxInboundVoiceEvent } from "@/src/core/telnyx/voice-router";
+import { getTelnyxTransportForWebhook } from "@/src/core/telnyx/webhook-transport";
+import { createTelnyxClient, getAssistant } from "@tinadmin/telnyx-ai-platform/server";
+import { nextAllowedStartUtc } from "@/src/core/campaigns/scheduling";
 
 function resolveTenantId(request: NextRequest, payload: Record<string, unknown>) {
   const headerTenant = request.headers.get("x-tenant-id");
@@ -17,6 +20,21 @@ function resolveTenantId(request: NextRequest, payload: Record<string, unknown>)
     (payload.tenant_id as string | undefined) ||
     (payload.tenantId as string | undefined);
   return payloadTenant;
+}
+
+/** Resolve tenant from campaign_recipients by call_control_id (for outbound campaign calls where Telnyx does not send tenant). */
+async function resolveTenantIdFromCampaignRecipient(
+  payload: Record<string, unknown>
+): Promise<string | null> {
+  const callControlId = resolveExternalId(payload);
+  if (!callControlId) return null;
+  const adminClient = createAdminClient();
+  const { data } = await (adminClient.from("campaign_recipients") as any)
+    .select("tenant_id")
+    .eq("call_control_id", callControlId)
+    .limit(1)
+    .maybeSingle();
+  return (data?.tenant_id as string) ?? null;
 }
 
 function resolveEventType(payload: Record<string, unknown>) {
@@ -54,6 +72,159 @@ function resolveExternalId(payload: Record<string, unknown>) {
     (payload.id as string | undefined) ||
     null
   );
+}
+
+function resolveCallPayload(payload: Record<string, unknown>): Record<string, unknown> {
+  const data =
+    (payload.data as Record<string, unknown> | undefined) ||
+    ((payload.metadata as Record<string, unknown> | undefined)?.event as
+      | Record<string, unknown>
+      | undefined);
+  const nested = data?.payload;
+  if (nested && typeof nested === "object") return nested as Record<string, unknown>;
+  return (data ?? payload) as Record<string, unknown>;
+}
+
+/** Start AI assistant on outbound call when it is answered (set by callAssistantAction via client_state). */
+async function handleOutboundCallAnsweredAssistant(payload: Record<string, unknown>) {
+  const eventType = resolveEventType(payload);
+  const normalizedEventType = eventType.replaceAll("_", ".");
+  const callPayload = resolveCallPayload(payload);
+  const direction = callPayload.direction as string | undefined;
+  const clientStateRaw =
+    (callPayload.client_state as string | undefined) ||
+    ((payload.data as Record<string, unknown> | undefined)?.client_state as string | undefined);
+
+  // Some Telnyx setups emit `call.conversation.started` without a `call.answered` webhook.
+  // Treat both as “answered-equivalent” triggers for starting the outbound assistant.
+  if (
+    normalizedEventType !== "call.answered" &&
+    normalizedEventType !== "call.conversation.started"
+  ) {
+    return;
+  }
+
+  // Some Telnyx event payloads omit `direction`. If direction is present, ensure it's outbound;
+  // otherwise rely on our client_state marker (`tinadmin_outbound_assistant`) to scope behavior.
+  if (direction && direction !== "outgoing" && direction !== "outbound") return;
+
+  if (!clientStateRaw || typeof clientStateRaw !== "string") return;
+
+  // Decoded client_state from campaign executor may include: t, a, tid, g (greeting), pf (enableProductPurchaseFlow), rw (webhookUrl)
+  let decoded: { t?: string; a?: string; tid?: string; g?: string; cg?: boolean; pf?: boolean; rw?: string };
+  try {
+    decoded = JSON.parse(
+      Buffer.from(clientStateRaw, "base64").toString("utf8")
+    ) as { t?: string; a?: string; tid?: string; g?: string; cg?: boolean; pf?: boolean; rw?: string };
+  } catch {
+    return;
+  }
+  if (decoded?.t !== "tinadmin_outbound_assistant" || !decoded?.a || !decoded?.tid) return;
+
+  const callControlId =
+    (callPayload.call_control_id as string) || resolveExternalId(payload);
+  if (!callControlId) return;
+
+  const DEFAULT_GREETING =
+    "Hi, this is calling from PetStore Direct. We work with professional grooming salons on wholesale supply pricing. Am I speaking with the person who handles grooming supply purchases?";
+  const campaignGreeting =
+    typeof decoded.g === "string" && decoded.g.trim()
+      ? decoded.g.trim().slice(0, 3000)
+      : "";
+
+  try {
+    const { transport, credentialSource } = await getTelnyxTransportForWebhook(decoded.tid);
+    // Fetch current assistant config from Telnyx so we pass the latest instructions.
+    // Passing instructions at ai_assistant_start overwrites any cached/stale assistant config.
+    // Telnyx API may return { data: { ... } } or direct { instructions, ... }.
+    let instructions: string | undefined;
+    let assistantGreetingObserved = "";
+    try {
+      const response = await getAssistant(transport, decoded.a);
+      const rawResponse: unknown = response;
+      const assistant = (() => {
+        if (!rawResponse || typeof rawResponse !== "object") return null;
+        if ("data" in rawResponse) {
+          const data = (rawResponse as { data?: unknown }).data;
+          if (data && typeof data === "object") {
+            return data as Record<string, unknown>;
+          }
+        }
+        return rawResponse as Record<string, unknown>;
+      })();
+      const raw = assistant?.instructions;
+      const assistantGreetingRaw = assistant?.greeting;
+      const assistantGreeting =
+        typeof assistantGreetingRaw === "string" && assistantGreetingRaw.trim()
+          ? assistantGreetingRaw.trim().slice(0, 3000)
+          : "";
+      assistantGreetingObserved = assistantGreeting;
+      if (typeof raw === "string" && raw.trim()) {
+        instructions = raw.trim().slice(0, 50000);
+      }
+
+    } catch (fetchErr) {
+      console.warn("[TelnyxWebhook] Could not fetch assistant for instructions:", fetchErr instanceof Error ? fetchErr.message : String(fetchErr));
+    }
+    const assistantBody = instructions
+      ? { id: decoded.a, instructions }
+      : { id: decoded.a };
+
+    // Avoid double greeting:
+    // - If campaign explicitly set a greeting (cg=true), send it.
+    // - If cg is missing (older client_state), treat greeting as campaign greeting only when it differs from DEFAULT_GREETING.
+    // - Else, if assistant has its own configured greeting, omit greeting in start call so Telnyx plays only one.
+    // - Else, fall back to DEFAULT_GREETING.
+    const legacyLooksCustom = !!campaignGreeting && campaignGreeting !== DEFAULT_GREETING;
+    const hasCampaignGreeting =
+      (!!campaignGreeting && decoded.cg === true) ||
+      (!!campaignGreeting && decoded.cg == null && legacyLooksCustom);
+    const shouldSendGreeting = hasCampaignGreeting || !assistantGreetingObserved;
+    const greetingToSend = hasCampaignGreeting ? campaignGreeting : DEFAULT_GREETING;
+    const startBody: Record<string, unknown> = shouldSendGreeting
+      ? { assistant: assistantBody, greeting: greetingToSend }
+      : { assistant: assistantBody };
+
+    let lastError: unknown = null;
+    try {
+      const startRes = await transport.request(
+        `/calls/${callControlId}/actions/ai_assistant_start`,
+        {
+          method: "POST",
+          body: startBody,
+        }
+      );
+    } catch (err) {
+      lastError = err;
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const is401 = /401|Authentication failed|No key found matching/i.test(errMsg);
+      const envKey = process.env.TELNYX_API_KEY?.trim();
+      if (is401 && credentialSource === "tenant" && envKey) {
+        console.log("[TelnyxWebhook:ai_assistant_start] 401 with tenant credentials, retrying with TELNYX_API_KEY env");
+        try {
+          const envTransport = createTelnyxClient({ apiKey: envKey });
+          await envTransport.request(
+            `/calls/${callControlId}/actions/ai_assistant_start`,
+            { method: "POST", body: startBody }
+          );
+          lastError = null;
+          console.log("[TelnyxWebhook:ai_assistant_start] retry succeeded");
+        } catch (retryErr) {
+          lastError = retryErr;
+          console.error("[TelnyxWebhook:ai_assistant_start] retry failed", retryErr instanceof Error ? retryErr.message : String(retryErr));
+        }
+      }
+    }
+    if (lastError) throw lastError;
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    console.error("[TelnyxWebhook] Outbound call.answered ai_assistant_start failed:", {
+      callControlId,
+      assistantId: decoded.a,
+      tenantId: decoded.tid,
+      error: errMsg,
+    });
+  }
 }
 
 function shouldStoreAiAgentEvent(eventType: string) {
@@ -241,8 +412,10 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const tenantId = resolveTenantId(request, payload);
-
+  let tenantId: string | undefined = resolveTenantId(request, payload);
+  if (!tenantId) {
+    tenantId = (await resolveTenantIdFromCampaignRecipient(payload)) ?? undefined;
+  }
   if (!tenantId) {
     return NextResponse.json(
       { error: "tenantId is required" },
@@ -252,6 +425,7 @@ export async function POST(request: NextRequest) {
 
   const eventType = resolveEventType(payload);
   const externalId = resolveExternalId(payload);
+
   const adminClient = createAdminClient();
 
   const { error } = await (adminClient.from("telephony_events") as any).insert({
@@ -310,6 +484,17 @@ export async function POST(request: NextRequest) {
     });
   }
 
+  // Start AI assistant on outbound call when answered (callAssistantAction sets client_state).
+  try {
+    await handleOutboundCallAnsweredAssistant(payload);
+  } catch (error) {
+    console.error("[TelnyxWebhook] Error handling outbound call.answered assistant:", {
+      eventType,
+      externalId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
   // Record AI call costs on call completion (best-effort, fire-and-forget)
   try {
     await recordAiCallCostFromEvent(tenantId, eventType, externalId, payload);
@@ -342,17 +527,17 @@ async function updateCampaignRecipientFromCallEvent(
   if (!callControlId) return;
 
   const { data: recipient } = await (adminClient.from("campaign_recipients") as any)
-    .select("id, campaign_id")
+    .select("id, campaign_id, attempts")
     .eq("tenant_id", tenantId)
     .eq("call_control_id", callControlId)
     .single();
 
   if (!recipient) return;
 
-  const norm = eventType.toLowerCase();
+  const norm = eventType.toLowerCase().replaceAll("_", ".");
   let status: string | null = null;
 
-  if (norm === "call.answered") {
+  if (norm === "call.answered" || norm === "call.conversation.started") {
     status = "in_progress";
   } else if (norm === "call.hangup" || norm === "call.completed") {
     const data = payload.data as Record<string, unknown> | undefined;
@@ -372,7 +557,41 @@ async function updateCampaignRecipientFromCallEvent(
 
   if (status) {
     const updates: Record<string, unknown> = { status };
-    if (status === "completed" || status === "no_answer" || status === "voicemail") {
+
+    // Retry logic: for "no answer" / "voicemail", reschedule if attempts < max_attempts.
+    if (status === "no_answer" || status === "voicemail") {
+      const { data: campaign } = await (adminClient.from("campaigns") as any)
+        .select(
+          "max_attempts, retry_delay_minutes, calling_window_start, calling_window_end, calling_days, timezone"
+        )
+        .eq("tenant_id", tenantId)
+        .eq("id", recipient.campaign_id)
+        .maybeSingle();
+
+      const attempts = Math.max(0, Math.floor(Number(recipient.attempts) || 0));
+      const maxAttempts = Math.max(0, Math.floor(Number(campaign?.max_attempts) || 3));
+      const retryDelay = Math.max(1, Math.floor(Number(campaign?.retry_delay_minutes) || 60));
+      const tz = String(campaign?.timezone || "UTC");
+      const windowStart = String(campaign?.calling_window_start || "09:00");
+      const windowEnd = String(campaign?.calling_window_end || "20:00");
+      const callingDays = (campaign?.calling_days as number[] | null | undefined) ?? [1, 2, 3, 4, 5];
+
+      if (maxAttempts > 0 && attempts < maxAttempts) {
+        const retryBase = new Date(Date.now() + retryDelay * 60_000);
+        const retryAt = nextAllowedStartUtc({
+          fromUtc: retryBase,
+          timeZone: tz,
+          callingWindowStart: windowStart,
+          callingWindowEnd: windowEnd,
+          callingDays,
+        });
+        updates.status = "scheduled";
+        updates.scheduled_at = retryAt.toISOString();
+        updates.completed_at = null;
+      } else {
+        updates.completed_at = new Date().toISOString();
+      }
+    } else if (status === "completed") {
       updates.completed_at = new Date().toISOString();
     }
     await (adminClient.from("campaign_recipients") as any)
@@ -429,6 +648,9 @@ async function recordAiCallCostFromEvent(
     (inner.conversation_id as string | undefined) ??
     (data?.conversation_id as string | undefined) ??
     externalId;
+  const aiAssistantId =
+    (inner.ai_assistant_id as string | undefined) ??
+    (data?.ai_assistant_id as string | undefined);
 
   // Estimated cost: Telnyx Conversational AI = ~$0.08/min + $0.002/min call control
   // This is a conservative estimate; real cost comes from Telnyx billing API
@@ -470,6 +692,50 @@ async function recordAiCallCostFromEvent(
       estimated: actualCost === estimatedCost,
       conversation_id: conversationId,
       call_control_id: externalId,
+      ai_assistant_id: aiAssistantId ?? null,
     },
   });
+
+  // Also normalize voice usage into agent_usage_events for agent-level reporting.
+  if (aiAssistantId) {
+    try {
+      const adminClient = createAdminClient();
+      const { data: agent } = await (adminClient.from("agent_instances") as any)
+        .select("id")
+        .eq("tenant_id", tenantId)
+        .eq("provider", "telnyx")
+        .eq("external_ref", aiAssistantId)
+        .maybeSingle();
+
+      if (agent?.id) {
+        await (adminClient.from("agent_usage_events") as any).insert({
+          tenant_id: tenantId,
+          agent_id: agent.id,
+          channel: "voice",
+          provider: "telnyx",
+          event_type: "voice.call.completed",
+          input_tokens: 0,
+          output_tokens: 0,
+          audio_seconds: durationSec,
+          transcription_seconds: 0,
+          tool_calls: 0,
+          estimated_cost: actualCost,
+          currency: "USD",
+          trace_id: conversationId ?? externalId ?? null,
+          metadata: {
+            conversation_id: conversationId ?? null,
+            call_control_id: externalId ?? null,
+            ai_assistant_id: aiAssistantId,
+            source: "telnyx.call-events.webhook",
+          },
+        });
+      }
+    } catch (usageError) {
+      console.error("[TelnyxWebhook] Error recording agent voice usage:", {
+        tenantId,
+        aiAssistantId,
+        error: usageError instanceof Error ? usageError.message : String(usageError),
+      });
+    }
+  }
 }

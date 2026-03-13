@@ -7,6 +7,7 @@ import {
   getAssistant,
   importAssistants,
   listAssistants,
+  TelnyxApiError,
   TelnyxCloneAssistantResponse,
   updateAssistant,
   TelnyxCreateAssistantRequest,
@@ -17,12 +18,125 @@ import {
   triggerAssistantTestRun,
 } from "@tinadmin/telnyx-ai-platform/server";
 import { headers } from "next/headers";
-import { getTelnyxTransport } from "./client";
+import { getTelnyxTransport, getTelnyxTransportWithSource } from "./client";
 import { trackApiCall } from "@/src/core/telemetry";
 import { ensureTenantId } from "@/core/multi-tenancy/validation";
 import { createClient } from "@/core/database/server";
+import { createAdminClient } from "@/core/database/admin-client";
 
 const TELNYX_PROVIDER = "telnyx";
+
+/**
+ * Register a Telnyx assistant ID in the tenant_ai_assistants mapping table.
+ * Only used when the tenant is on a shared Telnyx account (non-enterprise).
+ */
+async function registerAssistantMapping(
+  tenantId: string,
+  telnyxAssistantId: string,
+  userId?: string | null
+): Promise<void> {
+  try {
+    const adminClient = createAdminClient();
+    await adminClient
+      .from("tenant_ai_assistants" as any)
+      .upsert(
+        {
+          tenant_id: tenantId,
+          telnyx_assistant_id: telnyxAssistantId,
+          created_by: userId || null,
+        } as any,
+        { onConflict: "tenant_id,telnyx_assistant_id" }
+      );
+  } catch (err) {
+    console.error("[registerAssistantMapping] Failed to register mapping:", err);
+  }
+}
+
+/**
+ * Remove a Telnyx assistant ID from the tenant_ai_assistants mapping table.
+ */
+async function removeAssistantMapping(
+  tenantId: string,
+  telnyxAssistantId: string
+): Promise<void> {
+  try {
+    const adminClient = createAdminClient();
+    await adminClient
+      .from("tenant_ai_assistants" as any)
+      .delete()
+      .eq("tenant_id", tenantId)
+      .eq("telnyx_assistant_id", telnyxAssistantId);
+  } catch (err) {
+    console.error("[removeAssistantMapping] Failed to remove mapping:", err);
+  }
+}
+
+/**
+ * Get the set of Telnyx assistant IDs mapped to a tenant.
+ * Returns null if tenant is not on a shared account (enterprise tenants skip filtering).
+ */
+async function getTenantAssistantIds(tenantId: string): Promise<Set<string>> {
+  const adminClient = createAdminClient();
+  const { data, error } = await adminClient
+    .from("tenant_ai_assistants" as any)
+    .select("telnyx_assistant_id")
+    .eq("tenant_id", tenantId);
+
+  if (error) {
+    console.error("[getTenantAssistantIds] Error:", error);
+    return new Set();
+  }
+
+  return new Set(
+    (data as { telnyx_assistant_id: string }[]).map((r) => r.telnyx_assistant_id)
+  );
+}
+
+function extractTelnyxErrorDetail(details: unknown): string | null {
+  if (!details || typeof details !== "object") return null;
+  const d = details as Record<string, unknown>;
+  if (typeof d.message === "string" && d.message.trim()) return d.message.trim();
+  const errors = d.errors;
+  if (Array.isArray(errors) && errors.length) {
+    const parts: string[] = [];
+    for (const err of errors.slice(0, 3)) {
+      if (err && typeof err === "object") {
+        const e = err as Record<string, unknown>;
+        const title = typeof e.title === "string" ? e.title.trim() : "";
+        const detail = typeof e.detail === "string" ? e.detail.trim() : "";
+        const code = typeof e.code === "string" ? e.code.trim() : "";
+        const part = [code && `(${code})`, title, detail].filter(Boolean).join(" ");
+        if (part) parts.push(part);
+      }
+    }
+    if (parts.length) return parts.join("; ");
+  }
+  if (typeof d.detail === "string" && d.detail.trim()) return d.detail.trim();
+  return null;
+}
+
+/**
+ * Normalize a phone number to E.164 format (+ followed by digits only).
+ * Strips spaces, dashes, parentheses; adds + if missing.
+ */
+function normalizeToE164(raw: string): string {
+  const digitsOnly = raw.replace(/\D/g, "");
+  if (digitsOnly.length === 0) return raw.trim();
+  return raw.trim().startsWith("+") ? `+${digitsOnly}` : `+${digitsOnly}`;
+}
+
+/** E.164: + followed by 10–15 digits. */
+const E164_REGEX = /^\+\d{10,15}$/;
+
+function validateE164(value: string, param: "to" | "from"): string {
+  const normalized = normalizeToE164(value);
+  if (!E164_REGEX.test(normalized)) {
+    throw new Error(
+      `Phone number must be in E.164 format (e.g. +15551234567). The "${param}" value you entered is not valid.`
+    );
+  }
+  return normalized;
+}
 
 interface CallAssistantPayload {
   assistantId: string;
@@ -31,6 +145,7 @@ interface CallAssistantPayload {
   connectionId: string;
   streamUrl?: string; // Optional WebSocket URL for audio streaming
   streamTrack?: "inbound_track" | "outbound_track" | "both_tracks"; // Which audio track to stream
+  streamCodec?: string; // Telnyx: PCMU (default), PCMA, G722, OPUS, AMR-WB, L16
 }
 
 interface CallAssistantResult {
@@ -84,40 +199,85 @@ function extractConversationId(response: unknown): string | null {
 
 export async function listAssistantsAction() {
   const { tenantId, userId } = await getTelemetryContext();
-  
+
   try {
-    const transport = await getTelnyxTransport("integrations.read");
-    
+    const { transport, credentialSource } = await getTelnyxTransportWithSource("integrations.read");
+
     return trackApiCall(
       "listAssistants",
       TELNYX_PROVIDER,
-      () => listAssistants(transport),
+      async () => {
+        const response = await listAssistants(transport);
+
+        // Enterprise tenants (own Telnyx account) see all their assistants — no filter
+        if (credentialSource === "tenant") {
+          return response;
+        }
+
+        // Shared account: filter by tenant_ai_assistants mapping
+        if (tenantId && credentialSource === "shared") {
+          const allowedIds = await getTenantAssistantIds(tenantId);
+          const allAssistants = response.data ?? [];
+          return {
+            ...response,
+            data: allAssistants.filter((a: { id: string }) => allowedIds.has(a.id)),
+          };
+        }
+
+        // Platform Admin with no tenant selected on shared account — show all
+        return response;
+      },
       { tenantId, userId }
     );
   } catch (error) {
-    // Improve error messages for common issues
-    if (error instanceof Error) {
-      if (error.message.includes("401") || error.message.includes("Unauthorized")) {
-        throw new Error(
-          "Telnyx API authentication failed (401). Please verify your API key is valid and has the correct permissions. " +
-          "Check your Telnyx API key in System Admin → Integrations → Telnyx"
-        );
-      }
-      if (error.message.includes("Tenant context missing")) {
-        throw new Error(
-          "Tenant context missing. Please select a tenant or configure the platform default Telnyx integration."
-        );
-      }
-      if (error.message.includes("not configured") || error.message.includes("API key")) {
-        throw new Error(
-          "Telnyx API key not configured. " +
-          "Please configure Telnyx integration: System Admin → Integrations → Telephony → Telnyx, " +
-          "or set TELNYX_API_KEY environment variable."
-        );
+    const errMsg = error instanceof Error ? error.message : String(error);
+    console.error("[listAssistantsAction] caught:", errMsg);
+    let userMessage =
+      "Unable to load assistants. Please check your agent integration (API key and tenant) and try again.";
+    if (error instanceof TelnyxApiError && error.status >= 500) {
+      userMessage =
+        "Telnyx is temporarily unavailable (server error). Please try again in a few minutes.";
+    } else if (error instanceof Error) {
+      if (error.message.includes("Permission denied") || error.message.includes("Insufficient tenant permissions")) {
+        userMessage =
+          "You don't have permission to view integrations. Contact your Organization Admin to get access to AI Assistants.";
+      } else if (
+        error.message.includes("401") ||
+        error.message.includes("Unauthorized") ||
+        error.message.includes("Authentication failed") ||
+        error.message.includes("No key found matching")
+      ) {
+        userMessage =
+          "Telnyx API key is invalid or was revoked. Create a new API key in Telnyx Portal (Portal → API Keys), then update Integration Secrets or .env.local (TELNYX_API_KEY) and restart the app.";
+      } else if (error.message.includes("Tenant context missing")) {
+        userMessage =
+          "Tenant context missing. Please select a tenant or configure the platform default telephony integration.";
+      } else if (error.message.includes("not configured") || error.message.includes("API key")) {
+        userMessage =
+          "Telephony API key not configured. Configure in System Admin → Integrations or set your environment key.";
+      } else if (
+        /INTEGRATION_CREDENTIALS_KEY|SUPABASE_SERVICE_ROLE|NEXT_PUBLIC_SUPABASE/i.test(error.message)
+      ) {
+        userMessage =
+          "Telephony API key not configured. Set the key in your environment or configure integration credentials on the server.";
       }
     }
-    throw error;
+    return { error: userMessage };
   }
+}
+
+/** List tenant-scoped assistants for voice routing dropdown (id + name only). */
+export async function listTenantAssistantsForVoiceAction(): Promise<
+  { data: Array<{ id: string; name: string }> } | { error: string }
+> {
+  const result = await listAssistantsAction();
+  if ("error" in result && result.error) {
+    return { data: [], error: result.error };
+  }
+  const list = (result as { data?: Array<{ id: string; name?: string }> }).data ?? [];
+  return {
+    data: list.map((a) => ({ id: a.id, name: (a.name ?? a.id).trim() || a.id })),
+  };
 }
 
 export async function getAssistantAction(assistantId: string) {
@@ -138,12 +298,22 @@ export async function getAssistantAction(assistantId: string) {
 
 export async function createAssistantAction(payload: TelnyxCreateAssistantRequest) {
   const { tenantId, userId } = await getTelemetryContext();
-  const transport = await getTelnyxTransport("integrations.write");
+  const { transport, credentialSource } = await getTelnyxTransportWithSource("integrations.write");
   
   return trackApiCall(
     "createAssistant",
     TELNYX_PROVIDER,
-    () => createAssistant(transport, payload),
+    async () => {
+      const result = await createAssistant(transport, payload);
+      const assistantId = result?.id ?? (result as any)?.data?.id;
+
+      // Register mapping for non-enterprise tenants (shared Telnyx account)
+      if (credentialSource === "shared" && tenantId && assistantId) {
+        await registerAssistantMapping(tenantId, assistantId, userId);
+      }
+
+      return result;
+    },
     {
       tenantId,
       userId,
@@ -179,6 +349,82 @@ export async function updateAssistantAction(
   );
 }
 
+const PROXY_WEBHOOK_TOOL_NAME = "platform_brain";
+
+/**
+ * Ensures the Telnyx assistant has a webhook tool pointing to the given proxy URL
+ * and has web_chat enabled so widget text chat is routed to your backend (e.g. Abacus).
+ * Call this with the full proxy URL including ?publicKey=... so widget chat reaches your proxy.
+ */
+export async function ensureProxyWebhookToolOnAssistantAction(
+  assistantId: string,
+  proxyWebhookUrl: string
+): Promise<{ success: boolean; error?: string }> {
+  const { tenantId, userId } = await getTelemetryContext();
+  const url = proxyWebhookUrl?.trim();
+  if (!url || !assistantId?.trim()) {
+    return { success: false, error: "assistantId and proxyWebhookUrl are required." };
+  }
+
+  try {
+    const transport = await getTelnyxTransport("integrations.write");
+    const assistant = await getAssistant(transport, assistantId);
+    const existingTools = Array.isArray(assistant.tools) ? [...assistant.tools] : [];
+    const existingFeatures = Array.isArray(assistant.enabled_features) ? [...assistant.enabled_features] : [];
+
+    const webhookTool = {
+      type: "webhook",
+      webhook: {
+        name: PROXY_WEBHOOK_TOOL_NAME,
+        description: "Route chat to platform/Abacus backend",
+        url,
+        method: "POST",
+      },
+    } as Record<string, unknown>;
+
+    const otherTools = existingTools.filter(
+      (t) => {
+        const obj = t as Record<string, unknown>;
+        const directName = typeof obj?.name === "string" ? obj.name : "";
+        const webhookName =
+          typeof obj?.webhook === "object" && obj.webhook
+            ? typeof (obj.webhook as any)?.name === "string"
+              ? String((obj.webhook as any).name)
+              : ""
+            : "";
+        const name = directName || webhookName;
+        return name !== PROXY_WEBHOOK_TOOL_NAME;
+      }
+    );
+    const newTools = [...otherTools, webhookTool];
+
+    const hasWebChat = existingFeatures.some(
+      (f) => String(f).toLowerCase() === "web_chat"
+    );
+    const newFeatures = hasWebChat ? existingFeatures : [...existingFeatures, "web_chat"];
+
+    await trackApiCall(
+      "updateAssistant",
+      TELNYX_PROVIDER,
+      () =>
+        updateAssistant(transport, assistantId, {
+          tools: newTools,
+          enabled_features: newFeatures,
+        }),
+      {
+        tenantId,
+        userId,
+        requestData: { assistantId, step: "ensureProxyWebhookTool" },
+      }
+    );
+
+    return { success: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { success: false, error: msg };
+  }
+}
+
 export async function cloneAssistantAction(
   assistantId: string
 ): Promise<TelnyxCloneAssistantResponse> {
@@ -187,7 +433,7 @@ export async function cloneAssistantAction(
   }
 
   const { tenantId, userId } = await getTelemetryContext();
-  const transport = await getTelnyxTransport("integrations.write");
+  const { transport, credentialSource } = await getTelnyxTransportWithSource("integrations.write");
 
   return trackApiCall(
     "cloneAssistant",
@@ -198,6 +444,12 @@ export async function cloneAssistantAction(
       if (!clonedId) {
         throw new Error("Clone succeeded but no assistant ID was returned.");
       }
+
+      // Register mapping for non-enterprise tenants (shared Telnyx account)
+      if (credentialSource === "shared" && tenantId) {
+        await registerAssistantMapping(tenantId, clonedId, userId);
+      }
+
       return { id: clonedId };
     },
     {
@@ -210,12 +462,19 @@ export async function cloneAssistantAction(
 
 export async function deleteAssistantAction(assistantId: string) {
   const { tenantId, userId } = await getTelemetryContext();
-  const transport = await getTelnyxTransport("integrations.write");
+  const { transport, credentialSource } = await getTelnyxTransportWithSource("integrations.write");
   
   return trackApiCall(
     "deleteAssistant",
     TELNYX_PROVIDER,
-    () => deleteAssistant(transport, assistantId),
+    async () => {
+      await deleteAssistant(transport, assistantId);
+
+      // Clean up mapping for non-enterprise tenants (shared Telnyx account)
+      if (credentialSource === "shared" && tenantId) {
+        await removeAssistantMapping(tenantId, assistantId);
+      }
+    },
     {
       tenantId,
       userId,
@@ -226,12 +485,27 @@ export async function deleteAssistantAction(assistantId: string) {
 
 export async function importAssistantsAction(payload: TelnyxImportAssistantsRequest) {
   const { tenantId, userId } = await getTelemetryContext();
-  const transport = await getTelnyxTransport("integrations.write");
+  const { transport, credentialSource } = await getTelnyxTransportWithSource("integrations.write");
   
   return trackApiCall(
     "importAssistants",
     TELNYX_PROVIDER,
-    () => importAssistants(transport, payload),
+    async () => {
+      const result = await importAssistants(transport, payload);
+
+      // Register mappings for non-enterprise tenants (shared Telnyx account)
+      if (credentialSource === "shared" && tenantId) {
+        const imported = result?.data ?? [];
+        for (const item of imported) {
+          const assistantId = (item as { id?: string }).id;
+          if (assistantId) {
+            await registerAssistantMapping(tenantId, assistantId, userId);
+          }
+        }
+      }
+
+      return result;
+    },
     {
       tenantId,
       userId,
@@ -242,6 +516,50 @@ export async function importAssistantsAction(payload: TelnyxImportAssistantsRequ
       },
     }
   );
+}
+
+/**
+ * Link an existing Telnyx assistant ID to the current tenant.
+ *
+ * This is only required when using a shared Telnyx API key (env/platform default),
+ * where we filter assistants via tenant_ai_assistants.
+ */
+export async function linkExistingTelnyxAssistantAction(assistantId: string): Promise<{ success: boolean; error?: string }> {
+  const { tenantId, userId } = await getTelemetryContext();
+  if (!tenantId) {
+    return { success: false, error: "Tenant context missing. Select a workspace and try again." };
+  }
+
+  const trimmed = assistantId?.trim();
+  if (!trimmed) {
+    return { success: false, error: "Assistant ID is required." };
+  }
+
+  try {
+    const { transport, credentialSource } = await getTelnyxTransportWithSource("integrations.read");
+
+    // If tenant has their own Telnyx account, assistants are already isolated by account.
+    if (credentialSource === "tenant") {
+      return { success: true };
+    }
+
+    // Validate the assistant exists in Telnyx (helps avoid typos).
+    await trackApiCall(
+      "getAssistant",
+      TELNYX_PROVIDER,
+      () => getAssistant(transport, trimmed),
+      { tenantId, userId, requestData: { assistantId: trimmed } }
+    );
+
+    await registerAssistantMapping(tenantId, trimmed, userId);
+    return { success: true };
+  } catch (e) {
+    if (e instanceof TelnyxApiError && e.status === 404) {
+      return { success: false, error: "Assistant not found in Telnyx. Double-check the assistant ID." };
+    }
+    const msg = e instanceof Error ? e.message : String(e);
+    return { success: false, error: msg || "Failed to link assistant." };
+  }
 }
 
 export async function callAssistantAction(payload: CallAssistantPayload): Promise<CallAssistantResult> {
@@ -276,13 +594,13 @@ export async function callAssistantAction(payload: CallAssistantPayload): Promis
       if (error instanceof Error) {
         if (error.message.includes("Tenant context missing")) {
           throw new Error(
-            "Tenant context missing. Please select a tenant or configure the platform default Telnyx integration."
+            "Tenant context missing. Please select a tenant or configure the platform default telephony integration."
           );
         }
         if (error.message.includes("401") || error.message.includes("Unauthorized")) {
           throw new Error(
-            "Telnyx API authentication failed (401). Please verify your API key is valid. " +
-            "Check your Telnyx API key in System Admin → Integrations → Telnyx"
+            "Provider API authentication failed (401). Please verify your API key is valid. " +
+            "Check your API key in System Admin → Integrations → Telephony"
           );
         }
       }
@@ -294,23 +612,30 @@ export async function callAssistantAction(payload: CallAssistantPayload): Promis
       TELNYX_PROVIDER,
       async () => {
         try {
+          // Normalize and validate E.164 for Telnyx
+          const toE164 = validateE164(toNumber, "to");
+          const fromE164 = validateE164(fromNumber, "from");
+
           // Build dial request body
           const dialBody: Record<string, string> = {
             connection_id: connectionId.trim(),
-            from: fromNumber.trim(),
-            to: toNumber.trim(),
+            from: fromE164,
+            to: toE164,
           };
 
-          // Add streaming if streamUrl is provided
+          // Add streaming if streamUrl is provided (Telnyx Media Streaming docs)
           if (payload.streamUrl?.trim()) {
             const streamUrl = payload.streamUrl.trim();
             dialBody.stream_url = streamUrl;
-            dialBody.stream_track = payload.streamTrack || "both_tracks";
-            
+            dialBody.stream_track = payload.streamTrack || "outbound_track";
+            // Request PCMU so stream matches our player (PCMU, PCMA, L16 supported)
+            dialBody.stream_codec = payload.streamCodec || "PCMU";
+
             console.log("[TELEMETRY] callAssistantAction - Adding stream URL", {
               timestamp: new Date().toISOString(),
               streamUrl: streamUrl.substring(0, 100) + (streamUrl.length > 100 ? '...' : ''),
               streamTrack: dialBody.stream_track,
+              streamCodec: dialBody.stream_codec,
               hasToken: streamUrl.includes('token='),
             });
           } else {
@@ -342,30 +667,54 @@ export async function callAssistantAction(payload: CallAssistantPayload): Promis
           if (!callControlId) {
             const responseStr = JSON.stringify(dialResponse, null, 2);
             throw new Error(
-              `Telnyx dial did not return a call_control_id. Response: ${responseStr.substring(0, 500)}`
+              `Provider dial did not return a call_control_id. Response: ${responseStr.substring(0, 500)}`
             );
           }
 
-          const startResponse = await transport.request(
-            `/calls/${callControlId}/actions/ai_assistant_start`,
-            {
-              method: "POST",
-              body: {
-                assistant: {
-                  assistant_id: assistantId,
-                },
-              },
+          // Telnyx requires the call to be answered before ai_assistant_start. Attach
+          // assistant_id and tenant_id to the call via client_state so the webhook can
+          // start the assistant on call.answered.
+          if (tenantId) {
+            const statePayload = { t: "tinadmin_outbound_assistant", a: assistantId, tid: tenantId };
+            const clientState = Buffer.from(JSON.stringify(statePayload), "utf8").toString("base64");
+            try {
+              await transport.request(
+                `/calls/${callControlId}/actions/client_state_update`,
+                { method: "PUT", body: { client_state: clientState } }
+              );
+            } catch (stateErr) {
+              console.warn("[callAssistantAction] client_state_update failed (call will still ring):", stateErr);
             }
-          );
+          }
 
-          const conversationId = extractConversationId(startResponse);
-          return { callControlId, conversationId };
+          // Return immediately; assistant will be started by webhook when call is answered.
+          return { callControlId, conversationId: null };
         } catch (error) {
-          // Improve error messages for Telnyx API errors
+          // Surface Telnyx API error details for better debugging
+          if (error instanceof TelnyxApiError) {
+            if (error.status === 404) {
+              throw new Error(
+                "Call Control App ID not found. Please verify the Connection ID is correct in your provider console."
+              );
+            }
+            if (error.status === 400) {
+              throw new Error(
+                "Invalid request parameters. Please check phone numbers and Call Control App ID format."
+              );
+            }
+            if (error.status === 422) {
+              const telnyxDetail = extractTelnyxErrorDetail(error.details);
+              const hint =
+                "Invalid assistant configuration. Please verify the assistant ID exists and is properly configured.";
+              throw new Error(
+                telnyxDetail ? `${hint} Telnyx: ${telnyxDetail}` : hint
+              );
+            }
+          }
           if (error instanceof Error) {
             if (error.message.includes("404")) {
               throw new Error(
-                "Call Control App ID not found. Please verify the Connection ID is correct in Telnyx Mission Control."
+                "Call Control App ID not found. Please verify the Connection ID is correct in your provider console."
               );
             }
             if (error.message.includes("400")) {
@@ -425,7 +774,7 @@ export async function hangUpCallAction(callControlId: string): Promise<void> {
     if (error instanceof Error) {
       if (error.message.includes("Tenant context missing")) {
         throw new Error(
-          "Tenant context missing. Please select a tenant or configure the platform default Telnyx integration."
+          "Tenant context missing. Please select a tenant or configure the platform default telephony integration."
         );
       }
     }
@@ -436,10 +785,25 @@ export async function hangUpCallAction(callControlId: string): Promise<void> {
     "hangUpCall",
     TELNYX_PROVIDER,
     async () => {
-      await transport.request(`/calls/${callControlId}/actions/hangup`, {
-        method: "POST",
-        body: {},
-      });
+      try {
+        await transport.request(`/calls/${callControlId}/actions/hangup`, {
+          method: "POST",
+          body: {},
+        });
+      } catch (error) {
+        // Call may have already ended (e.g. other party hung up). Treat as success.
+        if (error instanceof TelnyxApiError && error.status === 422) {
+          const msg = (error.message || "").toLowerCase();
+          if (
+            msg.includes("already ended") ||
+            msg.includes("90018") ||
+            msg.includes("no longer active")
+          ) {
+            return;
+          }
+        }
+        throw error;
+      }
     },
     {
       tenantId,
@@ -465,7 +829,7 @@ export async function getCallInstructionsAction(assistantId: string) {
     }
 
     const h = await headers();
-    const host = h.get("x-forwarded-host") || h.get("host") || "localhost:3010";
+    const host = h.get("x-forwarded-host") || h.get("host") || "localhost:3020";
     const proto = h.get("x-forwarded-proto") || (host.includes("localhost") ? "http" : "https");
     const baseUrl = `${proto}://${host}`;
 
@@ -482,23 +846,19 @@ export async function getCallInstructionsAction(assistantId: string) {
       tenantHeader: "x-tenant-id",
       tenantQueryParam: "tenantId",
       requiredEnv: [
-        // For webhook verification (Voice API v2).
-        "TELNYX_PUBLIC_KEY",
-        // For Call Control commands if not using per-tenant integration config.
-        "TELNYX_API_KEY",
-        // For decrypting integration credentials if encryption is enabled.
-        "INTEGRATION_CREDENTIALS_KEY",
-        // For storing webhook events.
-        "SUPABASE_SERVICE_ROLE_KEY",
-        "NEXT_PUBLIC_SUPABASE_URL",
+        "Provider webhook public key (for signature verification)",
+        "Provider API key (for Call Control commands if not using per-tenant integration config)",
+        "Integration credentials encryption key (if encryption is enabled)",
+        "Database service role key (for storing webhook events)",
+        "Database URL (for storing webhook events)",
       ],
       localTunnelNotes: [
-        "Telnyx must reach your webhook over the public internet (localhost won't work).",
-        "If testing locally, use a tunnel (ngrok) and paste the HTTPS URL above into the Telnyx Voice API Application.",
-        "ngrok setup: `ngrok config add-authtoken <token>` then `ngrok http 3010`.",
+        "Your provider must reach your webhook over the public internet (localhost won't work).",
+        "If testing locally, use a tunnel (ngrok) and paste the HTTPS URL above into your provider Voice API Application.",
+        "ngrok setup: `ngrok config add-authtoken <token>` then `ngrok http 3020`.",
       ],
       steps: [
-        "Create or open your Call Control App in Telnyx Mission Control.",
+        "Create or open your Call Control App in your provider console.",
         "Set the Webhook URL to the value shown below.",
         "Include the tenant context using x-tenant-id header or ?tenantId= query param.",
         "Use this assistant ID when starting the AI assistant for inbound calls.",
@@ -539,16 +899,15 @@ export async function testCallAssistantAction(assistantId: string): Promise<Test
       "testCallAssistant",
       TELNYX_PROVIDER,
       async () => {
-        // Get the assistant to retrieve its version_id
-        const assistant = await getAssistant(transport, assistantId);
-        const versionId = (assistant as any).version_id || assistantId;
-        
+        // Verify the assistant exists
+        await getAssistant(transport, assistantId);
+
         // First, try to find an existing test
         const testsResponse = await listAssistantTests(transport);
-        
+
         let testId: string;
         const existingTests = testsResponse.data || [];
-        
+
         // Look for a test that matches this assistant or use the first one
         // If no tests exist, create a new one
         if (existingTests.length > 0) {
@@ -578,16 +937,16 @@ export async function testCallAssistantAction(assistantId: string): Promise<Test
             description: `Quick test for assistant ${assistantId}`,
             max_duration_seconds: 60,
           };
-          
+
           const createdTest = await createAssistantTest(transport, testPayload);
           testId = createdTest.test_id;
           console.log("[testCallAssistantAction] Created new test:", testId);
         }
 
-        // Trigger the test run with the assistant version_id
-        const testRun = await triggerAssistantTestRun(transport, testId, {
-          destination_version_id: versionId,
-        });
+        // Trigger the test run. Do not pass destination_version_id: Telnyx will use the
+        // assistant's main version. Passing a stale or invalid version_id causes 400
+        // "Assistant version with id ... does not exist".
+        const testRun = await triggerAssistantTestRun(transport, testId, {});
         
         return {
           testId,
@@ -609,8 +968,8 @@ export async function testCallAssistantAction(assistantId: string): Promise<Test
     if (error instanceof Error) {
       if (error.message.includes("401") || error.message.includes("Unauthorized")) {
         throw new Error(
-          "Telnyx API authentication failed (401). Please verify your API key is valid. " +
-          "Check your Telnyx API key in System Admin → Integrations → Telnyx"
+          "Provider API authentication failed (401). Please verify your API key is valid. " +
+          "Check your API key in System Admin → Integrations → Telephony"
         );
       }
       if (error.message.includes("404")) {

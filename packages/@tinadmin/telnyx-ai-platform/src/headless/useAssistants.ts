@@ -21,16 +21,15 @@ export function useAssistantsList(api: TelnyxAssistantsApi) {
     setError(null);
     try {
       const response = await api.listAssistants();
-      setData(response.data ?? []);
-    } catch (err) {
-      let errorMessage = "Failed to load assistants";
-      if (err instanceof Error) {
-        errorMessage = err.message;
-      } else if (typeof err === 'string') {
-        errorMessage = err;
-      } else if (err && typeof err === 'object' && 'message' in err) {
-        errorMessage = String(err.message);
+      if (response && "error" in response) {
+        setError(response.error);
+        setData([]);
+      } else {
+        setData(response.data ?? []);
       }
+    } catch (err) {
+      const errorMessage =
+        err instanceof Error ? err.message : typeof err === "string" ? err : "Failed to load assistants";
       console.error("[useAssistantsList] Error loading assistants:", err);
       setError(errorMessage);
     } finally {
@@ -83,8 +82,19 @@ export function useAssistantEditor(api: TelnyxAssistantsApi, assistantId: string
       setError(null);
       try {
         const updated = await api.updateAssistant(assistantId, payload ?? assistant);
-        setAssistant(updated);
-        return updated;
+        // Merge sent voice_settings into response so provider/model persist if API omits them
+        const merged =
+          payload?.voice_settings && typeof updated === "object" && updated !== null
+            ? {
+                ...updated,
+                voice_settings: {
+                  ...((updated as TelnyxAssistant).voice_settings as Record<string, unknown> ?? {}),
+                  ...(payload.voice_settings as Record<string, unknown>),
+                },
+              }
+            : updated;
+        setAssistant(merged as TelnyxAssistant);
+        return merged;
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to save assistant");
         return null;

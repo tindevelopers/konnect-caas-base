@@ -13,6 +13,13 @@ import { createClient } from "@/core/database/server";
 
 const TELNYX_PROVIDER = "telnyx";
 
+export type TelnyxCredentialSource = "tenant" | "shared";
+
+export interface TelnyxTransportWithSource {
+  transport: TelnyxTransport;
+  credentialSource: TelnyxCredentialSource;
+}
+
 function extractApiKey(credentials?: Record<string, unknown> | null) {
   if (!credentials) return undefined;
   if (typeof credentials.apiKey === "string") return credentials.apiKey;
@@ -21,12 +28,16 @@ function extractApiKey(credentials?: Record<string, unknown> | null) {
 }
 
 /**
- * Resolves Telnyx API key in order: (1) tenant integration, (2) platform default, (3) TELNYX_API_KEY env.
- * Platform Admins can use platform defaults without selecting a tenant.
+ * Resolves Telnyx API key and credential source.
+ * Resolution order: (1) tenant integration, (2) TELNYX_API_KEY env, (3) platform default.
+ *
+ * Returns both the transport and the credential source:
+ * - "tenant": tenant has their own Telnyx account (enterprise) — assistants are isolated by account
+ * - "shared": using env or platform default — assistants must be filtered via tenant_ai_assistants
  */
-export async function getTelnyxTransport(
+export async function getTelnyxTransportWithSource(
   requiredPermission: "integrations.read" | "integrations.write" = "integrations.read"
-): Promise<TelnyxTransport> {
+): Promise<TelnyxTransportWithSource> {
   // Get user ID for telemetry
   let userId: string | null = null;
   try {
@@ -47,8 +58,7 @@ export async function getTelnyxTransport(
       // Try to get tenant ID, but don't fail if Platform Admin hasn't selected one
       try {
         tenantId = await ensureTenantId();
-      } catch {
-        // If not a Platform Admin and no tenant ID, we'll throw below
+      } catch (e) {
         if (!isAdmin) {
           throw new Error("Tenant context missing");
         }
@@ -60,46 +70,67 @@ export async function getTelnyxTransport(
         await requirePermission(requiredPermission, { tenantId });
       } else if (isAdmin) {
         // Platform Admins can access platform defaults without tenant context
-        // Skip permission check for platform-level operations
       } else {
         throw new Error("Tenant context missing");
       }
 
-      // If we have a tenant ID, try tenant-specific config first
+      // If we have a tenant ID, try tenant-specific config FIRST
+      // This takes priority because it means the tenant has their own Telnyx account
       if (tenantId) {
         const tenantConfig = await getIntegrationConfig(tenantId, TELNYX_PROVIDER);
         const tenantKey = extractApiKey(
           tenantConfig?.credentials as Record<string, unknown> | null | undefined
         );
         if (tenantKey) {
-          return createTelnyxClient({ apiKey: tenantKey });
+          return {
+            transport: createTelnyxClient({ apiKey: tenantKey }),
+            credentialSource: "tenant" as TelnyxCredentialSource,
+          };
         }
       }
 
-      // Fall back to platform default
-      const platformConfig = await getPlatformIntegrationConfig(TELNYX_PROVIDER);
-      const platformKey = extractApiKey(
-        platformConfig?.credentials as Record<string, unknown> | null | undefined
-      );
+      // Environment variable (shared — used by all tenants without their own config)
+      const envKey = process.env.TELNYX_API_KEY;
+      const hasEnvKey = !!(envKey && envKey.trim().length >= 10);
+      if (hasEnvKey) {
+        return {
+          transport: createTelnyxClient({ apiKey: envKey!.trim() }),
+          credentialSource: "shared" as TelnyxCredentialSource,
+        };
+      }
+
+      // Fall back to platform default (shared)
+      let platformKey: string | undefined;
+      try {
+        const platformConfig = await getPlatformIntegrationConfig(TELNYX_PROVIDER);
+        platformKey = extractApiKey(
+          platformConfig?.credentials as Record<string, unknown> | null | undefined
+        );
+      } catch (e) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+        const isConfigEnvError =
+          /INTEGRATION_CREDENTIALS_KEY|SUPABASE_SERVICE_ROLE_KEY|NEXT_PUBLIC_SUPABASE_URL/i.test(errMsg);
+        if (isConfigEnvError) {
+          platformKey = undefined;
+        } else {
+          throw e;
+        }
+      }
       if (platformKey) {
-        // Validate API key format (Telnyx API keys typically start with "KEY" or are 20+ chars)
         if (platformKey.length < 10) {
           throw new Error(
-            `Invalid Telnyx API key format. The key appears to be too short (${platformKey.length} chars). ` +
-            `Please verify your API key in System Admin → Integrations → Telnyx`
+            `Invalid telephony API key format. The key appears to be too short (${platformKey.length} chars). ` +
+            `Please verify your API key in System Admin → Integrations → Telephony`
           );
         }
-        return createTelnyxClient({ apiKey: platformKey });
-      }
-
-      // Final fallback to environment variable
-      const envKey = process.env.TELNYX_API_KEY;
-      if (envKey) {
-        return createTelnyxClient({ apiKey: envKey });
+        return {
+          transport: createTelnyxClient({ apiKey: platformKey }),
+          credentialSource: "shared" as TelnyxCredentialSource,
+        };
       }
 
       throw new Error(
-        "Telnyx API key not configured. Set the system default (System Admin → Integrations), connect Telnyx for this organization (Integrations → Telephony → Telnyx), or set TELNYX_API_KEY."
+        "Telephony API key not configured. Set the key in your environment, set the system default (System Admin → Integrations), or connect a telephony provider for this organization (Integrations → Telephony)."
       );
     },
     {
@@ -110,4 +141,14 @@ export async function getTelnyxTransport(
       },
     }
   );
+}
+
+/**
+ * Backward-compatible wrapper that returns only the TelnyxTransport.
+ */
+export async function getTelnyxTransport(
+  requiredPermission: "integrations.read" | "integrations.write" = "integrations.read"
+): Promise<TelnyxTransport> {
+  const result = await getTelnyxTransportWithSource(requiredPermission);
+  return result.transport;
 }

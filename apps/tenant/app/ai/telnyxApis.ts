@@ -16,9 +16,11 @@ import {
   listIntegrationSecretsAction,
   createIntegrationSecretAction,
 } from "@/app/actions/telnyx/secrets";
+import { listIntegrationsAction } from "@/app/actions/telnyx/integrations";
 import {
   TelnyxAssistantsApi,
   TelnyxAssistantTestsApi,
+  TelnyxIntegrationsApi,
   TelnyxIntegrationSecretsApi,
 } from "@tinadmin/telnyx-ai-platform/server";
 
@@ -41,4 +43,8 @@ export const assistantTestsApi: TelnyxAssistantTestsApi = {
 export const integrationSecretsApi: TelnyxIntegrationSecretsApi = {
   listIntegrationSecrets: listIntegrationSecretsAction,
   createIntegrationSecret: createIntegrationSecretAction,
+};
+
+export const integrationsApi: TelnyxIntegrationsApi = {
+  listIntegrations: listIntegrationsAction,
 };

@@ -100,19 +100,19 @@ export default function DefaultIntegrationsPage() {
           </h1>
           <p className="mt-2 text-gray-500 dark:text-gray-400">
             Set system-wide credentials used when an organization has not configured its own. New
-            users and tenants will use this default Telnyx account until they set organization-level
-            credentials under Integrations → Telephony → Telnyx.
+            users and tenants will use this default provider account until they set organization-level
+            credentials under Integrations → Telephony.
           </p>
         </div>
 
         <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
           <h2 className="mb-4 text-lg font-semibold text-gray-900 dark:text-white">
-            Telnyx (system default)
+            Premium Telephony (system default)
           </h2>
           <p className="mb-4 text-sm text-gray-500 dark:text-gray-400">
-            Used for AI Assistants and Telnyx APIs when the current organization has no Telnyx
-            integration. Organizations can override this by connecting Telnyx under Integrations →
-            Telephony → Telnyx.
+            Used for AI Assistants and telephony APIs when the current organization has no telephony
+            provider integration. Organizations can override this by connecting a telephony provider
+            under Integrations → Telephony.
           </p>
           <div className="space-y-4">
             <div>
@@ -154,7 +154,7 @@ export default function DefaultIntegrationsPage() {
               {!isConnected && apiKey === "" && (
                 <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-0.5 text-sm font-medium text-gray-600 dark:bg-gray-700 dark:text-gray-400">
                   <XMarkIcon className="h-4 w-4" />
-                  No default (use TELNYX_API_KEY env or org integration)
+                  No default (use environment configuration or org integration)
                 </span>
               )}
             </div>

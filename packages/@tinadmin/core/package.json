@@ -57,7 +57,7 @@
     "database",
     "permissions"
   ],
-  "author": "Your Organization",
+  "author": "Developer <developer@tin.info>",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -76,7 +76,7 @@
     "@supabase/supabase-js": "^2.89.0",
     "stripe": "^20.0.0",
     "ai": "^5.0.52",
-    "@ai-sdk/openai": "^1.0.0",
+    "@ai-sdk/openai": "^2.0.0",
     "openai": "^4.0.0",
     "resend": "^4.0.0"
   },

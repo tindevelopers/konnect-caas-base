@@ -11,7 +11,7 @@ import { resolve } from "path";
 // Load .env.local file
 config({ path: resolve(process.cwd(), ".env.local") });
 
-import { createAdminClient } from "@/core/database";
+import { createAdminClient } from "@/core/database/admin-client";
 
 async function assignOrgRole(email: string, tenantId?: string) {
   const adminClient = createAdminClient();

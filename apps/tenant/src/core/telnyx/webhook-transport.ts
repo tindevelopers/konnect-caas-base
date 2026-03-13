@@ -66,12 +66,21 @@ export async function getTelnyxIntegrationForWebhook(tenantId: string): Promise<
   return { credentials: decrypted, settings };
 }
 
+export type TelnyxCredentialSource = "tenant" | "env";
+
 export async function getTelnyxTransportForWebhook(tenantId: string): Promise<{
   transport: TelnyxTransport;
   settings: TelnyxVoiceRoutingSettings | null;
+  credentialSource: TelnyxCredentialSource;
 }> {
   const { credentials, settings } = await getTelnyxIntegrationForWebhook(tenantId);
-  const apiKey = extractApiKey(credentials) ?? process.env.TELNYX_API_KEY ?? null;
+  const tenantKey = extractApiKey(credentials);
+  const envKey = process.env.TELNYX_API_KEY?.trim() || null;
+  // Match getTelnyxTransport order: tenant first when available, so we fetch assistants
+  // from the same Telnyx account where the user edits them (fixes stale prompt when
+  // tenant has own Telnyx and TELNYX_API_KEY points to a different account).
+  const apiKey = tenantKey ?? envKey ?? null;
+  const credentialSource: TelnyxCredentialSource = tenantKey ? "tenant" : "env";
 
   if (!apiKey) {
     throw new Error(
@@ -82,6 +91,7 @@ export async function getTelnyxTransportForWebhook(tenantId: string): Promise<{
   return {
     transport: createTelnyxClient({ apiKey }),
     settings,
+    credentialSource: credentialSource as TelnyxCredentialSource,
   };
 }
 

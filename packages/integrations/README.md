@@ -7,13 +7,14 @@ This package centralizes third-party integration contracts, factories, and provi
 - Define a configuration using [`CrmProviderConfig`](./crm/crm-types.ts).
 - Use `createProvider` from [`crm/crm-provider-factory.ts`](./crm/crm-provider-factory.ts) to obtain the provider instance for the configured tenant.
 - The GoHighLevel adapter lives in [`crm/providers/gohighlevel-provider.ts`](./crm/providers/gohighlevel-provider.ts) and demonstrates how to map the provider API to the shared `CrmProvider` interface.
+- The HubSpot adapter lives in [`crm/providers/hubspot-provider.ts`](./crm/providers/hubspot-provider.ts) and provides contact/company/deal operations plus health checks.
 - Add new CRM adapters by implementing `CrmProvider` and adding the provider to the factory switch statement (and registering it in `index.ts` for exports).
 
 ## Calendaring Providers
 
 - The `/calendar` folder defines `CalendarProvider`, `CalendarEvent`, and related types.
-- Use `createCalendarProvider` to instantiate adapters once a calendaring provider exists (cal.com and others can be added here).
-- This section currently contains the contract and a placeholder factory; once we select a calendaring provider we can drop in the implementation without changing the rest of the platform.
+- Use `createCalendarProvider` to instantiate adapters.
+- Cal.com is implemented via [`calendar/providers/calcom-provider.ts`](./calendar/providers/calcom-provider.ts) and wired in [`calendar/calendar-provider-factory.ts`](./calendar/calendar-provider-factory.ts).
 
 ## Usage Tips
 

@@ -29,8 +29,8 @@ export async function getTenantPermissions(
 ): Promise<TenantPermissionConfig> {
   const supabase = await createServerClient();
   
-  // Get user's role permissions
-  const rolePermissions = await getUserPermissions(userId);
+  // Get user's role permissions (pass tenantId so tenant-specific roles are considered)
+  const rolePermissions = await getUserPermissions(userId, tenantId);
   
   // Get tenant-specific permission overrides
   const tenantResult: { data: { features: any } | null; error: any } = await supabase

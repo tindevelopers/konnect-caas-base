@@ -147,6 +147,14 @@ cd apps/tenant
 2. Stream URL sent to Telnyx? (check `callAssistantAction` logs)
 3. Telnyx can reach Railway? (test: `curl https://...railway.app/health`)
 
+### Audio sounds distorted or has background noise in the app (but clear in Telnyx Portal)
+
+The app streams only the **outbound** track (assistant’s voice) and uses precise buffer scheduling to avoid gaps and pops. If you still hear artifacts:
+
+1. **Telnyx Calling tab**: For the number assigned to the assistant, enable **HD Voice** (Assigned numbers → HD Voice). This improves the telephony leg quality.
+2. **Browser**: Use a recent Chrome or Firefox; ensure no other tab is capturing the microphone/speaker.
+3. **Network**: Prefer a stable connection; high jitter can affect streaming.
+
 ## Comparison Table
 
 | Feature | Telnyx Portal Webcall | Test Call | Call Assistant |

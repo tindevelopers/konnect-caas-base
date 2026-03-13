@@ -1,5 +1,7 @@
-import { CrmProvider, CrmProviderConfig } from './crm-interface';
+import { CrmProvider } from './crm-interface';
+import { CrmProviderConfig } from './crm-types';
 import { GoHighLevelProvider } from './providers/gohighlevel-provider';
+import { HubSpotProvider } from './providers/hubspot-provider';
 
 class CrmProviderRegistry {
   private providers = new Map<string, CrmProvider>();
@@ -28,6 +30,9 @@ export async function createProvider(config: CrmProviderConfig): Promise<CrmProv
   switch (config.provider) {
     case 'gohighlevel':
       provider = new GoHighLevelProvider();
+      break;
+    case 'hubspot':
+      provider = new HubSpotProvider();
       break;
     default:
       throw new Error(`Unknown CRM provider: ${config.provider}`);

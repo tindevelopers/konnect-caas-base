@@ -86,6 +86,33 @@ export async function getContacts(): Promise<Contact[]> {
 }
 
 /**
+ * Get contacts by IDs for the current tenant (e.g. campaign audience selection)
+ */
+export async function getContactsByIds(ids: string[]): Promise<Contact[]> {
+  if (ids.length === 0) return [];
+  try {
+    const tenantId = await getTenantForCrm();
+    const supabase = await createClient();
+    const { data, error } = await (supabase.from("contacts") as any)
+      .select(`*, company:companies(*)`)
+      .eq("tenant_id", tenantId)
+      .in("id", ids)
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error("Error fetching contacts by IDs:", error);
+      throw error;
+    }
+    return (data as Contact[]) || [];
+  } catch (error: any) {
+    if (error.message?.includes("No tenants found")) {
+      return [];
+    }
+    throw error;
+  }
+}
+
+/**
  * Get a single contact by ID
  */
 export async function getContact(id: string): Promise<Contact | null> {
@@ -205,5 +232,64 @@ export async function deleteContact(id: string): Promise<void> {
   if (contact) {
     const contactName = `${contact.first_name} ${contact.last_name}`;
     await logEntityDeleted("contact", id, contactName);
+  }
+}
+
+/**
+ * Lightweight list of contact phone numbers for dialing UI dropdowns.
+ * Returns both `phone` and `mobile` numbers (deduped) for the current tenant.
+ */
+export async function listContactDialTargetsAction(
+  limit: number = 200
+): Promise<Array<{ value: string; label: string }>> {
+  try {
+    const tenantId = await getTenantForCrm();
+    const supabase = await createClient();
+
+    const { data, error } = await (supabase.from("contacts") as any)
+      .select("id,first_name,last_name,phone,mobile")
+      .eq("tenant_id", tenantId)
+      .order("updated_at", { ascending: false })
+      .limit(Math.max(1, Math.min(500, limit)));
+
+    if (error) {
+      console.error("Error fetching contact dial targets:", error);
+      throw error;
+    }
+
+    const rows =
+      (data as Array<{
+        id: string;
+        first_name: string;
+        last_name: string;
+        phone: string | null;
+        mobile: string | null;
+      }>) ?? [];
+
+    const seen = new Set<string>();
+    const out: Array<{ value: string; label: string }> = [];
+
+    for (const r of rows) {
+      const name = `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim() || "Contact";
+      const candidates: Array<{ value: string; suffix?: string }> = [];
+      if (r.phone) candidates.push({ value: r.phone, suffix: "" });
+      if (r.mobile) candidates.push({ value: r.mobile, suffix: " (mobile)" });
+
+      for (const c of candidates) {
+        const value = String(c.value).trim();
+        if (!value) continue;
+        if (seen.has(value)) continue;
+        seen.add(value);
+        out.push({ value, label: `${name} · ${value}${c.suffix ?? ""}` });
+      }
+    }
+
+    return out;
+  } catch (error: any) {
+    // If no tenant found (Platform Admin with no tenants), return empty list
+    if (error?.message?.includes("No tenants found")) {
+      return [];
+    }
+    throw error;
   }
 }

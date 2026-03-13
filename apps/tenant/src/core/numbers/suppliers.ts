@@ -1,6 +1,6 @@
 /**
- * Number suppliers abstraction - stub for future multi-supplier support.
- * Currently: Telnyx only. Coming soon: Twilio, Bandwidth, etc.
+ * Number suppliers abstraction for multi-VOIP support.
+ * Active: Telnyx, Twilio. Coming soon: Bandwidth.
  */
 
 export type NumberSupplierId = "telnyx" | "twilio" | "bandwidth";
@@ -12,14 +12,14 @@ export type NumberSupplier = {
   comingSoon?: boolean;
 };
 
-/** Active suppliers with inventory. Telnyx only for now. */
+/** Active suppliers with inventory. */
 export const ACTIVE_SUPPLIERS: NumberSupplier[] = [
   { id: "telnyx", name: "Telnyx", enabled: true },
+  { id: "twilio", name: "Twilio", enabled: true },
 ];
 
-/** Future suppliers - Coming soon */
+/** Future suppliers */
 export const COMING_SOON_SUPPLIERS: NumberSupplier[] = [
-  { id: "twilio", name: "Twilio", enabled: false, comingSoon: true },
   { id: "bandwidth", name: "Bandwidth", enabled: false, comingSoon: true },
 ];
 
@@ -28,17 +28,3 @@ export const ALL_SUPPLIERS: NumberSupplier[] = [
   ...ACTIVE_SUPPLIERS,
   ...COMING_SOON_SUPPLIERS,
 ];
-
-/**
- * Stub: Search localities across multiple suppliers.
- * TODO: Implement when adding Twilio, Bandwidth, etc.
- */
-export async function searchLocalitiesFromSuppliers(_args: {
-  countryCode: string;
-  localityQuery: string;
-  phoneNumberType?: string;
-  supplierIds?: NumberSupplierId[];
-}): Promise<{ localities: string[]; bySupplier: Record<string, string[]> }> {
-  // Coming soon - multi-supplier aggregation
-  return { localities: [], bySupplier: {} };
-}

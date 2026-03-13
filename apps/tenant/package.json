@@ -4,19 +4,20 @@
   "private": true,
   "description": "Admin dashboard application for multi-tenant SaaS platform",
   "engines": {
-    "node": "20"
+    "node": "20.x"
   },
   "scripts": {
-    "dev": "next dev --port 3010 --webpack",
+    "dev": "cross-env NODE_OPTIONS=--max-http-header-size=32768 next dev --port 3020 --hostname 0.0.0.0 --webpack",
+    "dev:3000": "next dev --port 3000 --hostname 0.0.0.0 --webpack",
     "build": "next build --webpack",
-    "start": "next start --port 3010",
+    "start": "next start --port 3020",
     "lint": "next lint",
     "type-check": "tsc --noEmit",
     "ws:server": "tsx server/websocket-server.ts",
     "dev:all": "concurrently \"pnpm dev\" \"pnpm ws:server\""
   },
   "dependencies": {
-    "@ai-sdk/openai": "^1.0.0",
+    "@ai-sdk/openai": "^2.0.0",
     "@builder.io/react": "^9.1.0",
     "@fullcalendar/core": "^6.1.15",
     "@fullcalendar/daygrid": "^6.1.15",
@@ -58,7 +59,7 @@
     "server-only": "^0.0.1",
     "simplebar-react": "^3.3.0",
     "stripe": "^20.0.0",
-    "swiper": "^11.2.0",
+    "swiper": ">=12.1.2",
     "tailwind-merge": "^2.6.0",
     "tailwindcss": "^4.0.0",
     "ws": "^8.19.0",
@@ -73,6 +74,7 @@
     "@types/prismjs": "^1.26.5",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
+    "cross-env": "^7.0.3",
     "concurrently": "^9.2.1",
     "dotenv": "^17.2.3",
     "eslint": "^9",

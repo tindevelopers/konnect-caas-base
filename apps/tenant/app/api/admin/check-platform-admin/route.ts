@@ -4,6 +4,9 @@ import { createAdminClient } from "@/core/database/admin-client";
 import { isPlatformAdmin } from "@/app/actions/organization-admins";
 import { getUserPermissions } from "@/core/permissions/permissions";
 
+// Ensure this runs per-request so role/tenant are always current (no caching)
+export const dynamic = "force-dynamic";
+
 export async function OPTIONS() {
   return new NextResponse(null, {
     status: 200,
@@ -40,6 +43,7 @@ export async function GET() {
           authenticated: true,
           userId: user.id,
           email: user.email,
+          isPlatformAdmin: false,
           error: `Failed to fetch user data: ${userError?.message || "User not found"}`,
         },
         { status: 200 }
@@ -50,6 +54,10 @@ export async function GET() {
     const tenantId = userData.tenant_id;
     const isAdmin = role === "Platform Admin" && tenantId === null;
 
+    // #region agent log
+    fetch('http://127.0.0.1:7245/ingest/12c50a73-cce7-4e62-9e27-745f045f2e8f',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'check-platform-admin/route.ts:GET',message:'Role check result',data:{role,tenantId:tenantId??'null',isAdmin},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
+    // #endregion
+
     // Check permissions
     const permissions = await getUserPermissions(user.id);
 
@@ -59,8 +67,10 @@ export async function GET() {
       email: user.email,
       fullName: userData.full_name,
       role: role || "Unknown",
+      effectiveRole: permissions.role,
       tenantId: tenantId,
       isPlatformAdmin: isAdmin,
+      permissionsList: permissions.permissions,
       permissions: {
         hasTenantsWrite: permissions.isPlatformAdmin || permissions.permissions.includes("tenants.write"),
         allPermissions: permissions.permissions,

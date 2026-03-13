@@ -1,15 +1,21 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import {
   AssistantEditor,
+  AssignedNumberRow,
   McpServerDescriptor,
   TelnyxModelMetadata,
+  TelnyxIntegration,
 } from "@tinadmin/telnyx-ai-platform";
 import { assistantsApi } from "../../telnyxApis";
 import { listMcpServersAction } from "@/app/actions/telnyx/mcpServers";
 import { listModelsAction } from "@/app/actions/telnyx/models";
+import { listIntegrationsAction } from "@/app/actions/telnyx/integrations";
+import { createIntegrationSecretAction } from "@/app/actions/telnyx/secrets";
+import { testAssistantToolAction } from "@/app/actions/telnyx/tools";
+import { listPhoneNumbersAssignedToAssistantAction } from "@/app/actions/telnyx/numbers";
 import AssistantActions from "@/components/ai/AssistantActions";
 import AssistantActionsErrorBoundary from "@/components/ai/AssistantActionsErrorBoundary";
 
@@ -19,6 +25,8 @@ export default function AssistantEditorPage() {
   const assistantId = params?.assistantId as string;
   const [mcpServers, setMcpServers] = useState<McpServerDescriptor[]>([]);
   const [models, setModels] = useState<TelnyxModelMetadata[]>([]);
+  const [integrations, setIntegrations] = useState<TelnyxIntegration[]>([]);
+  const [assignedNumbers, setAssignedNumbers] = useState<AssignedNumberRow[]>([]);
 
   if (!assistantId) {
     return <p className="text-sm text-gray-500">Assistant not found.</p>;
@@ -48,6 +56,36 @@ export default function AssistantEditorPage() {
     void loadModels();
   }, []);
 
+  useEffect(() => {
+    async function loadIntegrations() {
+      try {
+        const response = await listIntegrationsAction();
+        setIntegrations(response.data ?? []);
+      } catch {
+        setIntegrations([]);
+      }
+    }
+    void loadIntegrations();
+  }, []);
+
+  const loadAssignedNumbers = useCallback(async () => {
+    if (!assistantId) return;
+    try {
+      const res = await listPhoneNumbersAssignedToAssistantAction(assistantId);
+      setAssignedNumbers(res.data ?? []);
+    } catch {
+      setAssignedNumbers([]);
+    }
+  }, [assistantId]);
+
+  useEffect(() => {
+    void loadAssignedNumbers();
+  }, [loadAssignedNumbers]);
+
+  const onAssignNumbers = useCallback(() => {
+    router.push("/rtc/numbers/manage-numbers");
+  }, [router]);
+
   return (
     <>
       <AssistantEditor
@@ -55,6 +93,11 @@ export default function AssistantEditorPage() {
         assistantId={assistantId}
         mcpServers={mcpServers}
         models={models}
+        integrations={integrations}
+        createIntegrationSecret={createIntegrationSecretAction}
+        testAssistantTool={testAssistantToolAction}
+        assignedNumbers={assignedNumbers}
+        onAssignNumbers={onAssignNumbers}
         onBack={() => router.push("/ai/assistants")}
       />
       <AssistantActionsErrorBoundary>

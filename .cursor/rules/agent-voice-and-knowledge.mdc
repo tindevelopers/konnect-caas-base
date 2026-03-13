@@ -1,0 +1,14 @@
+---
+description: Voice/STT/TTS and knowledge ingestion guardrails for agent features
+globs: apps/tenant/{server,src/core/agents,app/api/agents,app/api/public/listings}/**/*.{ts,tsx}
+alwaysApply: false
+---
+
+# Voice and Knowledge Guardrails
+
+- Treat speech providers as pluggable capabilities; do not hardcode a single STT/TTS vendor.
+- Keep premium voice options explicit and configurable per agent (`voice_profile`, `speech_profile`).
+- Realtime voice pipelines should degrade gracefully if provider credentials are missing.
+- Ingestion flows must write normalized source records (`agent_knowledge_sources`) before pushing content into KB documents.
+- For URL/sitemap ingestion, sanitize and limit fetched text size before embedding.
+- Avoid storing PII-heavy raw transcripts in logs; summarize and persist only what is needed for support/reporting workflows.

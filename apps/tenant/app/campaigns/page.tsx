@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { getCampaigns, getCampaignStats } from "@/app/actions/campaigns/campaigns";
 import PageBreadcrumb from "@/components/common/PageBreadCrumb";
 import Button from "@/components/ui/button/Button";
+import { Modal } from "@/components/ui/modal";
 import { PlusIcon } from "@heroicons/react/24/outline";
 import Link from "next/link";
 import type { Campaign, CampaignStats } from "@/app/actions/campaigns/campaigns";
@@ -28,6 +29,10 @@ export default function CampaignsPage() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [statsMap, setStatsMap] = useState<Record<string, CampaignStats>>({});
   const [loading, setLoading] = useState(true);
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
+  const [campaignToDelete, setCampaignToDelete] = useState<Campaign | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     loadCampaigns();
@@ -48,6 +53,44 @@ export default function CampaignsPage() {
       console.error("Error loading campaigns:", err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const openDeleteModal = (campaign: Campaign) => {
+    setCampaignToDelete(campaign);
+    setDeleteError(null);
+    setIsDeleteOpen(true);
+  };
+
+  const closeDeleteModal = () => {
+    setIsDeleteOpen(false);
+    setCampaignToDelete(null);
+    setDeleteError(null);
+  };
+
+  const handleDeleteCampaign = async () => {
+    if (!campaignToDelete) return;
+    setDeleteError(null);
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/campaigns/${campaignToDelete.id}`, { method: "DELETE" });
+      const body = (await res.json()) as { ok?: boolean; error?: string };
+      if (!res.ok || !body?.ok) {
+        setDeleteError(body?.error ?? "Failed to delete campaign");
+        return;
+      }
+
+      setCampaigns((prev) => prev.filter((c) => c.id !== campaignToDelete.id));
+      setStatsMap((prev) => {
+        const next = { ...prev };
+        delete next[campaignToDelete.id];
+        return next;
+      });
+      closeDeleteModal();
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Failed to delete campaign");
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -147,11 +190,20 @@ export default function CampaignsPage() {
                           {stats?.completed ?? 0}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                          <Link href={`/campaigns/${campaign.id}`}>
-                            <button className="text-brand-500 hover:text-brand-700">
-                              View
+                          <div className="inline-flex items-center gap-3">
+                            <Link href={`/campaigns/${campaign.id}`}>
+                              <button className="text-brand-500 hover:text-brand-700">
+                                View
+                              </button>
+                            </Link>
+                            <button
+                              type="button"
+                              className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                              onClick={() => openDeleteModal(campaign)}
+                            >
+                              Delete
                             </button>
-                          </Link>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -162,6 +214,43 @@ export default function CampaignsPage() {
           </div>
         </div>
       </div>
+
+      <Modal
+        isOpen={isDeleteOpen}
+        onClose={() => {
+          if (!deleting) closeDeleteModal();
+        }}
+        className="relative w-full max-w-[560px] rounded-2xl bg-white p-6 dark:bg-gray-900"
+      >
+        <div className="space-y-4">
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+            Delete Campaign
+          </h3>
+          <p className="text-sm text-gray-600 dark:text-gray-300">
+            Are you sure you want to delete{" "}
+            <span className="font-semibold">{campaignToDelete?.name ?? "this campaign"}</span>?
+            This performs a soft delete and removes it from active views.
+          </p>
+          {deleteError && (
+            <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-200">
+              {deleteError}
+            </div>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={closeDeleteModal} disabled={deleting}>
+              Cancel
+            </Button>
+            <button
+              type="button"
+              onClick={handleDeleteCampaign}
+              disabled={deleting}
+              className="inline-flex items-center justify-center rounded-lg bg-red-600 px-5 py-3.5 text-sm font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {deleting ? "Deleting..." : "Delete"}
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

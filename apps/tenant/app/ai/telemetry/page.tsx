@@ -45,6 +45,23 @@ export default function TelemetryPage() {
     loadTelemetry();
   }, [filters]);
 
+  useEffect(() => {
+    if (!selectedEvent) return;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSelectedEvent(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [selectedEvent]);
+
   const loadTelemetry = async () => {
     try {
       setLoading(true);
@@ -80,6 +97,11 @@ export default function TelemetryPage() {
   const formatDate = (dateStr?: string) => {
     if (!dateStr) return "";
     return new Date(dateStr).toLocaleString();
+  };
+
+  const formatProvider = (provider: string) => {
+    if (provider === "telnyx") return "premium_telephony";
+    return provider;
   };
 
   const getStatusColor = (status: string) => {
@@ -200,7 +222,7 @@ export default function TelemetryPage() {
               type="text"
               value={filters.provider}
               onChange={(e) => setFilters({ ...filters, provider: e.target.value })}
-              placeholder="e.g. telnyx"
+              placeholder="e.g. premium_telephony"
               className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-800"
             />
           </div>
@@ -299,15 +321,24 @@ export default function TelemetryPage() {
 
       {/* Event Details Modal */}
       {selectedEvent && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Telemetry event details"
+          onMouseDown={(e) => {
+            if (e.currentTarget === e.target) setSelectedEvent(null);
+          }}
+        >
           <div className="w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-lg dark:bg-gray-900">
-            <div className="flex items-center justify-between mb-4">
+            <div className="mb-4 flex items-center justify-between">
               <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Event Details</h2>
               <button
                 onClick={() => setSelectedEvent(null)}
-                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                aria-label="Close"
+                className="rounded-md px-2 py-1 text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white"
               >
-                ✕
+                <span aria-hidden="true">✕</span>
               </button>
             </div>
             <div className="space-y-4">
@@ -317,7 +348,9 @@ export default function TelemetryPage() {
               </div>
               <div>
                 <div className="text-sm font-medium text-gray-500 dark:text-gray-400">Provider</div>
-                <div className="mt-1 text-gray-900 dark:text-white">{selectedEvent.provider}</div>
+                <div className="mt-1 text-gray-900 dark:text-white">
+                  {formatProvider(selectedEvent.provider)}
+                </div>
               </div>
               <div>
                 <div className="text-sm font-medium text-gray-500 dark:text-gray-400">Status</div>
@@ -369,6 +402,15 @@ export default function TelemetryPage() {
                   </pre>
                 </div>
               )}
+            </div>
+            <div className="mt-6 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setSelectedEvent(null)}
+                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-100 dark:hover:bg-gray-800"
+              >
+                Close
+              </button>
             </div>
           </div>
         </div>

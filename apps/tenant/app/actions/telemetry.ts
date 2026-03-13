@@ -45,6 +45,17 @@ export async function getTelemetryEventsAction(options?: {
     offset: options?.offset || 0,
     startDate,
     endDate,
+  }).then((events) => {
+    if (isAdmin) return events;
+    // Non-platform admins should not see supplier/provider details.
+    return events.map((e) => ({
+      ...e,
+      provider: "redacted",
+      request_data: undefined,
+      response_data: undefined,
+      error_stack: undefined,
+      metadata: undefined,
+    }));
   });
 }
 
@@ -75,7 +86,7 @@ export async function getTelemetryStatsAction(options?: {
 
   return getTelemetryStats({
     tenantId,
-    provider: options?.provider,
+    provider: isAdmin ? options?.provider : undefined,
     startDate,
     endDate,
   });

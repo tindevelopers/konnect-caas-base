@@ -1,7 +1,7 @@
 "use server";
 
 import { createClient } from "@/core/database/server";
-import { createTenantAwareClient, getSupabaseClient } from "@/core/database/tenant-client";
+import { createTenantAwareClient, createTenantAwareServerClient, getSupabaseClient } from "@/core/database/tenant-client";
 import type { Database } from "@/core/database";
 import type {
   SupportTicket,
@@ -137,11 +137,12 @@ export async function createSupportTicket(
   input: CreateTicketInput,
   tenantId?: string
 ): Promise<SupportTicket> {
-  const client = tenantId 
-    ? await createTenantAwareClient(tenantId)
+  // Use server client so auth.getUser() sees the request session (cookies)
+  const client = tenantId
+    ? await createTenantAwareServerClient(tenantId)
     : await createClient();
   const supabase = getSupabaseClient(client);
-  
+
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
     throw new Error("Not authenticated");
@@ -172,6 +173,8 @@ export async function createSupportTicket(
       category_id: input.category_id || null,
       created_by: user.id,
       assigned_to: input.assigned_to || null,
+      support_code: input.support_code || null,
+      support_ref: input.support_ref || null,
     })
     .select(`
       *,
@@ -208,6 +211,7 @@ export async function updateSupportTicket(
   if (input.priority !== undefined) updateData.priority = input.priority;
   if (input.category_id !== undefined) updateData.category_id = input.category_id;
   if (input.assigned_to !== undefined) updateData.assigned_to = input.assigned_to;
+  if (input.escalated_to_platform_admin_at !== undefined) updateData.escalated_to_platform_admin_at = input.escalated_to_platform_admin_at;
   
   const { data, error } = await (supabase
     .from("support_tickets") as any)

@@ -9,6 +9,8 @@ A complete, enterprise-grade SaaS platform template built with Next.js 15, Supab
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue)](https://www.typescriptlang.org/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind-4.0-38bdf8)](https://tailwindcss.com/)
 
+Staging branch pushes trigger Vercel preview deployments.
+
 ---
 
 ## 🍴 Fork This Template
@@ -57,6 +59,7 @@ See [**FORK_GUIDE.md**](FORK_GUIDE.md) for detailed customization instructions.
 - **Calendar** - Events and scheduling
 - **Task Management** - Kanban boards
 - **White Label** - Custom branding per tenant
+- **AI Chat Agents (3 levels)** - Telnyx (voice), Enhanced (RAG chatbot), Abacus (ChatLLM). See [**Chat AI Agents**](docs/CHAT_AI_AGENTS.md) for how to train and configure each — critical for product quality.
 
 ### 🎨 UI/UX
 - **Modern Design** - Beautiful, responsive interface
@@ -204,6 +207,7 @@ See [`.env.example`](.env.example) for complete list.
 - [**Developer Guide**](docs/DEVELOPER_GUIDE.md) - Advanced development
 - [**Architecture**](docs/ARCHITECTURE.md) - System design
 - [**Multi-Tenancy**](docs/MULTITENANT_ARCHITECTURE.md) - Tenant isolation
+- [**Chat AI Agents**](docs/CHAT_AI_AGENTS.md) - **Three levels of chat AI (Telnyx, Enhanced, Abacus) and how to train them** — critical for product quality
 - [**Stripe Setup**](docs/STRIPE_SETUP.md) - Payment integration
 - [**Deployment**](docs/DEPLOYMENT.md) - Production deployment
 - [**User Guide**](docs/USER_GUIDE.md) - End-user documentation

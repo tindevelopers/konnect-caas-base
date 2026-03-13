@@ -1,12 +1,14 @@
 "use client";
 
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Button from "@/components/ui/button/Button";
 import { Modal } from "@/components/ui/modal";
 import Alert from "@/components/ui/alert/Alert";
 import { useModal } from "@/hooks/useModal";
-import { CallIcon, CopyIcon, PencilIcon } from "@/icons";
+import { useTenant } from "@/core/multi-tenancy";
+import { CallIcon, ChatIcon, CopyIcon, PencilIcon } from "@/icons";
+import { listContactDialTargetsAction } from "@/app/actions/crm/contacts";
 import {
   callAssistantAction,
   cloneAssistantAction,
@@ -14,9 +16,20 @@ import {
   hangUpCallAction,
   testCallAssistantAction,
 } from "@/app/actions/telnyx/assistants";
+import {
+  listCallControlApplicationsAction,
+  createCallControlApplicationAction,
+} from "@/app/actions/telnyx/call-control";
+import { listPhoneNumbersAssignedToAssistantAction } from "@/app/actions/telnyx/numbers";
+import { getTenantVoiceSettings } from "@/app/actions/voice-settings";
+import { STREAM_CODEC_OPTIONS } from "@/src/lib/stream-codec-options";
 import CallStatusModal from "./CallStatusModal";
 import WebcallModal from "./WebcallModal";
+import TestChatModal from "./TestChatModal";
+import TelnyxWidgetModal from "./TelnyxWidgetModal";
 import AudioStreamPlayer from "./AudioStreamPlayer";
+import EmbedPreviewSection from "./EmbedPreviewSection";
+import AbacusChatbotEmbed from "./AbacusChatbotEmbed";
 
 interface AssistantActionsProps {
   assistantId: string;
@@ -44,6 +57,7 @@ const inputClasses =
 
 export default function AssistantActions({ assistantId }: AssistantActionsProps) {
   const router = useRouter();
+  const { tenant } = useTenant();
   const callModal = useModal();
   const receiveModal = useModal();
   const cloneModal = useModal();
@@ -59,6 +73,7 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
     fromNumber: "",
     connectionId: "",
     streamUrl: "", // Optional WebSocket URL for audio streaming
+    streamCodec: "", // Preferred codec (PCMU, OPUS, etc.); empty = use tenant default
   });
   const [callResult, setCallResult] = useState<CallResult | null>(null);
   const [callError, setCallError] = useState<string | null>(null);
@@ -80,13 +95,57 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
     status: string;
   } | null>(null);
   const [testError, setTestError] = useState<string | null>(null);
-  
+
+  const [assignedNumbersForCall, setAssignedNumbersForCall] = useState<Array<{ phone_number: string }>>([]);
+  const [contactDialTargets, setContactDialTargets] = useState<Array<{ value: string; label: string }>>([]);
+  const [loadingContactDialTargets, setLoadingContactDialTargets] = useState(false);
+  const [callControlApps, setCallControlApps] = useState<Array<{ id: string; application_name: string | null }>>([]);
+  const [callControlAppsError, setCallControlAppsError] = useState<string | null>(null);
+  const [loadingCallControlApps, setLoadingCallControlApps] = useState(false);
+  const [creatingCallControlApp, setCreatingCallControlApp] = useState(false);
+  const [newCallControlAppName, setNewCallControlAppName] = useState("Voice / AI Assistant");
+
   const webcallModal = useModal();
+  const testChatModal = useModal();
+  const abacusChatbotModal = useModal();
+  const isPetStoreDirectTenant =
+    (tenant?.name ?? "").trim().toLowerCase() === "pet store direct";
+
+  useEffect(() => {
+    if (!assistantId) return;
+    let cancelled = false;
+    listPhoneNumbersAssignedToAssistantAction(assistantId).then((res) => {
+      if (!cancelled && res.data?.length) setAssignedNumbersForCall(res.data);
+    });
+    return () => { cancelled = true; };
+  }, [assistantId]);
 
   const openCallModal = useCallback(async () => {
     setCallError(null);
     setCallResult(null);
-    
+    setCallControlAppsError(null);
+    try {
+      const voiceSettings = await getTenantVoiceSettings();
+      const codec = voiceSettings.defaultStreamCodec || "PCMU";
+      setCallForm((prev) => ({ ...prev, streamCodec: codec }));
+    } catch {
+      setCallForm((prev) => ({ ...prev, streamCodec: "PCMU" }));
+    }
+    setLoadingCallControlApps(true);
+    setLoadingContactDialTargets(true);
+    try {
+      const [res, contacts] = await Promise.all([
+        listCallControlApplicationsAction(),
+        listContactDialTargetsAction().catch(() => []),
+      ]);
+      setCallControlApps(res.data ?? []);
+      if (res.error) setCallControlAppsError(res.error);
+      setContactDialTargets(contacts ?? []);
+    } finally {
+      setLoadingCallControlApps(false);
+      setLoadingContactDialTargets(false);
+    }
+
     // Auto-populate WebSocket stream URL
     // Priority: Production URL (Railway) > ngrok > localhost
     // This ensures we test against production infrastructure even locally
@@ -175,6 +234,7 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
         connectionId: callForm.connectionId,
         streamUrl: callForm.streamUrl || undefined,
         streamTrack: "both_tracks",
+        streamCodec: callForm.streamCodec || undefined,
       });
       setCallResult(result);
       setBanner({
@@ -257,6 +317,10 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
     webcallModal.openModal();
   }, [webcallModal]);
 
+  const handleTestChat = useCallback(() => {
+    testChatModal.openModal();
+  }, [testChatModal]);
+
 
   return (
     <div className="mt-8 rounded-2xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-900">
@@ -283,6 +347,13 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
           onClick={openCallModal}
         >
           Call Assistant
+        </Button>
+        <Button
+          variant="outline"
+          startIcon={<ChatIcon className="h-4 w-4" />}
+          onClick={handleTestChat}
+        >
+          Test Chat
         </Button>
         <Button
           variant="outline"
@@ -315,6 +386,13 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
         </Button>
         <Button
           variant="outline"
+          startIcon={<ChatIcon className="h-4 w-4" />}
+          onClick={abacusChatbotModal.openModal}
+        >
+          Abacus Chatbot
+        </Button>
+        <Button
+          variant="outline"
           startIcon={<CopyIcon className="h-4 w-4" />}
           onClick={cloneModal.openModal}
         >
@@ -344,6 +422,25 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
               <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-400">
                 Destination (To)
               </label>
+              {loadingContactDialTargets ? (
+                <p className="mb-2 text-sm text-gray-500 dark:text-gray-400">Loading contact numbers…</p>
+              ) : contactDialTargets.length > 0 ? (
+                <select
+                  className="mb-2 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-gray-600 dark:bg-gray-800 dark:text-white/90"
+                  value={contactDialTargets.some((c) => c.value === callForm.toNumber) ? callForm.toNumber : ""}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v) setCallForm((prev) => ({ ...prev, toNumber: v }));
+                  }}
+                >
+                  <option value="">Choose contact number…</option>
+                  {contactDialTargets.map((c) => (
+                    <option key={c.value} value={c.value}>
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
+              ) : null}
               <input
                 type="text"
                 placeholder="+15551234567"
@@ -353,14 +450,34 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
                   setCallForm((prev) => ({ ...prev, toNumber: event.target.value }))
                 }
               />
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                E.164 format: + and country code + number (e.g. +33123456789). Spaces/dashes are auto‑stripped.
+              </p>
             </div>
             <div>
               <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-400">
                 Caller ID (From)
               </label>
+              {assignedNumbersForCall.length > 0 && (
+                <select
+                  className="mb-2 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-gray-600 dark:bg-gray-800 dark:text-white/90"
+                  value={assignedNumbersForCall.some((n) => n.phone_number === callForm.fromNumber) ? callForm.fromNumber : ""}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v) setCallForm((prev) => ({ ...prev, fromNumber: v }));
+                  }}
+                >
+                  <option value="">Choose assigned number…</option>
+                  {assignedNumbersForCall.map((n) => (
+                    <option key={n.phone_number} value={n.phone_number}>
+                      {n.phone_number}
+                    </option>
+                  ))}
+                </select>
+              )}
               <input
                 type="text"
-                placeholder="+15550001111"
+                placeholder="+15550001111 or pick above"
                 className={inputClasses}
                 value={callForm.fromNumber}
                 onChange={(event) =>
@@ -370,20 +487,93 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
             </div>
             <div>
               <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-400">
-                Call Control Connection ID
+                Call Control connection
               </label>
-              <input
-                type="text"
-                placeholder="Call Control App ID"
-                className={inputClasses}
-                value={callForm.connectionId}
-                onChange={(event) =>
-                  setCallForm((prev) => ({ ...prev, connectionId: event.target.value }))
-                }
-              />
-              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                Find this in Telnyx Mission Control → Voice → Call Control Apps.
-              </p>
+              {loadingCallControlApps ? (
+                <p className="text-sm text-gray-500 dark:text-gray-400">Loading connections…</p>
+              ) : callControlAppsError ? (
+                <p className="text-sm text-amber-600 dark:text-amber-400">{callControlAppsError}</p>
+              ) : callControlApps.length > 0 ? (
+                <>
+                  <select
+                    className="mb-2 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-gray-600 dark:bg-gray-800 dark:text-white/90"
+                    value={callControlApps.some((a) => a.id === callForm.connectionId) ? callForm.connectionId : ""}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (v) setCallForm((prev) => ({ ...prev, connectionId: v }));
+                    }}
+                  >
+                    <option value="">Choose a Call Control connection…</option>
+                    {callControlApps.map((app) => (
+                      <option key={app.id} value={app.id}>
+                        {app.application_name || app.id}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    Connections are managed via the Telephony API. Same connection can be set on a number in Manage Numbers.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="mb-2 text-sm text-gray-600 dark:text-gray-400">
+                    No Call Control connection yet. Create one below (webhook will point to this app).
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      type="text"
+                      placeholder="App name"
+                      className="min-w-[180px] rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-white/90"
+                      value={newCallControlAppName}
+                      onChange={(e) => setNewCallControlAppName(e.target.value)}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={creatingCallControlApp || !newCallControlAppName.trim()}
+                      onClick={async () => {
+                        setCreatingCallControlApp(true);
+                        try {
+                          const { data, error } = await createCallControlApplicationAction({
+                            application_name: newCallControlAppName.trim() || "Voice / AI Assistant",
+                          });
+                          if (error) {
+                            setCallControlAppsError(error);
+                            return;
+                          }
+                          if (data?.id) {
+                            setCallControlApps((prev) => [
+                              ...prev,
+                              { id: data.id, application_name: data.application_name ?? null },
+                            ]);
+                            setCallForm((prev) => ({ ...prev, connectionId: data.id }));
+                            setCallControlAppsError(null);
+                          }
+                        } finally {
+                          setCreatingCallControlApp(false);
+                        }
+                      }}
+                    >
+                      {creatingCallControlApp ? "Creating…" : "Create connection"}
+                    </Button>
+                  </div>
+                </>
+              )}
+              <div className="mt-2">
+                <label className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">
+                  Or paste Connection ID
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. 289794722023604389"
+                  className={inputClasses}
+                  value={callForm.connectionId}
+                  onChange={(event) =>
+                    setCallForm((prev) => ({ ...prev, connectionId: event.target.value }))
+                  }
+                />
+              </div>
             </div>
             <div>
               <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-400">
@@ -403,12 +593,12 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
                 WebSocket URL for real-time audio streaming. Auto-populated based on your environment.
                 {callForm.streamUrl && callForm.streamUrl.includes("localhost") && (
                   <span className="block mt-1 text-amber-600 dark:text-amber-400">
-                    ⚠️ Localhost won't work for Telnyx. Set WEBSOCKET_URL in .env.local to use remote server (Railway) for testing.
+                    ⚠️ Localhost won't work for the telephony provider. Set WEBSOCKET_URL in .env.local to use a remote server (Railway) for testing.
                   </span>
                 )}
                 {callForm.streamUrl && callForm.streamUrl.includes("ngrok") && (
                   <span className="block mt-1 text-green-600 dark:text-green-400">
-                    ✅ Using ngrok tunnel - Telnyx will be able to connect!
+                    ✅ Using ngrok tunnel - the provider will be able to connect.
                   </span>
                 )}
                 {callForm.streamUrl && (callForm.streamUrl.includes("vercel.app") || callForm.streamUrl.includes("railway.app") || callForm.streamUrl.includes("render.com") || callForm.streamUrl.includes("fly.dev")) && !callForm.streamUrl.includes("ngrok") && (
@@ -416,6 +606,27 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
                     ✅ Using remote WebSocket server (Railway) - Recommended for testing production infrastructure!
                   </span>
                 )}
+              </p>
+            </div>
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-400">
+                Preferred stream codec
+              </label>
+              <select
+                className={inputClasses}
+                value={callForm.streamCodec || "PCMU"}
+                onChange={(e) =>
+                  setCallForm((prev) => ({ ...prev, streamCodec: e.target.value }))
+                }
+              >
+                {STREAM_CODEC_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Audio codec for the stream. Default is set in Communications → Voice → Settings.
               </p>
             </div>
           </div>
@@ -460,7 +671,7 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
             Receive inbound calls
           </h4>
           <p className="mb-5 text-sm text-gray-500 dark:text-gray-400">
-            Configure your Telnyx Call Control app to route inbound calls to this assistant.
+            Configure your Call Control app to route inbound calls to this assistant.
           </p>
 
           {isLoadingInstructions && (
@@ -624,12 +835,61 @@ export default function AssistantActions({ assistantId }: AssistantActionsProps)
         </div>
       )}
 
+      {/* Website Embed & Unified Answer Preview */}
+      <EmbedPreviewSection assistantId={assistantId} />
+
       {/* Webcall Modal */}
       <WebcallModal
         isOpen={webcallModal.isOpen}
         onClose={webcallModal.closeModal}
         assistantId={assistantId}
       />
+
+      {/* Test Chat Modal */}
+      {isPetStoreDirectTenant ? (
+        <TelnyxWidgetModal
+          isOpen={testChatModal.isOpen}
+          onClose={testChatModal.closeModal}
+          assistantId={assistantId}
+        />
+      ) : (
+        <TestChatModal
+          isOpen={testChatModal.isOpen}
+          onClose={testChatModal.closeModal}
+          assistantId={assistantId}
+        />
+      )}
+
+      {/* Abacus Chatbot Modal */}
+      <Modal
+        isOpen={abacusChatbotModal.isOpen}
+        onClose={abacusChatbotModal.closeModal}
+        className="relative m-5 sm:m-0 w-[min(100vw-2rem,480px)] min-w-[320px] rounded-2xl bg-white p-4 dark:bg-gray-900"
+        isFullscreen={false}
+      >
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <h4 className="text-sm font-semibold text-gray-900 dark:text-white">
+              Abacus AI Chatbot
+            </h4>
+            <button
+              type="button"
+              onClick={abacusChatbotModal.closeModal}
+              className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-300"
+              aria-label="Close"
+            >
+              <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+              </svg>
+            </button>
+          </div>
+          <AbacusChatbotEmbed
+            appId="d7dea936a"
+            height={560}
+            hideTopBar
+          />
+        </div>
+      </Modal>
 
       {/* Call Status Modal */}
       {callResult && (

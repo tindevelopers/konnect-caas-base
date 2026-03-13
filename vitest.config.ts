@@ -5,7 +5,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    include: ['packages/**/__tests__/**/*.test.ts'],
+    include: ['packages/**/__tests__/**/*.test.ts', 'apps/tenant/**/__tests__/**/*.test.ts'],
     alias: {
       '@/core': path.resolve(__dirname, './packages/@tinadmin/core/src'),
     },

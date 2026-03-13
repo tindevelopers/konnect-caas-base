@@ -24,7 +24,7 @@
     "url": "https://github.com/your-org/your-saas-platform/issues"
   },
   "homepage": "https://github.com/your-org/your-saas-platform#readme",
-  "author": "Your Organization",
+  "author": "Developer <developer@tin.info>",
   "license": "MIT",
   "main": "./src/app/page.tsx",
   "files": [
@@ -40,7 +40,7 @@
     "README_STRIPE.md"
   ],
   "engines": {
-    "node": "20.20.0"
+    "node": "20.x"
   },
   "packageManager": "pnpm@10.6.1",
   "scripts": {
@@ -50,6 +50,7 @@
     "dev:portal": "turbo run dev --filter=@tinadmin/portal",
     "dev:local": "supabase start && pnpm dev",
     "dev:localhost": "./scripts/start-localhost.sh",
+    "dev:remote": "turbo run dev",
     "build": "echo 'Skipping build for websocket service'",
     "build:packages": "turbo run build --filter='./packages/*'",
     "build:tenant": "turbo run build --filter=@tinadmin/tenant",
@@ -70,8 +71,12 @@
     "supabase:status": "supabase status",
     "supabase:reset": "supabase db reset",
     "sync:localities": "tsx scripts/sync-telnyx-localities.ts",
+    "update-telnyx-key": "node scripts/update-telnyx-key-all-tenants.mjs",
+    "clear-telnyx-configs": "node scripts/clear-telnyx-stored-configs.mjs",
     "docker:ps": "docker ps | grep supabase",
-    "docker:logs": "supabase logs"
+    "docker:logs": "supabase logs",
+    "railway:login": "railway login",
+    "railway:deploy:websocket": "./scripts/railway-websocket-deploy.sh"
   },
   "dependencies": {
     "@fullcalendar/core": "^6.1.15",
@@ -93,6 +98,7 @@
     "clsx": "^2.1.1",
     "flatpickr": "^4.6.13",
     "next": "^16.1.6",
+    "papaparse": "^5.5.3",
     "prismjs": "^1.30.0",
     "react": "^19.2.3",
     "react-apexcharts": "^1.7.0",
@@ -103,7 +109,7 @@
     "server-only": "^0.0.1",
     "simplebar-react": "^3.3.0",
     "stripe": "^20.0.0",
-    "swiper": "^11.2.0",
+    "swiper": ">=12.1.2",
     "tailwind-merge": "^2.6.0",
     "tailwindcss": "^4.0.0"
   },
@@ -136,6 +142,8 @@
       "ai>svelte": "5.46.4",
       "jsondiffpatch": ">=0.7.2",
       "glob": ">=10.5.0",
+      "minimatch": ">=10.2.1",
+      "ajv": ">=8.18.0",
       "undici": ">=6.23.0"
     }
   }

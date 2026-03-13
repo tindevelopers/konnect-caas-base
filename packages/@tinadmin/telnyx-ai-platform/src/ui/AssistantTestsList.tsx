@@ -65,7 +65,7 @@ export function AssistantTestsList({ api }: AssistantTestsListProps) {
             AI Tests
           </h1>
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            Create and run tests for Telnyx AI assistants.
+            Create and run tests for AI assistants.
           </p>
         </div>
         <div className="flex items-center gap-2">

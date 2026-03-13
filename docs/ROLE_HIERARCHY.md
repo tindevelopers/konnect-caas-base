@@ -1,10 +1,11 @@
-# Role Hierarchy - Google/HubSpot Style
+# Role Hierarchy - Platform/System Admin Model
 
 This document outlines the role structure following Google Workspace and HubSpot's organization model.
 
-## 🔹 Tenant Admin (Platform-Level Authority)
+## 🔹 Platform Admin (System-Level Authority)
 
-**What it is:** The root administrator who owns and controls the entire SaaS platform/tenant.
+**What it is:** The root administrator who owns and controls the entire SaaS platform.
+In the UI this role is shown as **System Admin** (badge/menu naming), but in code/DB the role name is **Platform Admin**.
 
 ### Powers and Responsibilities:
 
@@ -24,7 +25,7 @@ This document outlines the role structure following Google Workspace and HubSpot
 
 **Technical Implementation:**
 - `users.tenant_id = NULL` (not tied to any specific tenant)
-- `users.role_id` = "Tenant Admin"
+- `users.role_id` = "Platform Admin"
 - Bypasses all RLS policies
 - Has access to all data across all organizations
 
@@ -60,7 +61,7 @@ This document outlines the role structure following Google Workspace and HubSpot
 
 ## 📊 Comparison Table
 
-| Aspect | Tenant Admin | Organization Admin |
+| Aspect | Platform Admin | Organization Admin |
 |--------|--------------|-------------------|
 | **Scope** | Entire platform | Single organization |
 | **User Management** | All users | Organization users only |
@@ -69,7 +70,23 @@ This document outlines the role structure following Google Workspace and HubSpot
 | **Security Policies** | ✅ Global | ❌ Org-level only |
 | **Multi-Org Visibility** | ✅ All orgs | ❌ Their org only |
 | **RLS Restrictions** | ❌ Bypassed | ✅ Applied |
-| **Can be restricted** | ❌ No | ✅ Yes (by Tenant Admin) |
+| **Can be restricted** | ❌ No | ✅ Yes (by Platform Admin) |
+
+---
+
+## 🧭 Menu Visibility Matrix
+
+| Menu Area | Platform Admin (System Admin UI) | Organization Admin | Billing Owner / Developer / Viewer |
+|-----------|----------------------------------|--------------------|-------------------------------------|
+| Dashboard / CRM / Support / AI | ✅ | ✅ | ✅ (permission-gated) |
+| Admin > User Management | ✅ | ✅ | Depends on role permissions |
+| Admin > Tenant Management | ✅ | ❌ | ❌ |
+| System Admin section | ✅ | ❌ | ❌ |
+| SaaS platform section | ✅ | ❌ | ❌ |
+
+Notes:
+- **System Admin** in the sidebar refers to the same actor as **Platform Admin** in DB/code.
+- Users below Organization Admin must not see other organizations unless explicitly granted through role setup.
 
 ---
 
@@ -96,7 +113,7 @@ This document outlines the role structure following Google Workspace and HubSpot
 
 ### Google Workspace Style:
 ```
-Tenant Admin (Super Admin)
+Platform Admin (Super Admin)
 └── Organization: Acme Corp
     ├── Organization Admin (Admin)
     ├── Billing Owner
@@ -106,7 +123,7 @@ Tenant Admin (Super Admin)
 
 ### HubSpot Style:
 ```
-Tenant Admin (Super Admin)
+Platform Admin (Super Admin)
 └── Account: Acme Marketing
     ├── Organization Admin (Account Admin)
     ├── Billing Owner (Billing Admin)
@@ -118,9 +135,9 @@ Tenant Admin (Super Admin)
 
 ## 🔐 Technical Implementation Notes
 
-### Tenant Admin Detection:
+### Platform Admin Detection:
 ```typescript
-const isTenantAdmin = user.role_id === "Tenant Admin" && user.tenant_id === null;
+const isPlatformAdmin = user.role_id === "Platform Admin" && user.tenant_id === null;
 ```
 
 ### Organization Admin Detection:
@@ -129,10 +146,10 @@ const isOrgAdmin = user.role_id === "Organization Admin" && user.tenant_id !== n
 ```
 
 ### Multi-Role Support:
-A Tenant Admin can also have an Organization Admin role for a specific tenant via `user_tenant_roles`:
+A Platform Admin can also have an Organization Admin role for a specific tenant via `user_tenant_roles`:
 ```typescript
 // Platform-level access
-users.role_id = "Tenant Admin"
+users.role_id = "Platform Admin"
 users.tenant_id = NULL
 
 // Also manage Acme Corp as Org Admin
@@ -142,8 +159,43 @@ user_tenant_roles:
   - role_id: "Organization Admin"
 ```
 
-This allows a Tenant Admin to "wear two hats" - platform oversight + hands-on org management.
+This allows a Platform Admin to "wear two hats" - platform oversight + hands-on org management.
 
+---
+
+## 🔧 Troubleshooting: Organisation Admin sees platform menus / all users
+
+In code the platform-level role is named **"Platform Admin"** (not "Tenant Admin"). The app treats you as Platform Admin only when **both** are true:
+
+- `roles.name = 'Platform Admin'`
+- `users.tenant_id IS NULL`
+
+If you are an Organisation Admin but still see "System Admin", "SaaS", and users from other tenants:
+
+1. **Check what the app thinks**  
+   While logged in, open: `GET /api/admin/check-platform-admin`  
+   You should see `"isPlatformAdmin": false`, `"role": "Organization Admin"`, and a non-null `tenantId`.
+
+2. **Verify user rows in the DB**  
+   From the repo root:
+   ```bash
+   npx tsx scripts/verify-rbac-users.ts
+   ```
+   This lists every user with role and tenant. Anyone with role "Platform Admin" and `tenant_id` NULL is treated as Platform Admin and will see everything.
+
+3. **Fix an Organisation Admin that was given Platform Admin by mistake**  
+   Set their role to "Organization Admin" and their tenant to the correct org:
+   ```bash
+   npx tsx scripts/list-tenants.ts                    # get <tenant-id> for the org
+   npx tsx scripts/assign-org-role.ts <email> <tenant-id>
+   ```
+   Example for Pet Store Direct admin:
+   ```bash
+   npx tsx scripts/assign-org-role.ts petstoredirect@tin.info <pet-store-direct-tenant-uuid>
+   ```
+
+4. **Redeploy / hard refresh**  
+   After changing the DB, redeploy or do a hard refresh so the role check runs again (the sidebar request is not cached).
 
 
 

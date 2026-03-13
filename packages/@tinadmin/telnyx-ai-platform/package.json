@@ -21,11 +21,13 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "test:contract": "pnpm build && TELNYX_CONTRACT_TESTS=1 node --test tests/contract.test.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",
-    "tailwind-merge": "^2.6.0"
+    "tailwind-merge": "^2.6.0",
+    "telnyx": "^5.37.1"
   },
   "devDependencies": {
     "@types/react": "^19.2.7",
@@ -36,7 +38,7 @@
     "react": "^18.0.0 || ^19.0.0",
     "react-dom": "^18.0.0 || ^19.0.0"
   },
-  "author": "Your Organization",
+  "author": "Developer <developer@tin.info>",
   "license": "MIT",
   "repository": {
     "type": "git",

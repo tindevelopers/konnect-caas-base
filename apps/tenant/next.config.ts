@@ -48,6 +48,21 @@ const nextConfig: NextConfig = {
     deviceSizes: [640, 750, 828, 1080, 1200, 1920, 2048, 3840],
     imageSizes: [16, 32, 48, 64, 96, 128, 256, 384],
     minimumCacheTTL: 60,
+    remotePatterns: [
+      // Supabase Storage signed/public URLs (e.g. <project-ref>.supabase.co/storage/v1/...)
+      {
+        protocol: "https",
+        hostname: "**.supabase.co",
+        pathname: "/storage/v1/**",
+      },
+      // Local Supabase Storage (when using `supabase start`)
+      {
+        protocol: "http",
+        hostname: "localhost",
+        port: "54321",
+        pathname: "/storage/v1/**",
+      },
+    ],
   },
   
   // Enable compression

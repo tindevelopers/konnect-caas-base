@@ -743,5 +743,54 @@ export interface Database {
         created_at?: string;
       };
     };
+    tenant_ai_assistants: {
+      Row: {
+        id: string;
+        tenant_id: string;
+        telnyx_assistant_id: string;
+        created_at: string;
+        created_by: string | null;
+      };
+      Insert: {
+        id?: string;
+        tenant_id: string;
+        telnyx_assistant_id: string;
+        created_at?: string;
+        created_by?: string | null;
+      };
+      Update: {
+        id?: string;
+        tenant_id?: string;
+        telnyx_assistant_id?: string;
+        created_at?: string;
+        created_by?: string | null;
+      };
+    };
+    tenant_phone_number_voice_agents: {
+      Row: {
+        id: string;
+        tenant_id: string;
+        phone_number_e164: string;
+        telnyx_assistant_id: string;
+        created_at: string;
+        updated_at: string;
+      };
+      Insert: {
+        id?: string;
+        tenant_id: string;
+        phone_number_e164: string;
+        telnyx_assistant_id: string;
+        created_at?: string;
+        updated_at?: string;
+      };
+      Update: {
+        id?: string;
+        tenant_id?: string;
+        phone_number_e164?: string;
+        telnyx_assistant_id?: string;
+        created_at?: string;
+        updated_at?: string;
+      };
+    };
   };
 }

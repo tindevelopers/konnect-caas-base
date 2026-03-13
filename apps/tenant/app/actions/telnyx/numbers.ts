@@ -2,11 +2,16 @@
 
 import { TelnyxApiError } from "@tinadmin/telnyx-ai-platform/server";
 import { trackApiCall } from "@/src/core/telemetry";
-import { ensureTenantId } from "@/core/multi-tenancy/validation";
+import { ensureTenantId, getTenantIdOptional } from "@/core/multi-tenancy/validation";
 import { createClient } from "@/core/database/server";
 import { createAdminClient } from "@/core/database/admin-client";
 import { getTelnyxTransport } from "./client";
 import { OMIT_FEATURES_FOR_COUNTRIES } from "@/src/core/telnyx/country-constraints";
+import { isPlatformAdmin } from "@/core/database/organization-admins";
+import {
+  createSupportRef,
+  toPublicProviderError,
+} from "@/src/core/errors/public-provider-errors";
 
 const TELNYX_PROVIDER = "telnyx";
 
@@ -70,12 +75,16 @@ function enhanceTelnyxError(error: unknown): Error {
   if (error instanceof TelnyxApiError) {
     if (error.status === 401) {
       return new Error(
-        "Telnyx API authentication failed (401). Please verify your API key is valid and has the correct permissions. " +
-          "Check your Telnyx API key in System Admin → Integrations → Telnyx"
+        "Provider API authentication failed (401). Please verify your API key is valid and has the correct permissions. " +
+          "Check your API key in System Admin → Integrations → Telephony"
       );
     }
     const detail = extractTelnyxErrorDetail(error.details);
-    return new Error(detail ? `Telnyx API request failed (${error.status}): ${detail}` : `Telnyx API request failed (${error.status})`);
+    return new Error(
+      detail
+        ? `Provider API request failed (${error.status}): ${detail}`
+        : `Provider API request failed (${error.status})`
+    );
   }
 
   const msg = error.message || "";
@@ -83,14 +92,14 @@ function enhanceTelnyxError(error: unknown): Error {
 
   if (msg.includes("401") || lower.includes("unauthorized")) {
     return new Error(
-      "Telnyx API authentication failed (401). Please verify your API key is valid and has the correct permissions. " +
-        "Check your Telnyx API key in System Admin → Integrations → Telnyx"
+      "Provider API authentication failed (401). Please verify your API key is valid and has the correct permissions. " +
+        "Check your API key in System Admin → Integrations → Telephony"
     );
   }
 
   if (lower.includes("tenant context missing")) {
     return new Error(
-      "Tenant context missing. Please select a tenant or configure the platform default Telnyx integration."
+      "Tenant context missing. Please select a tenant or configure the platform default telephony integration."
     );
   }
 
@@ -378,7 +387,8 @@ export async function searchLocalitiesFromDbAction(args: {
 
     if (error) return { ok: false, error: error.message };
 
-    const localities = [...new Set((data ?? []).map((r) => r.locality).filter(Boolean))];
+    const rows = (data ?? []) as Array<{ locality?: string | null }>;
+    const localities = [...new Set(rows.map((r) => r.locality).filter(Boolean))] as string[];
     return { ok: true, localities };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Unknown error" };
@@ -464,6 +474,8 @@ export async function searchAvailablePhoneNumbersAction(args: {
   excludeHeldNumbers?: boolean;
 }) {
   const { tenantId, userId } = await getTelemetryContext();
+  const supportRef = createSupportRef();
+  const platformAdmin = await isPlatformAdmin();
 
   try {
     const transport = await getTelnyxTransport("integrations.read");
@@ -510,7 +522,7 @@ export async function searchAvailablePhoneNumbersAction(args: {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         location: "numbers.ts:searchAvailablePhoneNumbersAction",
-        message: "Telnyx search request",
+        message: "Provider search request",
         data: { countryCode, path, filter: JSON.stringify(filter) },
         timestamp: Date.now(),
         hypothesisId: "H1",
@@ -522,9 +534,18 @@ export async function searchAvailablePhoneNumbersAction(args: {
       "searchAvailablePhoneNumbers",
       TELNYX_PROVIDER,
       async () => {
-        return transport.request<TelnyxListResponse<TelnyxAvailablePhoneNumber>>(path, {
-          method: "GET",
-        });
+        try {
+          return await transport.request<TelnyxListResponse<TelnyxAvailablePhoneNumber>>(path, {
+            method: "GET",
+          });
+        } catch (error) {
+          throw toPublicProviderError({
+            error,
+            supportRef,
+            isPlatformAdmin: platformAdmin,
+            defaultCode: "KX-NUM-003",
+          });
+        }
       },
       {
         tenantId,
@@ -534,6 +555,7 @@ export async function searchAvailablePhoneNumbersAction(args: {
           phoneNumberType: args.phoneNumberType,
           featuresCount: features?.length ?? 0,
         },
+        metadata: { supportRef },
       }
     );
   } catch (e) {
@@ -549,14 +571,19 @@ export async function searchAvailablePhoneNumbersAction(args: {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         location: "numbers.ts:searchAvailablePhoneNumbersAction:catch",
-        message: "Telnyx search error",
+        message: "Provider search error",
         data: { errorDetails: errDetails },
         timestamp: Date.now(),
         hypothesisId: "H2",
       }),
     }).catch(() => {});
     // #endregion
-    throw enhanceTelnyxError(e);
+    throw toPublicProviderError({
+      error: e,
+      supportRef,
+      isPlatformAdmin: platformAdmin,
+      defaultCode: "KX-NUM-003",
+    });
   }
 }
 
@@ -586,6 +613,8 @@ export async function createNumberReservationAction(args: {
   customerReference?: string;
 }) {
   const { tenantId, userId } = await getTelemetryContext();
+  const supportRef = createSupportRef();
+  const platformAdmin = await isPlatformAdmin();
 
   if (!args.phoneNumbers?.length) {
     throw new Error("At least one phone number is required to reserve.");
@@ -602,24 +631,44 @@ export async function createNumberReservationAction(args: {
       "createNumberReservation",
       TELNYX_PROVIDER,
       async () => {
-        return transport.request<TelnyxApiResponse<TelnyxNumberReservation>>("/number_reservations", {
-          method: "POST",
-          body,
-        });
+        try {
+          return await transport.request<TelnyxApiResponse<TelnyxNumberReservation>>(
+            "/number_reservations",
+            {
+              method: "POST",
+              body,
+            }
+          );
+        } catch (error) {
+          throw toPublicProviderError({
+            error,
+            supportRef,
+            isPlatformAdmin: platformAdmin,
+            defaultCode: "KX-NUM-003",
+          });
+        }
       },
       {
         tenantId,
         userId,
         requestData: { phoneNumbersCount: args.phoneNumbers.length, hasCustomerReference: !!args.customerReference },
+        metadata: { supportRef },
       }
     );
   } catch (e) {
-    throw enhanceTelnyxError(e);
+    throw toPublicProviderError({
+      error: e,
+      supportRef,
+      isPlatformAdmin: platformAdmin,
+      defaultCode: "KX-NUM-003",
+    });
   }
 }
 
 export async function extendNumberReservationAction(reservationId: string) {
   const { tenantId, userId } = await getTelemetryContext();
+  const supportRef = createSupportRef();
+  const platformAdmin = await isPlatformAdmin();
   if (!reservationId?.trim()) throw new Error("reservationId is required");
 
   try {
@@ -628,20 +677,36 @@ export async function extendNumberReservationAction(reservationId: string) {
       "extendNumberReservation",
       TELNYX_PROVIDER,
       async () => {
-        return transport.request<TelnyxApiResponse<TelnyxNumberReservation>>(
-          `/number_reservations/${reservationId}/actions/extend`,
-          { method: "POST", body: {} }
-        );
+        try {
+          return await transport.request<TelnyxApiResponse<TelnyxNumberReservation>>(
+            `/number_reservations/${reservationId}/actions/extend`,
+            { method: "POST", body: {} }
+          );
+        } catch (error) {
+          throw toPublicProviderError({
+            error,
+            supportRef,
+            isPlatformAdmin: platformAdmin,
+            defaultCode: "KX-NUM-003",
+          });
+        }
       },
-      { tenantId, userId, requestData: { reservationId } }
+      { tenantId, userId, requestData: { reservationId }, metadata: { supportRef } }
     );
   } catch (e) {
-    throw enhanceTelnyxError(e);
+    throw toPublicProviderError({
+      error: e,
+      supportRef,
+      isPlatformAdmin: platformAdmin,
+      defaultCode: "KX-NUM-003",
+    });
   }
 }
 
 export async function retrieveNumberReservationAction(reservationId: string) {
   const { tenantId, userId } = await getTelemetryContext();
+  const supportRef = createSupportRef();
+  const platformAdmin = await isPlatformAdmin();
   if (!reservationId?.trim()) throw new Error("reservationId is required");
 
   try {
@@ -650,15 +715,112 @@ export async function retrieveNumberReservationAction(reservationId: string) {
       "retrieveNumberReservation",
       TELNYX_PROVIDER,
       async () => {
-        return transport.request<TelnyxApiResponse<TelnyxNumberReservation>>(
-          `/number_reservations/${reservationId}`,
-          { method: "GET" }
-        );
+        try {
+          return await transport.request<TelnyxApiResponse<TelnyxNumberReservation>>(
+            `/number_reservations/${reservationId}`,
+            { method: "GET" }
+          );
+        } catch (error) {
+          throw toPublicProviderError({
+            error,
+            supportRef,
+            isPlatformAdmin: platformAdmin,
+            defaultCode: "KX-NUM-003",
+          });
+        }
       },
-      { tenantId, userId, requestData: { reservationId } }
+      { tenantId, userId, requestData: { reservationId }, metadata: { supportRef } }
     );
   } catch (e) {
-    throw enhanceTelnyxError(e);
+    throw toPublicProviderError({
+      error: e,
+      supportRef,
+      isPlatformAdmin: platformAdmin,
+      defaultCode: "KX-NUM-003",
+    });
+  }
+}
+
+export async function deleteNumberReservationAction(reservationId: string) {
+  const { tenantId, userId } = await getTelemetryContext();
+  const supportRef = createSupportRef();
+  const platformAdmin = await isPlatformAdmin();
+  if (!reservationId?.trim()) throw new Error("reservationId is required");
+
+  try {
+    const transport = await getTelnyxTransport("integrations.write");
+    return trackApiCall(
+      "deleteNumberReservation",
+      TELNYX_PROVIDER,
+      async () => {
+        try {
+          return await transport.request<TelnyxApiResponse<TelnyxNumberReservation>>(
+            `/number_reservations/${reservationId}`,
+            { method: "DELETE" }
+          );
+        } catch (error) {
+          // 404 = already expired or released; 405 = provider may not support DELETE (reservation will expire). Treat as success so UI can remove it.
+          if (error instanceof TelnyxApiError && (error.status === 404 || error.status === 405)) {
+            return { data: null } as unknown as TelnyxApiResponse<TelnyxNumberReservation>;
+          }
+          throw toPublicProviderError({
+            error,
+            supportRef,
+            isPlatformAdmin: platformAdmin,
+            defaultCode: "KX-NUM-003",
+          });
+        }
+      },
+      { tenantId, userId, requestData: { reservationId }, metadata: { supportRef } }
+    );
+  } catch (e) {
+    throw toPublicProviderError({
+      error: e,
+      supportRef,
+      isPlatformAdmin: platformAdmin,
+      defaultCode: "KX-NUM-003",
+    });
+  }
+}
+
+export async function listNumberReservationsAction(args?: { pageNumber?: number; pageSize?: number }) {
+  const { tenantId, userId } = await getTelemetryContext();
+  const supportRef = createSupportRef();
+  const platformAdmin = await isPlatformAdmin();
+  try {
+    const transport = await getTelnyxTransport("integrations.read");
+    const qs = buildTelnyxFilterQuery({
+      page: { number: args?.pageNumber ?? 1, size: args?.pageSize ?? 25 },
+    });
+    return trackApiCall(
+      "listNumberReservations",
+      TELNYX_PROVIDER,
+      async () => {
+        try {
+          return await transport.request<TelnyxApiResponse<TelnyxNumberReservation[]>>(
+            `/number_reservations?${qs}`,
+            {
+              method: "GET",
+            }
+          );
+        } catch (error) {
+          throw toPublicProviderError({
+            error,
+            supportRef,
+            isPlatformAdmin: platformAdmin,
+            defaultCode: "KX-NUM-003",
+          });
+        }
+      },
+      { tenantId, userId, requestData: args, metadata: { supportRef } }
+    );
+  } catch (e) {
+    throw toPublicProviderError({
+      error: e,
+      supportRef,
+      isPlatformAdmin: platformAdmin,
+      defaultCode: "KX-NUM-003",
+    });
   }
 }
 
@@ -687,6 +849,8 @@ export type TelnyxNumberOrder = {
 
 export async function listNumberOrdersAction(args?: { pageNumber?: number; pageSize?: number }) {
   const { tenantId, userId } = await getTelemetryContext();
+  const supportRef = createSupportRef();
+  const platformAdmin = await isPlatformAdmin();
   try {
     const transport = await getTelnyxTransport("integrations.read");
     const qs = buildTelnyxFilterQuery({
@@ -697,19 +861,35 @@ export async function listNumberOrdersAction(args?: { pageNumber?: number; pageS
       "listNumberOrders",
       TELNYX_PROVIDER,
       async () => {
-        return transport.request<TelnyxListResponse<TelnyxNumberOrder>>(`/number_orders${qs}`, {
-          method: "GET",
-        });
+        try {
+          return await transport.request<TelnyxListResponse<TelnyxNumberOrder>>(`/number_orders${qs}`, {
+            method: "GET",
+          });
+        } catch (error) {
+          throw toPublicProviderError({
+            error,
+            supportRef,
+            isPlatformAdmin: platformAdmin,
+            defaultCode: "KX-NUM-003",
+          });
+        }
       },
-      { tenantId, userId, requestData: { pageNumber: args?.pageNumber ?? 1, pageSize: args?.pageSize ?? 25 } }
+      { tenantId, userId, requestData: { pageNumber: args?.pageNumber ?? 1, pageSize: args?.pageSize ?? 25 }, metadata: { supportRef } }
     );
   } catch (e) {
-    throw enhanceTelnyxError(e);
+    throw toPublicProviderError({
+      error: e,
+      supportRef,
+      isPlatformAdmin: platformAdmin,
+      defaultCode: "KX-NUM-003",
+    });
   }
 }
 
 export async function retrieveNumberOrderAction(orderId: string) {
   const { tenantId, userId } = await getTelemetryContext();
+  const supportRef = createSupportRef();
+  const platformAdmin = await isPlatformAdmin();
   if (!orderId?.trim()) throw new Error("orderId is required");
 
   try {
@@ -718,14 +898,28 @@ export async function retrieveNumberOrderAction(orderId: string) {
       "retrieveNumberOrder",
       TELNYX_PROVIDER,
       async () => {
-        return transport.request<TelnyxApiResponse<TelnyxNumberOrder>>(`/number_orders/${orderId}`, {
-          method: "GET",
-        });
+        try {
+          return await transport.request<TelnyxApiResponse<TelnyxNumberOrder>>(`/number_orders/${orderId}`, {
+            method: "GET",
+          });
+        } catch (error) {
+          throw toPublicProviderError({
+            error,
+            supportRef,
+            isPlatformAdmin: platformAdmin,
+            defaultCode: "KX-NUM-003",
+          });
+        }
       },
-      { tenantId, userId, requestData: { orderId } }
+      { tenantId, userId, requestData: { orderId }, metadata: { supportRef } }
     );
   } catch (e) {
-    throw enhanceTelnyxError(e);
+    throw toPublicProviderError({
+      error: e,
+      supportRef,
+      isPlatformAdmin: platformAdmin,
+      defaultCode: "KX-NUM-003",
+    });
   }
 }
 
@@ -742,8 +936,12 @@ export async function createNumberOrderAction(args: {
     monthlyCost?: number;
     currency?: string;
   };
+  /** If true, bypass reservation and order directly (use when reservation expired) */
+  bypassReservation?: boolean;
 }) {
   const { tenantId, userId } = await getTelemetryContext();
+  const supportRef = createSupportRef();
+  const platformAdmin = await isPlatformAdmin();
 
   if (!args.phoneNumbers?.length) {
     throw new Error("At least one phone number is required to create an order.");
@@ -768,10 +966,20 @@ export async function createNumberOrderAction(args: {
       "createNumberOrder",
       TELNYX_PROVIDER,
       async () => {
-        return transport.request<TelnyxApiResponse<TelnyxNumberOrder>>("/number_orders", {
-          method: "POST",
-          body,
-        });
+        try {
+          return await transport.request<TelnyxApiResponse<TelnyxNumberOrder>>("/number_orders", {
+            method: "POST",
+            body,
+          });
+        } catch (error) {
+          throw toPublicProviderError({
+            error,
+            supportRef,
+            isPlatformAdmin: platformAdmin,
+            defaultCode: "KX-NUM-003",
+            numberOrderContext: true,
+          });
+        }
       },
       {
         tenantId,
@@ -782,6 +990,7 @@ export async function createNumberOrderAction(args: {
           hasMessagingProfileId: Boolean(args.messagingProfileId),
           hasBillingGroupId: Boolean(args.billingGroupId),
         },
+        metadata: { supportRef },
       }
     );
 
@@ -803,7 +1012,13 @@ export async function createNumberOrderAction(args: {
 
     return result;
   } catch (e) {
-    throw enhanceTelnyxError(e);
+    throw toPublicProviderError({
+      error: e,
+      supportRef,
+      isPlatformAdmin: platformAdmin,
+      defaultCode: "KX-NUM-003",
+      numberOrderContext: true,
+    });
   }
 }
 
@@ -882,6 +1097,44 @@ export type TelnyxPhoneNumber = {
   created_at?: string;
   updated_at?: string;
 };
+
+// -----------------------------
+// Verified Numbers (outbound CLI)
+// -----------------------------
+
+export type TelnyxVerifiedNumber = {
+  record_type: "verified_number";
+  phone_number: string;
+  verified_at?: string;
+};
+
+export async function listVerifiedNumbersAction(args?: {
+  pageNumber?: number;
+  pageSize?: number;
+}) {
+  const { tenantId, userId } = await getTelemetryContext();
+  try {
+    const transport = await getTelnyxTransport("integrations.read");
+
+    const qs = buildTelnyxFilterQuery({
+      page: { number: args?.pageNumber ?? 1, size: args?.pageSize ?? 50 },
+    });
+
+    return trackApiCall(
+      "listVerifiedNumbers",
+      TELNYX_PROVIDER,
+      async () => {
+        return transport.request<TelnyxListResponse<TelnyxVerifiedNumber>>(
+          `/verified_numbers${qs}`,
+          { method: "GET" }
+        );
+      },
+      { tenantId, userId }
+    );
+  } catch (e) {
+    throw enhanceTelnyxError(e);
+  }
+}
 
 export async function listOwnedPhoneNumbersAction(args?: {
   phoneNumberContains?: string;
@@ -995,6 +1248,106 @@ export async function updateOwnedPhoneNumberAction(phoneNumberId: string, patch:
   } catch (e) {
     throw enhanceTelnyxError(e);
   }
+}
+
+// -----------------------------
+// Per-number voice agent (tenant-scoped)
+// -----------------------------
+
+/** Normalize E.164 for lookup (e.g. +33392090999). */
+function normalizeE164(value: string): string {
+  const t = value.trim();
+  return t.startsWith("+") ? t : `+${t}`;
+}
+
+export async function getPhoneNumberVoiceAgentAction(
+  phoneNumberE164: string
+): Promise<{ telnyx_assistant_id: string; supplier?: string } | null> {
+  await ensureTenantId();
+  const supabase = await createClient();
+  const key = normalizeE164(phoneNumberE164);
+  const { data, error } = await (supabase as any)
+    .from("tenant_phone_number_voice_agents")
+    .select("telnyx_assistant_id, supplier")
+    .eq("phone_number_e164", key)
+    .maybeSingle();
+  if (error) {
+    console.error("[getPhoneNumberVoiceAgentAction]", error);
+    return null;
+  }
+  return data?.telnyx_assistant_id
+    ? { telnyx_assistant_id: data.telnyx_assistant_id, supplier: data.supplier || "telnyx" }
+    : null;
+}
+
+export async function setPhoneNumberVoiceAgentAction(
+  phoneNumberE164: string,
+  telnyxAssistantId: string | null,
+  supplier: string = "telnyx"
+): Promise<{ ok: true } | { error: string }> {
+  const tenantId = await ensureTenantId();
+  const supabase = await createClient();
+  const key = normalizeE164(phoneNumberE164);
+  if (!key) return { error: "Phone number is required." };
+
+  if (telnyxAssistantId !== null && telnyxAssistantId !== undefined) {
+    const aid = String(telnyxAssistantId).trim();
+    if (!aid) return { error: "Assistant ID is required to assign." };
+    const { data: allowed } = await (supabase as any)
+      .from("tenant_ai_assistants")
+      .select("telnyx_assistant_id")
+      .eq("tenant_id", tenantId)
+      .eq("telnyx_assistant_id", aid)
+      .maybeSingle();
+    if (!allowed) {
+      return { error: "This AI assistant is not available to your tenant. Choose an assistant from the list." };
+    }
+    const validSupplier = ["telnyx", "twilio", "bandwidth"].includes(supplier) ? supplier : "telnyx";
+    const { error: upsertErr } = await (supabase as any)
+      .from("tenant_phone_number_voice_agents")
+      .upsert(
+        { tenant_id: tenantId, phone_number_e164: key, telnyx_assistant_id: aid, supplier: validSupplier },
+        { onConflict: "tenant_id,phone_number_e164" }
+      );
+    if (upsertErr) {
+      console.error("[setPhoneNumberVoiceAgentAction] upsert", upsertErr);
+      return { error: upsertErr.message || "Failed to save voice agent." };
+    }
+    return { ok: true };
+  }
+
+  const { error: delErr } = await (supabase as any)
+    .from("tenant_phone_number_voice_agents")
+    .delete()
+    .eq("tenant_id", tenantId)
+    .eq("phone_number_e164", key);
+  if (delErr) {
+    console.error("[setPhoneNumberVoiceAgentAction] delete", delErr);
+    return { error: delErr.message || "Failed to clear voice agent." };
+  }
+  return { ok: true };
+}
+
+/** List phone numbers assigned to this assistant (for Calling tab). */
+export async function listPhoneNumbersAssignedToAssistantAction(
+  assistantId: string
+): Promise<{ data: Array<{ phone_number: string; status?: string }> }> {
+  const tenantId = await getTenantIdOptional();
+  if (!tenantId || !assistantId?.trim()) return { data: [] };
+  const supabase = await createClient();
+  const { data: rows, error } = await (supabase as any)
+    .from("tenant_phone_number_voice_agents")
+    .select("phone_number_e164")
+    .eq("tenant_id", tenantId)
+    .eq("telnyx_assistant_id", assistantId.trim());
+  if (error) {
+    console.error("[listPhoneNumbersAssignedToAssistantAction]", error);
+    return { data: [] };
+  }
+  const data = (rows ?? []).map((r: { phone_number_e164: string }) => ({
+    phone_number: r.phone_number_e164,
+  }));
+  return { data };
 }
 
 // -----------------------------

@@ -7,11 +7,13 @@ import interactionPlugin from "@fullcalendar/interaction";
 import {
   EventInput,
   DateSelectArg,
+  DatesSetArg,
   EventClickArg,
   EventContentArg,
 } from "@fullcalendar/core";
 import { useModal } from "@/hooks/useModal";
 import { Modal } from "@/components/ui/modal";
+import { listCalendarEventsAction } from "@/app/actions/calendar/events";
 
 interface CalendarEvent extends EventInput {
   extendedProps: {
@@ -28,6 +30,9 @@ const Calendar: React.FC = () => {
   const [eventEndDate, setEventEndDate] = useState("");
   const [eventLevel, setEventLevel] = useState("");
   const [events, setEvents] = useState<CalendarEvent[]>([]);
+  const [calendarSource, setCalendarSource] = useState<string | null>(null);
+  const [calendarWarning, setCalendarWarning] = useState<string | null>(null);
+  const [isLoadingEvents, setIsLoadingEvents] = useState(false);
   const calendarRef = useRef<FullCalendar>(null);
   const { isOpen, openModal, closeModal } = useModal();
 
@@ -38,30 +43,42 @@ const Calendar: React.FC = () => {
     Warning: "warning",
   };
 
-  useEffect(() => {
-    // Initialize with some events
-    setEvents([
-      {
-        id: "1",
-        title: "Event Conf.",
-        start: new Date().toISOString().split("T")[0],
-        extendedProps: { calendar: "Danger" },
-      },
-      {
-        id: "2",
-        title: "Meeting",
-        start: new Date(Date.now() + 86400000).toISOString().split("T")[0],
-        extendedProps: { calendar: "Success" },
-      },
-      {
-        id: "3",
-        title: "Workshop",
-        start: new Date(Date.now() + 172800000).toISOString().split("T")[0],
-        end: new Date(Date.now() + 259200000).toISOString().split("T")[0],
+  const loadEvents = async (start?: string, end?: string) => {
+    setIsLoadingEvents(true);
+    try {
+      const response = await listCalendarEventsAction({ start, end });
+      const mapped: CalendarEvent[] = response.events.map((event) => ({
+        id: event.id,
+        title: event.title,
+        start: event.start,
+        end: event.end,
         extendedProps: { calendar: "Primary" },
-      },
-    ]);
+      }));
+      setEvents(mapped);
+      setCalendarSource(response.provider);
+      setCalendarWarning(response.warning ?? null);
+    } catch (error) {
+      setCalendarWarning(
+        error instanceof Error
+          ? error.message
+          : "Failed to load calendar events."
+      );
+      setEvents([]);
+    } finally {
+      setIsLoadingEvents(false);
+    }
+  };
+
+  useEffect(() => {
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+    const end = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString();
+    void loadEvents(start, end);
   }, []);
+
+  const handleDatesSet = (arg: DatesSetArg) => {
+    void loadEvents(arg.start.toISOString(), arg.end.toISOString());
+  };
 
   const handleDateSelect = (selectInfo: DateSelectArg) => {
     resetModalFields();
@@ -122,6 +139,22 @@ const Calendar: React.FC = () => {
 
   return (
     <div className="rounded-2xl border  border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
+      <div className="border-b border-gray-200 px-4 py-3 text-sm dark:border-gray-800">
+        {isLoadingEvents ? (
+          <p className="text-gray-500 dark:text-gray-400">Loading provider events...</p>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-700 dark:bg-gray-800 dark:text-gray-300">
+              Source: {calendarSource ?? "none"}
+            </span>
+            {calendarWarning && (
+              <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">
+                {calendarWarning}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
       <div className="custom-calendar">
         <FullCalendar
           ref={calendarRef}
@@ -136,6 +169,7 @@ const Calendar: React.FC = () => {
           selectable={true}
           select={handleDateSelect}
           eventClick={handleEventClick}
+          datesSet={handleDatesSet}
           eventContent={renderEventContent}
           customButtons={{
             addEventButton: {

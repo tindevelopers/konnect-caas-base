@@ -9,11 +9,16 @@ import {
   ShieldCheckIcon,
   KeyIcon,
 } from "@heroicons/react/24/outline";
-import Image from "next/image";
 import React, { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { updatePassword } from "@/app/actions/password";
 import { EyeIcon, EyeCloseIcon } from "@/icons";
+import { getCurrentUser } from "@/app/actions/user";
+import type { Database } from "@/core/database/types";
+
+type User = Database["public"]["Tables"]["users"]["Row"] & {
+  roles?: { name: string } | null;
+};
 
 type TabType = "profile" | "account" | "password" | "support";
 
@@ -22,12 +27,31 @@ function UserProfileContent() {
   const router = useRouter();
   const tabFromUrl = searchParams.get("tab") as TabType | null;
   const [activeTab, setActiveTab] = useState<TabType>(tabFromUrl || "profile");
+  const [user, setUser] = useState<User | null>(null);
+  const [userLoading, setUserLoading] = useState(true);
 
   useEffect(() => {
     if (tabFromUrl && ["profile", "account", "password", "support"].includes(tabFromUrl)) {
       setActiveTab(tabFromUrl);
     }
   }, [tabFromUrl]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadUser() {
+      try {
+        setUserLoading(true);
+        const data = await getCurrentUser();
+        if (!cancelled) setUser(data ?? null);
+      } catch (e) {
+        if (!cancelled) setUser(null);
+      } finally {
+        if (!cancelled) setUserLoading(false);
+      }
+    }
+    loadUser();
+    return () => { cancelled = true; };
+  }, []);
 
   return (
     <div className="space-y-8">
@@ -52,154 +76,91 @@ function UserProfileContent() {
         </div>
       </section>
 
-      {/* Tab Navigation */}
+      {/* Account settings content — main nav (Edit Profile / Account Settings / Change Password) is in the app sidebar */}
       <section className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
-        <div className="flex flex-wrap gap-2 border-b border-gray-200 dark:border-gray-800">
-          <button
-            onClick={() => {
-              setActiveTab("profile");
-              router.push("/profile?tab=profile");
-            }}
-            className={`px-4 py-2 text-sm font-medium transition-colors ${
-              activeTab === "profile"
-                ? "border-b-2 border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-400"
-                : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <svg
-                className="h-4 w-4"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
-                />
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-                />
-              </svg>
-              Edit Profile
-            </div>
-          </button>
-          <button
-            onClick={() => {
-              setActiveTab("account");
-              router.push("/profile?tab=account");
-            }}
-            className={`px-4 py-2 text-sm font-medium transition-colors ${
-              activeTab === "account"
-                ? "border-b-2 border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-400"
-                : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <svg
-                className="h-4 w-4"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.065 2.573c-.94 1.543.826 3.31 2.37 2.37.94a1.724 1.724 0 002.572 1.065c.426 1.756 2.924 1.756 3.35 0a1.724 1.724 0 002.573-1.065c1.543.94 3.31-.826 2.37-2.37a1.724 1.724 0 001.065-2.572c1.756-.426 1.756-2.924 0-3.35a1.724 1.724 0 00-1.065-2.573c.94-1.543-.826-3.31-2.37-2.37-.94a1.724 1.724 0 00-2.572-1.065z"
-                />
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                />
-              </svg>
-              Account Settings
-            </div>
-          </button>
-          <button
-            onClick={() => {
-              setActiveTab("password");
-              router.push("/profile?tab=password");
-            }}
-            className={`px-4 py-2 text-sm font-medium transition-colors ${
-              activeTab === "password"
-                ? "border-b-2 border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-400"
-                : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <KeyIcon className="h-4 w-4" />
-              Change Password
-            </div>
-          </button>
-          <button
-            onClick={() => {
-              setActiveTab("support");
-              router.push("/profile?tab=support");
-            }}
-            className={`px-4 py-2 text-sm font-medium transition-colors ${
-              activeTab === "support"
-                ? "border-b-2 border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-400"
-                : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <svg
-                className="h-4 w-4"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                />
-              </svg>
-              Support
-            </div>
-          </button>
-        </div>
-
-        {/* Tab Content */}
-        <div className="mt-6">
-          {activeTab === "profile" && <EditProfileSection />}
-          {activeTab === "account" && <AccountSettingsSection onSwitchTab={setActiveTab} />}
-          {activeTab === "password" && <ChangePasswordSection />}
-          {activeTab === "support" && <SupportSection />}
-        </div>
+        {activeTab === "profile" && (
+          <EditProfileSection user={user} loading={userLoading} />
+        )}
+        {activeTab === "account" && <AccountSettingsSection onSwitchTab={setActiveTab} />}
+        {activeTab === "password" && <ChangePasswordSection />}
+        {activeTab === "support" && <SupportSection />}
       </section>
     </div>
   );
 }
 
-function EditProfileSection() {
+function formatMemberSince(createdAt: string | null | undefined): string {
+  if (!createdAt) return "—";
+  try {
+    const d = new Date(createdAt);
+    return d.toLocaleDateString("en-US", { month: "short", year: "numeric" });
+  } catch {
+    return "—";
+  }
+}
+
+function getRoleDisplayName(roleName: string | null | undefined): string {
+  if (!roleName) return "—";
+  const map: Record<string, string> = {
+    "Platform Admin": "Platform Admin",
+    "Organization Admin": "Organization Admin",
+    "Billing Owner": "Billing Owner",
+    "Developer": "Developer",
+    "Viewer": "Viewer",
+  };
+  return map[roleName] || roleName;
+}
+
+function EditProfileSection({
+  user,
+  loading,
+}: {
+  user: User | null;
+  loading: boolean;
+}) {
+  const roleName = (user?.roles as { name?: string } | null | undefined)?.name;
+  const firstName = user?.full_name?.trim().split(/\s+/)[0] ?? "";
+  const lastName = user?.full_name?.trim().split(/\s+/).slice(1).join(" ") ?? "";
+  const created_at = (user as { created_at?: string } | null)?.created_at;
+
+  if (loading) {
+    return (
+      <div className="grid gap-6 lg:grid-cols-3">
+        <div className="lg:col-span-2 flex items-center justify-center py-12 text-gray-500 dark:text-gray-400">
+          Loading profile…
+        </div>
+        <div className="rounded-3xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-900">
+          <div className="animate-pulse space-y-4">
+            <div className="h-4 w-3/4 rounded bg-gray-200 dark:bg-gray-700" />
+            <div className="h-4 rounded bg-gray-200 dark:bg-gray-700" />
+            <div className="h-4 rounded bg-gray-200 dark:bg-gray-700" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-800 dark:border-amber-800 dark:bg-amber-500/10 dark:text-amber-200">
+        You are not signed in or your profile could not be loaded. Please sign in again.
+      </div>
+    );
+  }
+
   return (
     <div className="grid gap-6 lg:grid-cols-3">
       <div className="lg:col-span-2 space-y-6">
         <div className="flex items-center gap-6">
-          <div className="h-24 w-24 overflow-hidden rounded-full">
-            <Image
-              src="/images/user/user-17.jpg"
-              alt="Profile"
-              width={96}
-              height={96}
-            />
+          <div className="flex h-24 w-24 items-center justify-center overflow-hidden rounded-full bg-indigo-100 text-2xl font-semibold text-indigo-600 dark:bg-indigo-900/40 dark:text-indigo-300">
+            {(user.full_name || user.email || "?").charAt(0).toUpperCase()}
           </div>
           <div>
             <h2 className="text-2xl font-semibold text-gray-900 dark:text-white">
-              Jane Smith
+              {user.full_name || "No name"}
             </h2>
             <p className="text-gray-500 dark:text-gray-400">
-              randomuser@pimjo.com
+              {user.email}
             </p>
             <span className="mt-2 inline-flex items-center rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-300">
               Active
@@ -218,7 +179,7 @@ function EditProfileSection() {
                 <Input
                   id="first-name"
                   type="text"
-                  defaultValue="John"
+                  defaultValue={firstName}
                 />
               </div>
               <div>
@@ -226,7 +187,7 @@ function EditProfileSection() {
                 <Input
                   id="last-name"
                   type="text"
-                  defaultValue="Smith"
+                  defaultValue={lastName}
                 />
               </div>
               <div>
@@ -234,7 +195,7 @@ function EditProfileSection() {
                 <Input
                   id="email"
                   type="email"
-                  defaultValue="randomuser@pimjo.com"
+                  defaultValue={user.email ?? ""}
                 />
               </div>
               <div>
@@ -242,7 +203,7 @@ function EditProfileSection() {
                 <Input
                   id="phone"
                   type="tel"
-                  defaultValue="+1 (555) 123-4567"
+                  placeholder="+1 (555) 000-0000"
                 />
               </div>
               <div className="sm:col-span-2">
@@ -271,21 +232,21 @@ function EditProfileSection() {
           </h3>
           <div className="space-y-4">
             <div className="flex items-center gap-3 text-sm">
-              <EnvelopeIcon className="h-5 w-5 text-gray-400" />
+              <EnvelopeIcon className="h-5 w-5 shrink-0 text-gray-400" />
               <span className="text-gray-600 dark:text-gray-300">
-                randomuser@pimjo.com
+                {user.email}
               </span>
             </div>
             <div className="flex items-center gap-3 text-sm">
-              <CalendarIcon className="h-5 w-5 text-gray-400" />
+              <CalendarIcon className="h-5 w-5 shrink-0 text-gray-400" />
               <span className="text-gray-600 dark:text-gray-300">
-                Member since Jan 2023
+                Member since {formatMemberSince(created_at)}
               </span>
             </div>
             <div className="flex items-center gap-3 text-sm">
-              <ShieldCheckIcon className="h-5 w-5 text-gray-400" />
+              <ShieldCheckIcon className="h-5 w-5 shrink-0 text-gray-400" />
               <span className="text-gray-600 dark:text-gray-300">
-                Platform Admin
+                {getRoleDisplayName(roleName)}
               </span>
             </div>
           </div>

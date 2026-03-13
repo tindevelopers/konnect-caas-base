@@ -1,45 +1,92 @@
 "use client";
+
 import PageBreadcrumb from "@/components/common/PageBreadCrumb";
 import Button from "@/components/ui/button/Button";
 import Input from "@/components/form/input/InputField";
 import Label from "@/components/form/Label";
-import Switch from "@/components/form/switch/Switch";
-import { CheckIcon, XMarkIcon, ClockIcon, KeyIcon, EyeIcon, EyeSlashIcon } from "@heroicons/react/24/outline";
+import ProviderLogo from "@/components/integration/ProviderLogo";
+import {
+  CheckIcon,
+  EyeIcon,
+  EyeSlashIcon,
+  SignalIcon,
+  XMarkIcon,
+} from "@heroicons/react/24/outline";
 import { useParams } from "next/navigation";
-import React, { useState, useEffect } from "react";
-import { saveIntegrationConfig, fetchIntegrationConfig } from "@/app/actions/integrations/config";
+import React, { useEffect, useMemo, useState } from "react";
+import {
+  fetchIntegrationConfig,
+  saveIntegrationConfig,
+} from "@/app/actions/integrations/config";
 import { connectGoHighLevelIntegration } from "@/app/actions/integrations/gohighlevel";
+import { testIntegrationConnection } from "@/app/actions/integrations/health";
+import { integrationsCatalog } from "@/app/saas/admin/system-admin/integrations/integrationsCatalog";
 
-interface IntegrationConfig {
+interface AdditionalSetting {
   name: string;
+  label: string;
+  type: "switch" | "select" | "text";
+  options?: string[];
+  placeholder?: string;
+  required?: boolean;
+}
+
+interface IntegrationDefinition {
+  provider: string;
+  displayName: string;
   category: string;
   description: string;
-  status: "connected" | "disconnected" | "pending";
+  connectType: "apiKey" | "oauth";
   fields: Array<{
     name: string;
     label: string;
-    type: "text" | "password" | "url" | "email" | "select";
+    type: "text" | "password" | "url";
     required: boolean;
     placeholder?: string;
-    options?: string[];
   }>;
-  additionalSettings?: Array<{
-    name: string;
-    label: string;
-    type: "switch" | "select" | "text";
-    options?: string[];
-    placeholder?: string;
-    required?: boolean;
-  }>;
+  additionalSettings: AdditionalSetting[];
 }
+
+interface HealthState {
+  status: "active" | "error" | "unknown";
+  message: string;
+  checkedAt?: string;
+}
+
+const additionalSettingsByProvider: Record<string, AdditionalSetting[]> = {
+  telnyx: [
+    {
+      name: "voiceRouting.inboundAssistantId",
+      label: "Inbound Assistant ID",
+      type: "text",
+      placeholder: "asst_...",
+      required: true,
+    },
+    {
+      name: "voiceRouting.operatorSipUri",
+      label: "Operator SIP URI",
+      type: "text",
+      placeholder: "sip:operator@pbx.example.com",
+      required: false,
+    },
+    {
+      name: "voiceRouting.escapeDigit",
+      label: "Escape Digit",
+      type: "text",
+      placeholder: "0",
+      required: false,
+    },
+  ],
+};
 
 function readPathValue(obj: unknown, path: string) {
   if (!obj || typeof obj !== "object") return undefined;
   const parts = path.split(".").filter(Boolean);
-  let current: any = obj;
+  let current: unknown = obj;
+
   for (const part of parts) {
     if (!current || typeof current !== "object") return undefined;
-    current = current[part];
+    current = (current as Record<string, unknown>)[part];
   }
   return current;
 }
@@ -49,7 +96,7 @@ function setPathValue(target: Record<string, unknown>, path: string, value: unkn
   if (parts.length === 0) return;
 
   let current: Record<string, unknown> = target;
-  for (let i = 0; i < parts.length - 1; i++) {
+  for (let i = 0; i < parts.length - 1; i += 1) {
     const key = parts[i];
     const existing = current[key];
     if (!existing || typeof existing !== "object") {
@@ -60,881 +107,505 @@ function setPathValue(target: Record<string, unknown>, path: string, value: unkn
   current[parts[parts.length - 1]] = value;
 }
 
-const integrationConfigs: Record<string, IntegrationConfig> = {
-  // CRM
-  "salesforce": {
-    name: "Salesforce",
-    category: "CRM",
-    description: "Connect to Salesforce CRM to sync contacts, leads, and opportunities",
-    status: "connected",
-    fields: [
-      { name: "apiKey", label: "API Key", type: "password", required: true },
-      { name: "apiSecret", label: "API Secret", type: "password", required: true },
-      { name: "instanceUrl", label: "Instance URL", type: "url", required: true, placeholder: "https://yourinstance.salesforce.com" },
-    ],
-  },
-  "hubspot": {
-    name: "HubSpot",
-    category: "CRM",
-    description: "Sync contacts and deals with HubSpot CRM",
-    status: "disconnected",
-    fields: [
-      { name: "apiKey", label: "API Key", type: "password", required: true },
-    ],
-  },
-  "gohighlevel": {
-    name: "GoHighLevel",
-    category: "CRM",
-    description: "Connect to GoHighLevel for CRM and marketing automation",
-    status: "pending",
-    fields: [
-      { name: "apiKey", label: "API Key", type: "password", required: true },
-      { name: "locationId", label: "Location ID", type: "text", required: true },
-    ],
-  },
-  
-  // Email Marketing
-  "mailchimp": {
-    name: "Mailchimp",
-    category: "Email Marketing",
-    description: "Sync contacts and send campaigns via Mailchimp",
-    status: "connected",
-    fields: [
-      { name: "apiKey", label: "API Key", type: "password", required: true },
-      { name: "serverPrefix", label: "Server Prefix", type: "text", required: false, placeholder: "us1" },
-    ],
-  },
-  "sendgrid": {
-    name: "SendGrid",
-    category: "Email Marketing",
-    description: "Send transactional emails via SendGrid",
-    status: "connected",
-    fields: [
-      { name: "apiKey", label: "API Key", type: "password", required: true },
-    ],
-  },
-  
-  // Telephony
-  "twilio": {
-    name: "Twilio",
-    category: "Telephony",
-    description: "Send SMS and make phone calls via Twilio",
-    status: "connected",
-    fields: [
-      { name: "accountSid", label: "Account SID", type: "text", required: true },
-      { name: "authToken", label: "Auth Token", type: "password", required: true },
-      { name: "phoneNumber", label: "Phone Number", type: "text", required: false },
-    ],
-  },
-  "telnyx": {
-    name: "Telnyx",
-    category: "Telephony",
-    description:
-      "Organization-level Telnyx credentials for AI Assistants and communications. Overrides the system default; use this for enterprise or dedicated Telnyx accounts.",
-    status: "disconnected",
-    fields: [
-      { name: "apiKey", label: "API Key", type: "password", required: true },
-      { name: "messagingProfileId", label: "Messaging Profile ID", type: "text", required: false },
-    ],
-    additionalSettings: [
-      {
-        name: "voiceRouting.inboundAssistantId",
-        label: "Inbound Assistant ID",
-        type: "text" as const,
-        placeholder: "asst_...",
-        required: true,
-      },
-      {
-        name: "voiceRouting.operatorSipUri",
-        label: "Operator SIP URI (press 0 escape)",
-        type: "text" as const,
-        placeholder: "sip:operator@pbx.example.com",
-        required: true,
-      },
-      {
-        name: "voiceRouting.escapeDigit",
-        label: "Escape Digit",
-        type: "text" as const,
-        placeholder: "0",
-        required: false,
-      },
-    ],
-  },
-  
-  // Payments
-  "stripe": {
-    name: "Stripe",
-    category: "Payments",
-    description: "Process payments and manage subscriptions",
-    status: "connected",
-    fields: [
-      { name: "publishableKey", label: "Publishable Key", type: "text", required: true },
-      { name: "secretKey", label: "Secret Key", type: "password", required: true },
-      { name: "webhookSecret", label: "Webhook Secret", type: "password", required: false },
-    ],
-  },
-  "paypal": {
-    name: "PayPal",
-    category: "Payments",
-    description: "Accept PayPal payments",
-    status: "disconnected",
-    fields: [
-      { name: "clientId", label: "Client ID", type: "text", required: true },
-      { name: "clientSecret", label: "Client Secret", type: "password", required: true },
-    ],
-    additionalSettings: [
-      { name: "mode", label: "Mode", type: "select" as const, options: ["sandbox", "live"] },
-    ],
-  },
-  
-  "square": {
-    name: "Square",
-    category: "Payments",
-    description: "Payment processing and POS system",
-    status: "disconnected",
-    fields: [
-      { name: "applicationId", label: "Application ID", type: "text", required: true },
-      { name: "accessToken", label: "Access Token", type: "password", required: true },
-      { name: "locationId", label: "Location ID", type: "text", required: false },
-    ],
-  },
-  "braintree": {
-    name: "Braintree",
-    category: "Payments",
-    description: "Payment processing gateway",
-    status: "disconnected",
-    fields: [
-      { name: "merchantId", label: "Merchant ID", type: "text", required: true },
-      { name: "publicKey", label: "Public Key", type: "text", required: true },
-      { name: "privateKey", label: "Private Key", type: "password", required: true },
-    ],
-    additionalSettings: [
-      { name: "environment", label: "Environment", type: "select" as const, options: ["sandbox", "production"] },
-    ],
-  },
-  
-  // Analytics
-  "google-analytics": {
-    name: "Google Analytics",
-    category: "Analytics",
-    description: "Track website and app analytics",
-    status: "connected",
-    fields: [
-      { name: "trackingId", label: "Tracking ID", type: "text", required: true, placeholder: "UA-XXXXXXXXX-X" },
-      { name: "measurementId", label: "Measurement ID", type: "text", required: false, placeholder: "G-XXXXXXXXXX" },
-    ],
-  },
-  "mixpanel": {
-    name: "Mixpanel",
-    category: "Analytics",
-    description: "Product analytics platform",
-    status: "disconnected",
-    fields: [
-      { name: "projectToken", label: "Project Token", type: "text", required: true },
-      { name: "apiSecret", label: "API Secret", type: "password", required: false },
-    ],
-  },
-  "amplitude": {
-    name: "Amplitude",
-    category: "Analytics",
-    description: "Product analytics and data",
-    status: "disconnected",
-    fields: [
-      { name: "apiKey", label: "API Key", type: "text", required: true },
-      { name: "secretKey", label: "Secret Key", type: "password", required: true },
-    ],
-  },
-  
-  // Accounting
-  "quickbooks": {
-    name: "QuickBooks",
-    category: "Accounting",
-    description: "Accounting software integration",
-    status: "disconnected",
-    fields: [
-      { name: "clientId", label: "Client ID", type: "text", required: true },
-      { name: "clientSecret", label: "Client Secret", type: "password", required: true },
-      { name: "realmId", label: "Realm ID", type: "text", required: false },
-    ],
-  },
-  "xero": {
-    name: "Xero",
-    category: "Accounting",
-    description: "Cloud-based accounting software",
-    status: "disconnected",
-    fields: [
-      { name: "clientId", label: "Client ID", type: "text", required: true },
-      { name: "clientSecret", label: "Client Secret", type: "password", required: true },
-    ],
-  },
-  "freshbooks": {
-    name: "FreshBooks",
-    category: "Accounting",
-    description: "Cloud accounting software",
-    status: "disconnected",
-    fields: [
-      { name: "clientId", label: "Client ID", type: "text", required: true },
-      { name: "clientSecret", label: "Client Secret", type: "password", required: true },
-    ],
-  },
-  
-  // E-commerce
-  "shopify": {
-    name: "Shopify",
-    category: "E-commerce",
-    description: "E-commerce platform integration",
-    status: "connected",
-    fields: [
-      { name: "shopDomain", label: "Shop Domain", type: "text", required: true, placeholder: "yourstore.myshopify.com" },
-      { name: "apiKey", label: "API Key", type: "text", required: true },
-      { name: "apiSecret", label: "API Secret", type: "password", required: true },
-      { name: "accessToken", label: "Access Token", type: "password", required: true },
-    ],
-  },
-  "woocommerce": {
-    name: "WooCommerce",
-    category: "E-commerce",
-    description: "WordPress e-commerce plugin",
-    status: "disconnected",
-    fields: [
-      { name: "storeUrl", label: "Store URL", type: "url", required: true, placeholder: "https://yourstore.com" },
-      { name: "consumerKey", label: "Consumer Key", type: "text", required: true },
-      { name: "consumerSecret", label: "Consumer Secret", type: "password", required: true },
-    ],
-  },
-  "bigcommerce": {
-    name: "BigCommerce",
-    category: "E-commerce",
-    description: "E-commerce platform",
-    status: "disconnected",
-    fields: [
-      { name: "storeHash", label: "Store Hash", type: "text", required: true },
-      { name: "clientId", label: "Client ID", type: "text", required: true },
-      { name: "accessToken", label: "Access Token", type: "password", required: true },
-    ],
-  },
-  
-  // Social Media
-  "facebook": {
-    name: "Facebook",
-    category: "Social Media",
-    description: "Facebook Pages and Ads integration",
-    status: "disconnected",
-    fields: [
-      { name: "appId", label: "App ID", type: "text", required: true },
-      { name: "appSecret", label: "App Secret", type: "password", required: true },
-      { name: "accessToken", label: "Access Token", type: "password", required: false },
-    ],
-  },
-  "twitter": {
-    name: "Twitter/X",
-    category: "Social Media",
-    description: "Twitter/X API integration",
-    status: "disconnected",
-    fields: [
-      { name: "apiKey", label: "API Key", type: "text", required: true },
-      { name: "apiSecret", label: "API Secret", type: "password", required: true },
-      { name: "bearerToken", label: "Bearer Token", type: "password", required: false },
-    ],
-  },
-  "linkedin": {
-    name: "LinkedIn",
-    category: "Social Media",
-    description: "LinkedIn Pages and Ads integration",
-    status: "disconnected",
-    fields: [
-      { name: "clientId", label: "Client ID", type: "text", required: true },
-      { name: "clientSecret", label: "Client Secret", type: "password", required: true },
-    ],
-  },
-  "instagram": {
-    name: "Instagram",
-    category: "Social Media",
-    description: "Instagram Business API integration",
-    status: "disconnected",
-    fields: [
-      { name: "appId", label: "App ID", type: "text", required: true },
-      { name: "appSecret", label: "App Secret", type: "password", required: true },
-      { name: "accessToken", label: "Access Token", type: "password", required: false },
-    ],
-  },
-  
-  // Customer Support
-  "zendesk": {
-    name: "Zendesk",
-    category: "Customer Support",
-    description: "Sync tickets and customer data with Zendesk",
-    status: "connected",
-    fields: [
-      { name: "subdomain", label: "Subdomain", type: "text", required: true, placeholder: "yourcompany" },
-      { name: "email", label: "Email", type: "email", required: true },
-      { name: "apiToken", label: "API Token", type: "password", required: true },
-    ],
-  },
-  "intercom": {
-    name: "Intercom",
-    category: "Customer Support",
-    description: "Customer messaging and support platform",
-    status: "disconnected",
-    fields: [
-      { name: "appId", label: "App ID", type: "text", required: true },
-      { name: "apiKey", label: "API Key", type: "password", required: true },
-    ],
-  },
-  "freshdesk": {
-    name: "Freshdesk",
-    category: "Customer Support",
-    description: "Customer support software",
-    status: "disconnected",
-    fields: [
-      { name: "domain", label: "Domain", type: "text", required: true, placeholder: "yourcompany.freshdesk.com" },
-      { name: "apiKey", label: "API Key", type: "password", required: true },
-    ],
-  },
-  
-  // Additional CRM
-  "pipedrive": {
-    name: "Pipedrive",
-    category: "CRM",
-    description: "Sales-focused CRM",
-    status: "disconnected",
-    fields: [
-      { name: "apiToken", label: "API Token", type: "password", required: true },
-      { name: "companyDomain", label: "Company Domain", type: "text", required: false },
-    ],
-  },
-  
-  // Additional Email Marketing
-  "convertkit": {
-    name: "ConvertKit",
-    category: "Email Marketing",
-    description: "Email marketing for creators",
-    status: "disconnected",
-    fields: [
-      { name: "apiKey", label: "API Key", type: "password", required: true },
-      { name: "apiSecret", label: "API Secret", type: "password", required: false },
-    ],
-  },
-  "activecampaign": {
-    name: "ActiveCampaign",
-    category: "Email Marketing",
-    description: "Marketing automation platform",
-    status: "disconnected",
-    fields: [
-      { name: "apiUrl", label: "API URL", type: "url", required: true, placeholder: "https://yourcompany.api-us1.com" },
-      { name: "apiKey", label: "API Key", type: "password", required: true },
-    ],
-  },
-  
-  // Additional Telephony
-  "vonage": {
-    name: "Vonage",
-    category: "Telephony",
-    description: "Cloud communications platform",
-    status: "disconnected",
-    fields: [
-      { name: "apiKey", label: "API Key", type: "text", required: true },
-      { name: "apiSecret", label: "API Secret", type: "password", required: true },
-    ],
-  },
-};
+function hasCredentialValue(credentials: Record<string, unknown> | null | undefined) {
+  if (!credentials) return false;
+  return Object.values(credentials).some(
+    (value) => String(value ?? "").trim().length > 0
+  );
+}
+
+function buildDefinition(provider: string): IntegrationDefinition | null {
+  const catalog = integrationsCatalog.find((item) => item.provider === provider);
+  if (!catalog) return null;
+
+  return {
+    provider: catalog.provider,
+    displayName: catalog.displayName,
+    category: catalog.category,
+    description: catalog.description,
+    connectType: catalog.connectType,
+    fields: catalog.credentialSchema.map((field) => ({
+      ...field,
+      required: field.required ?? false,
+    })),
+    additionalSettings: additionalSettingsByProvider[catalog.provider] ?? [],
+  };
+}
+
+function normalizeHealth(settings: unknown): HealthState {
+  const health = readPathValue(settings, "health");
+  if (!health || typeof health !== "object") {
+    return { status: "unknown", message: "Not tested yet." };
+  }
+
+  const rawStatus = String((health as Record<string, unknown>).status ?? "unknown");
+  const normalizedStatus =
+    rawStatus === "active" || rawStatus === "ok" || rawStatus === "connected"
+      ? "active"
+      : rawStatus === "error" || rawStatus === "failed" || rawStatus === "inactive"
+        ? "error"
+        : "unknown";
+
+  return {
+    status: normalizedStatus,
+    message: String((health as Record<string, unknown>).message ?? "Not tested yet."),
+    checkedAt: String((health as Record<string, unknown>).checkedAt ?? "") || undefined,
+  };
+}
 
 export default function IntegrationDetailPage() {
   const params = useParams();
-  const category = (params.category as string) || "";
-  const integrationName = (params.integration as string)?.toLowerCase().replace(/\s+/g, "-");
-  
-  const config = integrationConfigs[integrationName] || {
-    name: integrationName.charAt(0).toUpperCase() + integrationName.slice(1),
-    category: category.charAt(0).toUpperCase() + category.slice(1).replace(/-/g, " "),
-    description: "Configure this integration",
-    status: "disconnected" as const,
-    fields: [
-      { name: "apiKey", label: "API Key", type: "password" as const, required: true },
-    ],
-  };
+  const provider = ((params.integration as string) ?? "").toLowerCase();
+  const definition = useMemo(() => buildDefinition(provider), [provider]);
 
   const [formData, setFormData] = useState<Record<string, string>>({});
   const [settingsData, setSettingsData] = useState<Record<string, string>>({});
   const [showSecrets, setShowSecrets] = useState<Record<string, boolean>>({});
-  const [isConnected, setIsConnected] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isTesting, setIsTesting] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const additionalSettingsTitle =
-    integrationName === "telnyx" ? "Voice Routing" : "Additional Settings";
+  const [health, setHealth] = useState<HealthState>({
+    status: "unknown",
+    message: "Not tested yet.",
+  });
 
   useEffect(() => {
+    if (!definition) {
+      setIsLoading(false);
+      return;
+    }
+    const currentDefinition = definition;
+
+    let mounted = true;
     async function loadConfig() {
+      setIsLoading(true);
+      setError(null);
       try {
-        const existing = await fetchIntegrationConfig(integrationName);
-        if (existing?.credentials && typeof existing.credentials === "object") {
-          setFormData(existing.credentials as Record<string, string>);
+        const existing = await fetchIntegrationConfig(provider);
+        if (!mounted) return;
+
+        const credentials =
+          (existing?.credentials as Record<string, unknown> | null | undefined) ?? {};
+        const nextFormData: Record<string, string> = {};
+        for (const field of currentDefinition.fields) {
+          nextFormData[field.name] = String(credentials[field.name] ?? "");
         }
-        if (config.additionalSettings && config.additionalSettings.length > 0) {
+        setFormData(nextFormData);
+
+        const nextSettingsData: Record<string, string> = {};
+        if (currentDefinition.additionalSettings.length > 0) {
           const existingSettings =
-            (existing?.settings && typeof existing.settings === "object"
-              ? (existing.settings as Record<string, unknown>)
-              : {}) ?? {};
-          const nextSettingsData: Record<string, string> = {};
-          for (const setting of config.additionalSettings) {
-            const rawValue = readPathValue(existingSettings, setting.name);
-            if (rawValue === undefined || rawValue === null) continue;
-            nextSettingsData[setting.name] = String(rawValue);
+            (existing?.settings as Record<string, unknown> | null | undefined) ?? {};
+          for (const setting of currentDefinition.additionalSettings) {
+            const raw = readPathValue(existingSettings, setting.name);
+            if (raw === undefined || raw === null) continue;
+            nextSettingsData[setting.name] = String(raw);
           }
-          setSettingsData(nextSettingsData);
         }
-        if (existing?.status === "connected") {
-          setIsConnected(true);
-        }
-      } catch {
-        setError(null);
+        setSettingsData(nextSettingsData);
+
+        const connected =
+          existing?.status === "connected" || hasCredentialValue(credentials);
+        setIsConnected(connected);
+        setHealth(normalizeHealth(existing?.settings));
+      } catch (loadError) {
+        if (!mounted) return;
+        setError(
+          loadError instanceof Error ? loadError.message : "Failed to load integration."
+        );
       } finally {
-        setIsLoading(false);
+        if (mounted) setIsLoading(false);
       }
     }
-    loadConfig();
-  }, [integrationName]);
+
+    void loadConfig();
+    return () => {
+      mounted = false;
+    };
+  }, [definition, provider]);
+
+  const toggleSecret = (fieldName: string) => {
+    setShowSecrets((prev) => ({ ...prev, [fieldName]: !prev[fieldName] }));
+  };
 
   const buildSettingsPayload = () => {
-    if (!config.additionalSettings || config.additionalSettings.length === 0) {
-      return null;
-    }
+    if (!definition || definition.additionalSettings.length === 0) return null;
 
     const payload: Record<string, unknown> = {};
-    for (const setting of config.additionalSettings) {
+    for (const setting of definition.additionalSettings) {
       const raw = settingsData[setting.name] ?? "";
-
       if (setting.type === "switch") {
         setPathValue(payload, setting.name, raw === "true");
-      } else {
-        // Keep values as strings; callers can parse later if needed.
-        const trimmed = String(raw).trim();
-        if (setting.required && trimmed.length === 0) {
-          throw new Error(`${setting.label} is required`);
-        }
-        if (trimmed.length === 0) continue;
+        continue;
+      }
+
+      const trimmed = String(raw).trim();
+      if (setting.required && trimmed.length === 0) {
+        throw new Error(`${setting.label} is required`);
+      }
+      if (trimmed.length > 0) {
         setPathValue(payload, setting.name, trimmed);
       }
     }
-
     return payload;
   };
 
-  const handleConnect = async () => {
+  const saveConnection = async (status: "connected" | "disconnected") => {
+    if (!definition) return;
+    if (definition.connectType === "oauth") {
+      setError("OAuth-based setup is not enabled yet for this integration.");
+      return;
+    }
     setError(null);
     setIsSaving(true);
+
     try {
       const credentials: Record<string, string> = {};
-      config.fields.forEach((f) => {
-        const val = formData[f.name];
-        if (val) credentials[f.name] = val;
-      });
-      const settings = buildSettingsPayload();
-      if (integrationName === "gohighlevel") {
-        if (!credentials.apiKey || !credentials.locationId) {
-          throw new Error("GoHighLevel API key and Location ID are required");
+      for (const field of definition.fields) {
+        const value = formData[field.name] ?? "";
+        if (field.required && status === "connected" && value.trim().length === 0) {
+          throw new Error(`${field.label} is required`);
         }
+        if (value.trim().length > 0) {
+          credentials[field.name] = value;
+        }
+      }
+
+      const settings = buildSettingsPayload();
+      const nextStatus =
+        status === "connected" && Object.keys(credentials).length > 0
+          ? "connected"
+          : "disconnected";
+
+      if (provider === "gohighlevel" && nextStatus === "connected") {
         await connectGoHighLevelIntegration({
           credentials: {
-            apiKey: credentials.apiKey,
-            locationId: credentials.locationId,
+            apiKey: credentials.apiKey ?? "",
+            locationId: credentials.locationId ?? "",
           },
         });
+
+        if (settings && Object.keys(settings).length > 0) {
+          await saveIntegrationConfig({
+            provider,
+            category: definition.category,
+            credentials,
+            settings,
+            status: nextStatus,
+          });
+        }
       } else {
         await saveIntegrationConfig({
-          provider: integrationName,
-          category: config.category,
-          credentials,
-          settings,
-          status: "connected",
+          provider,
+          category: definition.category,
+          credentials: nextStatus === "connected" ? credentials : {},
+          settings: status === "connected" ? settings : null,
+          status: nextStatus,
         });
       }
-      setIsConnected(true);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save");
+
+      setIsConnected(nextStatus === "connected");
+      if (nextStatus !== "connected") {
+        setHealth({ status: "unknown", message: "Disconnected." });
+      }
+    } catch (saveError) {
+      setError(
+        saveError instanceof Error ? saveError.message : "Failed to save integration."
+      );
     } finally {
       setIsSaving(false);
     }
   };
 
-  const handleDisconnect = async () => {
+  const handleTestConnection = async () => {
+    if (!definition) return;
     setError(null);
-    setIsSaving(true);
+    setIsTesting(true);
     try {
-      await saveIntegrationConfig({
-        provider: integrationName,
-        category: config.category,
-        credentials: {},
-        settings: null,
-        status: "disconnected",
+      const result = await testIntegrationConnection(provider);
+      setHealth({
+        status: result.status,
+        message: result.message,
+        checkedAt: result.checkedAt,
       });
-      setIsConnected(false);
-      setFormData({});
-      setSettingsData({});
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to disconnect");
+      if (result.ok) {
+        setIsConnected(true);
+        setError(null);
+      } else {
+        setError(result.message);
+      }
+    } catch (testError) {
+      setHealth({
+        status: "error",
+        message:
+          testError instanceof Error
+            ? testError.message
+            : "Integration test failed unexpectedly.",
+      });
+      setError(
+        testError instanceof Error
+          ? testError.message
+          : "Integration test failed unexpectedly."
+      );
     } finally {
-      setIsSaving(false);
+      setIsTesting(false);
     }
   };
 
-  const handleSaveSettings = async () => {
-    setError(null);
-    setIsSaving(true);
-    try {
-      const settings = buildSettingsPayload();
-      await saveIntegrationConfig({
-        provider: integrationName,
-        category: config.category,
-        // Preserve existing credentials while updating settings.
-        credentials: formData,
-        settings,
-        status: "connected",
-      });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save settings");
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const toggleSecret = (fieldName: string) => {
-    setShowSecrets({ ...showSecrets, [fieldName]: !showSecrets[fieldName] });
-  };
-
-  const statusIcons = {
-    connected: CheckIcon,
-    disconnected: XMarkIcon,
-    pending: ClockIcon,
-  };
-
-  const statusColors = {
-    connected: "bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-500",
-    disconnected: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
-    pending: "bg-yellow-100 text-yellow-700 dark:bg-yellow-500/15 dark:text-yellow-500",
-  };
-
-  const StatusIcon = statusIcons[isConnected ? "connected" : "disconnected"];
-
-  if (isLoading) {
+  if (!definition) {
     return (
-      <div>
-        <PageBreadcrumb pageTitle={`${config.name} Integration`} />
-        <div className="flex items-center justify-center py-12">
-          <p className="text-gray-500 dark:text-gray-400">Loading…</p>
+      <div className="space-y-6">
+        <PageBreadcrumb pageTitle="Integration" />
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 dark:border-amber-800 dark:bg-amber-950/20">
+          <h1 className="text-xl font-semibold text-amber-900 dark:text-amber-100">
+            Integration unavailable
+          </h1>
+          <p className="mt-2 text-sm text-amber-800 dark:text-amber-200">
+            This integration is not in the platform catalog. Add it at the platform
+            level first.
+          </p>
         </div>
       </div>
     );
   }
 
-  return (
-    <div>
-      <PageBreadcrumb pageTitle={`${config.name} Integration`} />
+  const healthBadgeClass =
+    health.status === "active"
+      ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"
+      : health.status === "error"
+        ? "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300"
+        : "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300";
+
+  if (isLoading) {
+    return (
       <div className="space-y-6">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-semibold text-gray-900 dark:text-white">
-              {config.name} Integration
-            </h1>
-            <p className="mt-2 text-gray-500 dark:text-gray-400">{config.description}</p>
+        <PageBreadcrumb pageTitle={`${definition.displayName} Integration`} />
+        <p className="text-sm text-gray-500 dark:text-gray-400">Loading...</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <PageBreadcrumb pageTitle={`${definition.displayName} Integration`} />
+
+      <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex items-start gap-4">
+            <ProviderLogo
+              provider={definition.provider}
+              displayName={definition.displayName}
+              className="flex h-12 w-12 items-center justify-center rounded-xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900"
+            />
+            <div>
+              <h1 className="text-2xl font-semibold text-gray-900 dark:text-white">
+                {definition.displayName}
+              </h1>
+              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                {definition.description}
+              </p>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Category: {definition.category}
+              </p>
+            </div>
           </div>
-          <div className="flex items-center gap-3">
+
+          <div className="flex flex-wrap items-center gap-2">
             <span
-              className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-sm font-medium ${
-                statusColors[isConnected ? "connected" : "disconnected"]
+              className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                isConnected
+                  ? "bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-300"
+                  : "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300"
               }`}
             >
-              <StatusIcon className="h-4 w-4" />
+              {isConnected ? (
+                <CheckIcon className="h-3.5 w-3.5" />
+              ) : (
+                <XMarkIcon className="h-3.5 w-3.5" />
+              )}
               {isConnected ? "Connected" : "Disconnected"}
             </span>
-            {isConnected ? (
-              <Button variant="outline" onClick={handleDisconnect} disabled={isSaving}>
-                {isSaving ? "Disconnecting…" : "Disconnect"}
-              </Button>
-            ) : (
-              <Button onClick={handleConnect} disabled={isSaving}>
-                {isSaving ? "Saving…" : "Connect"}
-              </Button>
-            )}
+
+            <span
+              className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ${healthBadgeClass}`}
+            >
+              <SignalIcon className="h-3.5 w-3.5" />
+              {health.status === "active"
+                ? "Active"
+                : health.status === "error"
+                  ? "Needs test"
+                  : "Not tested"}
+            </span>
           </div>
         </div>
 
-        {/* Connection Form */}
-        {!isConnected && (
-          <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
-            <h2 className="mb-4 text-lg font-semibold text-gray-900 dark:text-white">
-              Connection Settings
-            </h2>
-            <div className="space-y-4">
-              {config.fields.map((field) => (
-                <div key={field.name}>
-                  <Label htmlFor={field.name}>
-                    {field.label}
-                    {field.required && <span className="text-red-500">*</span>}
-                  </Label>
-                  <div className="relative mt-2">
-                    {field.type === "password" ? (
-                      <>
-                        <Input
-                          id={field.name}
-                          type={showSecrets[field.name] ? "text" : "password"}
-                          value={formData[field.name] || ""}
-                          onChange={(e) =>
-                            setFormData({ ...formData, [field.name]: e.target.value })
-                          }
-                          placeholder={field.placeholder}
-                          required={field.required}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => toggleSecret(field.name)}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-                        >
-                          {showSecrets[field.name] ? (
-                            <EyeSlashIcon className="h-5 w-5" />
-                          ) : (
-                            <EyeIcon className="h-5 w-5" />
-                          )}
-                        </button>
-                      </>
-                    ) : field.type === "select" ? (
-                      <select
-                        id={field.name}
-                        value={formData[field.name] || ""}
-                        onChange={(e) =>
-                          setFormData({ ...formData, [field.name]: e.target.value })
-                        }
-                        className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-sm text-gray-800 focus:border-brand-300 focus:ring-2 focus:ring-brand-500/10 focus:outline-hidden dark:border-gray-700 dark:bg-gray-800 dark:text-white/90"
-                        required={field.required}
-                      >
-                        <option value="">Select {field.label}</option>
-                        {field.options?.map((option) => (
-                          <option key={option} value={option}>
-                            {option}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <Input
-                        id={field.name}
-                        type={field.type}
-                        value={formData[field.name] || ""}
-                        onChange={(e) =>
-                          setFormData({ ...formData, [field.name]: e.target.value })
-                        }
-                        placeholder={field.placeholder}
-                        required={field.required}
-                      />
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {config.additionalSettings && config.additionalSettings.length > 0 && (
-              <div className="mt-6 rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-gray-950/20">
-                <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
-                  {additionalSettingsTitle}
-                </h3>
-                <div className="mt-4 space-y-4">
-                  {config.additionalSettings.map((setting) => (
-                    <div key={setting.name}>
-                      <Label htmlFor={setting.name}>
-                        {setting.label}
-                        {setting.required && <span className="text-red-500">*</span>}
-                      </Label>
-                      <div className="mt-2">
-                        {setting.type === "select" ? (
-                          <select
-                            id={setting.name}
-                            value={settingsData[setting.name] || ""}
-                            onChange={(e) =>
-                              setSettingsData((prev) => ({ ...prev, [setting.name]: e.target.value }))
-                            }
-                            className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-sm text-gray-800 focus:border-brand-300 focus:ring-2 focus:ring-brand-500/10 focus:outline-hidden dark:border-gray-700 dark:bg-gray-800 dark:text-white/90"
-                          >
-                            <option value="">Select {setting.label}</option>
-                            {setting.options?.map((option) => (
-                              <option key={option} value={option}>
-                                {option}
-                              </option>
-                            ))}
-                          </select>
-                        ) : setting.type === "switch" ? (
-                          <Switch
-                            id={setting.name}
-                            checked={settingsData[setting.name] === "true"}
-                            onChange={(checked) =>
-                              setSettingsData((prev) => ({ ...prev, [setting.name]: String(checked) }))
-                            }
-                          />
-                        ) : (
-                          <Input
-                            id={setting.name}
-                            type="text"
-                            value={settingsData[setting.name] || ""}
-                            onChange={(e) =>
-                              setSettingsData((prev) => ({ ...prev, [setting.name]: e.target.value }))
-                            }
-                            placeholder={setting.placeholder}
-                          />
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <div className="mt-6 flex flex-col gap-3">
-              {error && (
-                <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
-              )}
-              <div className="flex gap-3">
-                <Button variant="outline" disabled={isSaving}>Test Connection</Button>
-                <Button onClick={handleConnect} disabled={isSaving}>
-                  {isSaving ? "Saving…" : "Save & Connect"}
-                </Button>
-              </div>
-            </div>
-          </div>
+        <p className="mt-4 text-sm text-gray-600 dark:text-gray-300">{health.message}</p>
+        {health.checkedAt && (
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            Last tested: {new Date(health.checkedAt).toLocaleString()}
+          </p>
         )}
 
-        {/* Connected Settings */}
-        {isConnected && (
-          <div className="space-y-6">
-            {/* API Key Management */}
-            <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
-              <div className="mb-4 flex items-center justify-between">
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-                  API Credentials
-                </h2>
-                <Button variant="outline" size="sm">
-                  <KeyIcon className="h-4 w-4" />
-                  Regenerate Keys
-                </Button>
-              </div>
-              <div className="space-y-3">
-                {config.fields.map((field) => (
-                  <div key={field.name} className="flex items-center justify-between">
-                    <span className="text-sm text-gray-600 dark:text-gray-400">{field.label}</span>
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-xs text-gray-500 dark:text-gray-400">
-                        {field.type === "password"
-                          ? "••••••••••••"
-                          : formData[field.name] || "Not set"}
-                      </span>
-                      {field.type === "password" && (
-                        <button
-                          onClick={() => toggleSecret(field.name)}
-                          className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-                        >
-                          {showSecrets[field.name] ? (
-                            <EyeSlashIcon className="h-4 w-4" />
-                          ) : (
-                            <EyeIcon className="h-4 w-4" />
-                          )}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
+        {error && (
+          <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-900/20 dark:text-red-200">
+            {error}
+          </p>
+        )}
+      </div>
+
+      <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+          Connection Settings
+        </h2>
+        {definition.connectType === "oauth" && (
+          <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+            This integration uses OAuth. OAuth setup flow will be enabled in a later
+            phase.
+          </p>
+        )}
+        <div className="mt-4 space-y-4">
+          {definition.fields.map((field) => (
+            <div key={field.name}>
+              <Label htmlFor={field.name}>
+                {field.label}
+                {field.required && <span className="text-red-500">*</span>}
+              </Label>
+              <div className="relative mt-2">
+                <Input
+                  id={field.name}
+                  type={
+                    field.type === "password" && !showSecrets[field.name]
+                      ? "password"
+                      : field.type === "url"
+                        ? "url"
+                        : "text"
+                  }
+                  value={formData[field.name] ?? ""}
+                  onChange={(event) =>
+                    setFormData((prev) => ({ ...prev, [field.name]: event.target.value }))
+                  }
+                  placeholder={field.placeholder}
+                />
+                {field.type === "password" && (
+                  <button
+                    type="button"
+                    onClick={() => toggleSecret(field.name)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                  >
+                    {showSecrets[field.name] ? (
+                      <EyeSlashIcon className="h-5 w-5" />
+                    ) : (
+                      <EyeIcon className="h-5 w-5" />
+                    )}
+                  </button>
+                )}
               </div>
             </div>
+          ))}
+        </div>
+      </div>
 
-            {/* Additional Settings */}
-            {config.additionalSettings && config.additionalSettings.length > 0 && (
-              <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
-                <div className="mb-4 flex items-center justify-between">
-                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-                    {additionalSettingsTitle}
-                  </h2>
-                  <Button variant="outline" size="sm" onClick={handleSaveSettings} disabled={isSaving}>
-                    {isSaving ? "Saving…" : "Save settings"}
-                  </Button>
-                </div>
-                <div className="space-y-4">
-                  {config.additionalSettings.map((setting) => (
-                    <div key={setting.name}>
-                      <Label htmlFor={setting.name}>
-                        {setting.label}
-                        {setting.required && <span className="text-red-500">*</span>}
-                      </Label>
-                      <div className="mt-2">
-                        {setting.type === "switch" ? (
-                          <Switch
-                            id={setting.name}
-                            checked={settingsData[setting.name] === "true"}
-                            onChange={(checked) =>
-                              setSettingsData((prev) => ({ ...prev, [setting.name]: String(checked) }))
-                            }
-                          />
-                        ) : setting.type === "select" ? (
-                          <select
-                            id={setting.name}
-                            value={settingsData[setting.name] || ""}
-                            onChange={(e) =>
-                              setSettingsData((prev) => ({ ...prev, [setting.name]: e.target.value }))
-                            }
-                            className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-sm text-gray-800 focus:border-brand-300 focus:ring-2 focus:ring-brand-500/10 focus:outline-hidden dark:border-gray-700 dark:bg-gray-800 dark:text-white/90"
-                          >
-                            <option value="">Select {setting.label}</option>
-                            {setting.options?.map((option) => (
-                              <option key={option} value={option}>
-                                {option}
-                              </option>
-                            ))}
-                          </select>
-                        ) : (
-                          <Input
-                            id={setting.name}
-                            type="text"
-                            value={settingsData[setting.name] || ""}
-                            onChange={(e) =>
-                              setSettingsData((prev) => ({ ...prev, [setting.name]: e.target.value }))
-                            }
-                            placeholder={setting.placeholder}
-                          />
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Sync Status */}
-            <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
-              <h2 className="mb-4 text-lg font-semibold text-gray-900 dark:text-white">
-                Sync Status
-              </h2>
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-gray-600 dark:text-gray-400">Last Sync</span>
-                  <span className="text-sm font-medium text-gray-900 dark:text-white">
-                    {new Date().toLocaleString()}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-gray-600 dark:text-gray-400">Sync Status</span>
-                  <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-700 dark:bg-green-500/15 dark:text-green-500">
-                    <CheckIcon className="h-3 w-3" />
-                    Active
-                  </span>
+      {definition.additionalSettings.length > 0 && (
+        <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+            Additional Settings
+          </h2>
+          <div className="mt-4 space-y-4">
+            {definition.additionalSettings.map((setting) => (
+              <div key={setting.name}>
+                <Label htmlFor={setting.name}>
+                  {setting.label}
+                  {setting.required && <span className="text-red-500">*</span>}
+                </Label>
+                <div className="mt-2">
+                  {setting.type === "select" ? (
+                    <select
+                      id={setting.name}
+                      value={settingsData[setting.name] ?? ""}
+                      onChange={(event) =>
+                        setSettingsData((prev) => ({
+                          ...prev,
+                          [setting.name]: event.target.value,
+                        }))
+                      }
+                      className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-sm text-gray-800 focus:border-brand-300 focus:ring-2 focus:ring-brand-500/10 focus:outline-hidden dark:border-gray-700 dark:bg-gray-800 dark:text-white/90"
+                    >
+                      <option value="">Select {setting.label}</option>
+                      {setting.options?.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  ) : setting.type === "switch" ? (
+                    <label className="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                      <input
+                        id={setting.name}
+                        type="checkbox"
+                        checked={settingsData[setting.name] === "true"}
+                        onChange={(event) =>
+                          setSettingsData((prev) => ({
+                            ...prev,
+                            [setting.name]: String(event.target.checked),
+                          }))
+                        }
+                      />
+                      Enabled
+                    </label>
+                  ) : (
+                    <Input
+                      id={setting.name}
+                      type="text"
+                      value={settingsData[setting.name] ?? ""}
+                      onChange={(event) =>
+                        setSettingsData((prev) => ({
+                          ...prev,
+                          [setting.name]: event.target.value,
+                        }))
+                      }
+                      placeholder={setting.placeholder}
+                    />
+                  )}
                 </div>
               </div>
-              <div className="mt-4">
-                <Button variant="outline" size="sm">
-                  Sync Now
-                </Button>
-              </div>
-            </div>
+            ))}
           </div>
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center gap-3">
+        <Button
+          onClick={() => saveConnection("connected")}
+          disabled={isSaving || isTesting || definition.connectType === "oauth"}
+        >
+          {isSaving ? "Saving..." : isConnected ? "Save" : "Save & Connect"}
+        </Button>
+
+        <Button
+          variant="outline"
+          onClick={handleTestConnection}
+          disabled={
+            isSaving ||
+            isTesting ||
+            !isConnected ||
+            definition.connectType === "oauth"
+          }
+        >
+          {isTesting ? "Testing..." : "Test Connection"}
+        </Button>
+
+        {isConnected && (
+          <Button
+            variant="outline"
+            onClick={() => saveConnection("disconnected")}
+            disabled={isSaving || isTesting}
+          >
+            Disconnect
+          </Button>
         )}
       </div>
     </div>
   );
 }
-
