@@ -120,6 +120,11 @@ function toolMethod(t: any): string {
 
 function toolParameters(t: any): any {
   if (t && typeof t === "object") {
+    // Telnyx sends webhook body from body_parameters; parameters is legacy/different
+    if ("body_parameters" in t) return (t as any).body_parameters;
+    if (t.webhook && typeof t.webhook === "object" && "body_parameters" in t.webhook) {
+      return (t.webhook as any).body_parameters;
+    }
     if ("parameters" in t) return (t as any).parameters;
     if (t.webhook && typeof t.webhook === "object" && "parameters" in t.webhook) {
       return (t.webhook as any).parameters;
@@ -169,6 +174,7 @@ async function main() {
   const createDraftOrderDescription =
     "Use only after explicit customer confirmation to send checkout link. Send JSON like {\"customerConfirmed\":true,\"customerEmail\":\"buyer@example.com\"}. Required: customerConfirmed=true. Include call_control_id only if you have the real value from context; never send placeholder strings. Optional: customerEmail.";
 
+  // Telnyx sends the webhook POST body from body_parameters; "parameters" is not used for the request body.
   const desired = [
     {
       type: "webhook",
@@ -177,7 +183,7 @@ async function main() {
         description: searchProductsDescription,
         url: searchProductsUrl,
         method: "POST",
-        parameters: {
+        body_parameters: {
           type: "object",
           required: ["query"],
           properties: {
@@ -197,7 +203,7 @@ async function main() {
         description: addToSelectionDescription,
         url: addToSelectionUrl,
         method: "POST",
-        parameters: {
+        body_parameters: {
           type: "object",
           required: ["variantId", "quantity"],
           properties: {
@@ -226,7 +232,7 @@ async function main() {
         description: createDraftOrderDescription,
         url: createDraftOrderUrl,
         method: "POST",
-        parameters: {
+        body_parameters: {
           type: "object",
           required: ["customerConfirmed"],
           properties: {
@@ -264,24 +270,25 @@ async function main() {
   const existingAdd = existingTools.find((t) => String(t?.type || "") === "webhook" && toolName(t) === "add_to_selection");
   const existingCreate = existingTools.find((t) => String(t?.type || "") === "webhook" && toolName(t) === "create_draft_order");
 
+  const desiredParams = (d: (typeof desired)[number]) => (d?.webhook as any)?.body_parameters ?? (d?.webhook as any)?.parameters;
   const needsSearch =
     !existingSearch ||
     toolUrl(existingSearch) !== searchProductsUrl ||
     toolMethod(existingSearch).toUpperCase() !== "POST" ||
     toolDescription(existingSearch) !== searchProductsDescription ||
-    !jsonEqual(toolParameters(existingSearch), desired[0]?.webhook?.parameters);
+    !jsonEqual(toolParameters(existingSearch), desiredParams(desired[0]!));
   const needsAdd =
     !existingAdd ||
     toolUrl(existingAdd) !== addToSelectionUrl ||
     toolMethod(existingAdd).toUpperCase() !== "POST" ||
     toolDescription(existingAdd) !== addToSelectionDescription ||
-    !jsonEqual(toolParameters(existingAdd), desired[1]?.webhook?.parameters);
+    !jsonEqual(toolParameters(existingAdd), desiredParams(desired[1]!));
   const needsCreate =
     !existingCreate ||
     toolUrl(existingCreate) !== createDraftOrderUrl ||
     toolMethod(existingCreate).toUpperCase() !== "POST" ||
     toolDescription(existingCreate) !== createDraftOrderDescription ||
-    !jsonEqual(toolParameters(existingCreate), desired[2]?.webhook?.parameters);
+    !jsonEqual(toolParameters(existingCreate), desiredParams(desired[2]!));
   const changed = needsSearch || needsAdd || needsCreate;
 
   console.log("Assistant:", assistantId);

@@ -5,6 +5,12 @@
   "installCommand": "pnpm install",
   "buildCommand": "pnpm turbo run build --filter=@tinadmin/tenant",
   "outputDirectory": "apps/tenant/.next",
-  "regions": ["iad1"]
+  "regions": ["iad1"],
+  "git": {
+    "deploymentEnabled": {
+      "develop": true,
+      "staging": true
+    }
+  }
 }
 
