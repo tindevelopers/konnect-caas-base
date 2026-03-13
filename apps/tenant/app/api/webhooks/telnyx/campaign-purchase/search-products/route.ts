@@ -253,6 +253,8 @@ function extractAbacusContent(payload: Record<string, unknown>): string {
   }
   const c = payload.content ?? payload.response ?? payload.message;
   if (typeof c === "string" && c.trim()) return c.trim();
+  const fromMessages = parseAbacusResultMessages(payload);
+  if (fromMessages.content) return fromMessages.content;
   return "";
 }
 
@@ -263,7 +265,134 @@ function extractAbacusProducts(payload: Record<string, unknown>): unknown[] {
   if (Array.isArray(data.products)) return data.products;
   const result = asRecord(payload.result);
   if (Array.isArray(result.products)) return result.products;
-  return [];
+  const fromMessages = parseAbacusResultMessages(payload);
+  return fromMessages.products;
+}
+
+/**
+ * Abacus can return { success, result: { messages: [{ is_user, text }, ...] } } where the
+ * assistant message text is JSON (or markdown-wrapped JSON) with "response" and "products".
+ */
+function parseAbacusResultMessages(payload: Record<string, unknown>): {
+  content: string;
+  products: unknown[];
+} {
+  const result = asRecord(payload.result);
+  const messages = Array.isArray(result.messages) ? result.messages : [];
+  let content = "";
+  let products: unknown[] = [];
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i] as Record<string, unknown>;
+    if (msg?.is_user === true) break;
+    const text = typeof msg?.text === "string" ? msg.text : "";
+    if (!text.trim()) continue;
+    const parsed = parseJsonFromAssistantText(text);
+    if (parsed) {
+      if (typeof parsed.response === "string" && parsed.response.trim())
+        content = parsed.response.trim();
+      if (Array.isArray(parsed.products)) products = parsed.products;
+    }
+    if (products.length === 0) products = extractProductsFromAssistantText(text);
+    if (!content) content = extractResponseFromAssistantText(text);
+    if (content || products.length > 0) break;
+  }
+  return { content, products };
+}
+
+function parseJsonFromAssistantText(text: string): Record<string, unknown> | null {
+  let raw = text.trim();
+  const codeBlock = /```(?:json)?\s*([\s\S]*?)```/.exec(raw);
+  if (codeBlock) raw = codeBlock[1].trim();
+  try {
+    const out = JSON.parse(raw) as unknown;
+    return out && typeof out === "object" && !Array.isArray(out) ? (out as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** When full JSON parse fails, try to extract "response" string value (stops at first ", ). */
+function extractResponseFromAssistantText(text: string): string {
+  let raw = text.trim();
+  const codeBlock = /```(?:json)?\s*([\s\S]*?)```/.exec(raw);
+  if (codeBlock) raw = codeBlock[1].trim();
+  const match = /"response"\s*:\s*"/.exec(raw);
+  if (!match) return "";
+  let end = match.index + match[0].length;
+  let out = "";
+  while (end < raw.length) {
+    const c = raw[end];
+    if (c === "\\") {
+      end++;
+      if (raw[end] === '"') {
+        out += '"';
+        end++;
+      } else if (raw[end] === "n") {
+        out += "\n";
+        end++;
+      } else {
+        out += raw[end] ?? "";
+        end++;
+      }
+      continue;
+    }
+    if (c === '"') break;
+    out += c ?? "";
+    end++;
+  }
+  return out.trim();
+}
+
+/** When full JSON parse fails (e.g. control chars in Abacus response), try to extract products array. */
+function extractProductsFromAssistantText(text: string): unknown[] {
+  let raw = text.trim();
+  const codeBlock = /```(?:json)?\s*([\s\S]*?)```/.exec(raw);
+  if (codeBlock) raw = codeBlock[1].trim();
+  const nonEmptyMatch = /"products"\s*:\s*\[\s*\{/.exec(raw);
+  const productsMatch = nonEmptyMatch ?? /"products"\s*:\s*\[/.exec(raw);
+  if (!productsMatch) return [];
+  const openBracket = raw.indexOf("[", productsMatch.index);
+  if (openBracket === -1) return [];
+  const start = openBracket + 1;
+  const afterBracket = raw.slice(start, start + 10).trim();
+  if (afterBracket.startsWith("]")) return [];
+  let depth = 1;
+  let i = start;
+  let inString = false;
+  let escape = false;
+  let quoteChar = "";
+  while (i < raw.length && depth > 0) {
+    const c = raw[i];
+    if (escape) {
+      escape = false;
+      i++;
+      continue;
+    }
+    if (inString) {
+      if (c === quoteChar) inString = false;
+      else if (c === "\\") escape = true;
+      i++;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      inString = true;
+      quoteChar = c;
+      i++;
+      continue;
+    }
+    if (c === "[" || c === "{") depth++;
+    else if (c === "]" || c === "}") depth--;
+    i++;
+  }
+  if (depth !== 0) return [];
+  try {
+    let arrStr = "[" + raw.slice(start, i);
+    arrStr = arrStr.replace(/[\r\n\t]/g, " ").replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, " ");
+    const arr = JSON.parse(arrStr) as unknown;
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
 }
 
 export async function POST(request: NextRequest) {
